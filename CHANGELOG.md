@@ -65,6 +65,35 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.36 — a warm-up that fails halfway no longer answers every request with its page
+
+2026-09-28
+
+### Fixed
+
+- **A failed warm-up leaves nothing of its request in the workers.** The pool
+  snapshots statics and globals after `Q.webserver.warmup`, and every worker
+  restores that snapshot before each request. A warm-up that threw in the
+  middle of a render stopped before its own clean-up, so the snapshot held
+  that render's request -- address, route, visitor, open output buffers --
+  and every worker began every request as that one. On an installation whose
+  warm-up failed while its template cache was being cleared, half of the
+  signed-in requests for the admin dashboard came back as the public front
+  page, rendered for an anonymous visitor and marked publicly cacheable. The
+  new `Q_WebServer_WarmupGuard` captures the parent's state before the
+  warm-up and, when it throws, puts it back before the snapshot and the fork:
+  output buffers the warm-up opened are discarded, superglobals and globals
+  get their earlier values back (globals it added are removed), and the
+  statics of classes declared during the warm-up return to their declared
+  defaults, closures excepted (Composer's ClassLoader keeps its include
+  helper in one). The classes stay loaded, so workers still warm lazily, now
+  from a clean parent. The log line says what was undone. Tested by making
+  the warm-up fail after a full render and requesting four addresses thirty
+  times each, signed in and anonymously: every answer was that address's own
+  page.
+- **No deprecation for implicitly nullable parameters on PHP 8.4 and later.**
+  Eleven parameters with a `null` default and a type are now typed `?Type`.
+
 ## v0.0.4.35 — security headers on every response, pages found behind a TLS-ending load balancer, and 401 challenges answered as 401
 
 2026-09-28
