@@ -115,7 +115,7 @@ class Q_WebServer_Certificate_SelfSigned
 	 * @param {Q_WebServer_Certificate_Store|null} $store
 	 * @return {array|null} array(cert file, key file, changed), or null when none is usable
 	 */
-	static function ensure(array $hosts = null, $force = false, Q_WebServer_Certificate_Store $store = null)
+	static function ensure(?array $hosts = null, $force = false, ?Q_WebServer_Certificate_Store $store = null)
 	{
 		$hosts = $hosts ?: self::hosts();
 		$store = $store ?: new Q_WebServer_Certificate_Store();

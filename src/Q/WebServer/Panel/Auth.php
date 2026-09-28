@@ -199,7 +199,7 @@ class Q_WebServer_Panel_Auth
 	 * @static
 	 * @return {array} ok, and path, or error and failed (the rules it broke)
 	 */
-	static function storePassword($password, $path = null, $revokeSessions = false, $keepToken = null, array $context = null)
+	static function storePassword($password, $path = null, $revokeSessions = false, $keepToken = null, ?array $context = null)
 	{
 		$store = self::isStore($path);
 		$path = self::path($path);

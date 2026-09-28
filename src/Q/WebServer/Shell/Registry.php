@@ -61,7 +61,7 @@ class Q_WebServer_Shell_Registry
 	 * @param {array} $ctx serverDir, startOptions, runtime, scriptsDir, dataDir...
 	 * @param {array|null} [$console=null] console metadata (Q_Console::all()); loaded when null
 	 */
-	function __construct(array $ctx, array $console = null)
+	function __construct(array $ctx, ?array $console = null)
 	{
 		$this->ctx = $ctx;
 		$this->console = $console !== null ? $console : self::loadConsole($ctx);

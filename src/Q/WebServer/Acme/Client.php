@@ -81,7 +81,7 @@ class Q_WebServer_Acme_Client
 	 * @param {array|null} $eab array('kid' => ..., 'hmacKey' => base64url)
 	 * @return {string} the account URL
 	 */
-	function account($email = null, array $eab = null)
+	function account($email = null, ?array $eab = null)
 	{
 		$dir = $this->directory();
 		$payload = array('termsOfServiceAgreed' => true);

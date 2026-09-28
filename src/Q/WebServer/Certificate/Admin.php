@@ -59,7 +59,7 @@ class Q_WebServer_Certificate_Admin
 	 * starts, after the configuration file, and after a change here.
 	 * @param {array|null} $o null for what the store holds
 	 */
-	static function applyOverrides(array $o = null)
+	static function applyOverrides(?array $o = null)
 	{
 		if ($o === null) $o = self::overrides();
 		if (isset($o['mode'])) Q_Config::set('Q', 'web', 'https', 'mode', $o['mode']);

@@ -94,7 +94,7 @@ class Q_Console
 	 *   a single-dash word is a long option only if it is one of these
 	 * @return {array} array($positional, $options)
 	 */
-	static function parse(array $argv, array $valued = null, array $known = null)
+	static function parse(array $argv, ?array $valued = null, ?array $known = null)
 	{
 		if ($valued === null) $valued = self::valueOptions();
 		if ($known === null) $known = self::knownOptions();

@@ -85,7 +85,7 @@ abstract class Q_WebServer_Certificate_Source_Base implements Q_WebServer_Certif
 	 * @method run
 	 * @static
 	 */
-	static function run(array $cmd, &$output = '', array $env = null, $cwd = null)
+	static function run(array $cmd, &$output = '', ?array $env = null, $cwd = null)
 	{
 		$p = @proc_open($cmd, array(0 => array('file', '/dev/null', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')),
 			$pipes, $cwd, $env === null ? null : $env + (getenv() ?: array()));

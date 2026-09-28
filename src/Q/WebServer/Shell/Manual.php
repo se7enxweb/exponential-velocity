@@ -150,7 +150,7 @@ class Q_WebServer_Shell_Manual
 	}
 
 	/** The EXAMPLES section: listed ones, or ones made from the options. */
-	static function examples($name, array $spec = null)
+	static function examples($name, ?array $spec = null)
 	{
 		$ex = self::EXAMPLES[$name] ?? array();
 		if (!$ex && $spec) {

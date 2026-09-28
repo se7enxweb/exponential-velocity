@@ -157,7 +157,7 @@ function qshell_config(array $ctx)
 }
 
 /** The interpreter, its registry and its history, for a context. */
-function qshell_build(array $ctx, Q_WebServer_Shell_Io $io, array $req, Q_WebServer_Shell_History $history = null)
+function qshell_build(array $ctx, Q_WebServer_Shell_Io $io, array $req, ?Q_WebServer_Shell_History $history = null)
 {
 	$registry = new Q_WebServer_Shell_Registry($ctx);
 	if ($history === null) $history = new Q_WebServer_Shell_History($ctx['shellDir'] ?? null);
