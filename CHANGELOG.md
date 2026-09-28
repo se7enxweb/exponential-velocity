@@ -65,6 +65,69 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.35 — security headers on every response, pages found behind a TLS-ending load balancer, and 401 challenges answered as 401
+
+2026-09-28
+
+### Added
+
+- **`Q.webserver.headers`, `headersOnScripts` and `hsts`.** A static file
+  never reaches the application, so served by this server alone a stylesheet
+  or an image carried none of the security headers a front end sends, and
+  HSTS went out only for a domain with a record of its own in the panel
+  store. `Q.webserver.headers` (name => value) is now added to every response
+  the server builds itself: static files over HTTP/1.1 and HTTP/2, the
+  in-memory copy, 304s, image variants, its own error pages and redirects.
+  `Q.webserver.headersOnScripts` adds them to a script's response as well,
+  each only where the script did not send that header. `Q.webserver.hsts` (a
+  max-age, an object with `maxAge`, `includeSubDomains` and `preload`, or a
+  string) sends Strict-Transport-Security on every response over TLS and
+  never over plain HTTP; a domain's own HSTS record still wins. A header
+  already present, in any letter case, is never replaced or sent twice;
+  names that are not HTTP tokens, values with CR, LF or NUL, and the framing
+  headers are ignored. Nothing changes without the settings.
+  `tests/unit-response-headers.php` holds it.
+- Embedded OpenType fonts (`.eot`) are served with their media type.
+- GitHub funding metadata, the same as the other se7enxweb packages.
+
+### Fixed
+
+- **The application's page cache finds pages behind a load balancer that
+  ends TLS.** `Q.web.appCache` got scheme and host from the connection only.
+  Behind a load balancer forwarding to `exp:8080`, the worker saw
+  `X-Forwarded-Proto` and `X-Forwarded-Host` and stored the page for
+  `https://www.example.com`, while the server process asked for `http` and
+  `exp:8080`, so the page was never served from there. `serve()` now also
+  gets `headers` (every request header, lower-case names) and `port` (the
+  listener's), so the application can work scheme and host out as its own
+  code does. Applications that ignore the new keys are unaffected. Exponential
+  uses it from its HTTP cache (se7enxweb/exponential#103).
+- **`header('WWW-Authenticate: ...')` answers 401** unless the call names a
+  code, as PHP does, so an authentication challenge no longer goes out as
+  500. `getallheaders()` and `apache_request_headers()` fall back to the
+  request's headers in pool workers, where they returned nothing.
+- **A static file is served whole to a client that takes no gzip when
+  precompression is on.** When precompression had nothing to offer, its empty
+  result was sent as the body: a 200 with `Content-Length: 0`. A HEAD for a
+  large file on plain HTTP now describes what the GET sends.
+
+### Updated
+
+- **The exponential preset brings its own static, script and front
+  controller lists** when the configuration names none. Started with the
+  preset and no lists, an application served every file below its root and
+  ran any PHP file. The lists are the ones the application ships and are
+  only supplied where the configuration sets none, so narrower lists are
+  never widened.
+- **The tests rebuild the phar first and run against it.** The phar used to
+  be rebuilt by its own workflow at the same time as the tests ran, so a push
+  that changed the sources failed `phar-is-current` and the commit carrying
+  the rebuilt phar was never tested. The tests workflow now rebuilds it in
+  its first job, commits it back to main on a push there, and hands it to
+  every suite.
+
+---
+
 ## v0.0.4.34 — workers run as the site's user, not as root, and the response caches pause for a maintenance window
 
 2026-09-27
