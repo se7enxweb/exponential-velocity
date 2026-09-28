@@ -16,7 +16,8 @@
  *          (or null when the cache is off), whose serve(array $request)
  *          returns [status, headers, body] for a hit and null otherwise.
  *          $request: scheme, host, uri, method, cookies, acceptEncoding,
- *          ifNoneMatch
+ *          ifNoneMatch, headers (every request header, lower-case names),
+ *          port (the listener's)
  *   dir    passed to fromDir()
  *
  * A new object is made for every request, so what it read (a purge, a
@@ -110,6 +111,15 @@ class Q_WebServer_AppCache
 				'cookies' => $cookies,
 				'acceptEncoding' => (string) ($headers['accept-encoding'] ?? ''),
 				'ifNoneMatch' => isset($headers['if-none-match']) ? (string) $headers['if-none-match'] : null,
+				// Every request header, and the port it arrived on, so the
+				// application can work out scheme and host as its own code
+				// does behind a load balancer: the worker sees
+				// X-Forwarded-Proto and X-Forwarded-Host and renders (and
+				// stores) the page for https://www.example.com, while
+				// scheme and host above only say http and exp:8080 -- the
+				// page was stored under one key and looked for under another.
+				'headers' => $headers,
+				'port' => class_exists('Q_WebServer', false) ? (int) Q_WebServer::$port : 0,
 			));
 		} catch (Throwable $e) {
 			self::$offUntil = microtime(true) + 10;

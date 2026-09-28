@@ -7,7 +7,8 @@
  *   - a hit comes back as a response array, HEAD without the body;
  *   - what the class is given: scheme, host, uri with query, cookies (from
  *     the header when the request has not parsed them), accept-encoding,
- *     if-none-match;
+ *     if-none-match, every request header (a load balancer's
+ *     X-Forwarded-Proto and X-Forwarded-Host) and the listener's port;
  *   - writes are never asked about;
  *   - a new object per request, so nothing it read outlives the request;
  *   - a class that throws is not asked for ten seconds.
@@ -29,6 +30,10 @@ class Q_Config
 		}
 		return $node;
 	}
+}
+class Q_WebServer
+{
+	static $port = 8787;
 }
 class Q
 {
@@ -70,7 +75,8 @@ class TestAppCache
 $A = 'Q_WebServer_AppCache';
 $get = array('method' => 'GET', 'path' => '/a', 'query' => 'x=1', 'headers' => array(
 	'host' => 'example.org', 'cookie' => 'eZSESSID=abc; other=1', 'accept-encoding' => 'gzip',
-	'if-none-match' => '"e"'), '_https' => true);
+	'if-none-match' => '"e"', 'x-forwarded-proto' => 'https', 'x-forwarded-host' => 'www.example.org'),
+	'_https' => true);
 
 $A::init();
 check('not configured: not asked', $A::get($get), null);
@@ -94,6 +100,9 @@ check('given: uri with query', TestAppCache::$last['uri'], '/a?x=1');
 check('given: cookies parsed from the header', TestAppCache::$last['cookies'], array('eZSESSID' => 'abc', 'other' => '1'));
 check('given: accept-encoding', TestAppCache::$last['acceptEncoding'], 'gzip');
 check('given: if-none-match', TestAppCache::$last['ifNoneMatch'], '"e"');
+check('given: the forwarded scheme', TestAppCache::$last['headers']['x-forwarded-proto'] ?? null, 'https');
+check('given: the forwarded host', TestAppCache::$last['headers']['x-forwarded-host'] ?? null, 'www.example.org');
+check('given: the listener port', TestAppCache::$last['port'] ?? null, 8787);
 
 $made = TestAppCache::$made;
 $A::get($get);
