@@ -476,6 +476,15 @@ class Q_WebServer_Pool
 				$__inner = $__run;
 				$__run = static function ($f) use ($__inner) { return Q_WebServer_RunAs::asUser(function () use ($__inner, $f) { return $__inner($f); }); };
 			}
+			// What a failed warm-up has to leave behind: see WarmupGuard.
+			$guardFile = __DIR__ . '/WarmupGuard.php';
+			if (!class_exists('Q_WebServer_WarmupGuard', false) && is_file($guardFile)) {
+				require_once $guardFile;
+			}
+			$guarded = class_exists('Q_WebServer_WarmupGuard', false);
+			if ($guarded) {
+				Q_WebServer_WarmupGuard::capture();
+			}
 			try {
 				$__run($warmup);
 				// The warm-up is a request as far as the file wrapper is
@@ -496,10 +505,24 @@ class Q_WebServer_Pool
 			} catch (\Throwable $e) {
 				// A warm-up that throws must not stop the server from starting --
 				// the workers can still warm themselves lazily, the old way.
+				//
+				// But not from the state it stopped in. It failed halfway
+				// through a request, before its own clean-up, and the snapshot
+				// below is what every worker restores before each request: kept,
+				// every request began as the warm-up's, and was answered with
+				// its page whatever it asked for. Put the parent back first.
+				$undone = $guarded ? Q_WebServer_WarmupGuard::restore() : null;
+				if (class_exists('Q_WebServer_CompatFileWrapper', false)) {
+					Q_WebServer_CompatFileWrapper::forgetStats();
+				}
 				if (class_exists('Q_WebServer_Log', false)) {
 					Q_WebServer_Log::error('warm-up ' . basename($warmup)
-						. ' failed, workers will warm lazily: ' . $e->getMessage());
+						. ' failed, workers will warm lazily: ' . $e->getMessage()
+						. ($undone ? sprintf(' (undone: %d output buffers, %d globals, statics of %d classes)',
+							$undone['buffers'], $undone['globals'], $undone['classes']) : ''));
 				}
+				fwrite(STDERR, '  warm-up ' . basename($warmup) . ' FAILED, its state was undone and workers warm lazily: '
+					. $e->getMessage() . "\n");
 			}
 		}
 
