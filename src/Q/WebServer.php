@@ -5421,11 +5421,17 @@ WORKER;
 			return;
 		}
 		$boundary = '--' . ($bm[1] ?: $bm[2]);
+		// Loaded by path too: a script runner may have this class without the
+		// server's autoloader.
+		if (!class_exists('Q_WebServer_FormData', false)) require_once __DIR__ . '/WebServer/FormData.php';
 		$endBoundary = $boundary . '--';
 
 		$parts = explode($boundary, $body);
 		array_shift($parts); // before first boundary
 		$fileCount = 0;
+		$skipFiles = false;
+		$postFields = array();
+		$fileFields = array();
 
 		foreach ($parts as $part) {
 			$part = ltrim($part, "\r\n");
@@ -5475,23 +5481,37 @@ WORKER;
 			}
 
 			if ($filename !== null) {
-				// Enforce file upload limits
-				if (!self::$fileUploads) continue; // uploads disabled
+				// Enforce file upload limits the way PHP does: uploads
+				// disabled, one file too many, or a field name with broken
+				// brackets, and this file and every file after it in the
+				// body is left out. Text fields are still read.
+				if ($skipFiles || !self::$fileUploads || $fileCount >= self::$maxFileUploads
+					|| !Q_WebServer_FormData::fileNameIsWellFormed($name)) {
+					$skipFiles = true;
+					continue;
+				}
+				// A field left empty is reported, as PHP does, with
+				// UPLOAD_ERR_NO_FILE, and does not count towards the limit.
+				if ($filename === '') {
+					$fileFields[] = array($name, Q_WebServer_FormData::entry(
+						'', '', '', '', UPLOAD_ERR_NO_FILE, 0
+					));
+					continue;
+				}
 				$fileCount++;
-				if ($fileCount > self::$maxFileUploads) continue; // too many files
 
 				$error = UPLOAD_ERR_OK;
 				if (strlen($partBody) > self::$maxUploadSize) {
 					$error = UPLOAD_ERR_INI_SIZE;
-					$partBody = ''; // don't write oversized file
 				}
 
-				// File upload — write to temp file
-				$tmpPath = tempnam(sys_get_temp_dir(), 'qbix_upload_');
+				$tmpPath = '';
 				if ($error === UPLOAD_ERR_OK) {
+					// File upload — write to temp file
+					$tmpPath = tempnam(sys_get_temp_dir(), 'qbix_upload_');
 					file_put_contents($tmpPath, $partBody);
+					self::$uploadTempFiles[] = $tmpPath;
 				}
-				self::$uploadTempFiles[] = $tmpPath;
 				// Tell the compat layer this is an upload. Both
 				// is_uploaded_file() and move_uploaded_file() are shimmed,
 				// because the real ones answer from a list that only the
@@ -5510,38 +5530,24 @@ WORKER;
 					\Q_WebServer_Compat::$uploadedFiles[$tmpPath] = true;
 				}
 
-				$fileEntry = array(
-					'name'     => $filename,
-					'type'     => $partHeaders['content-type'] ?? 'application/octet-stream',
-					'tmp_name' => $tmpPath,
-					'error'    => $error,
-					'size'     => strlen($partBody),
-				);
-
-				// Handle array notation: files[0], files[photo], etc.
-				if (preg_match('/^([^\[]+)\[([^\]]*)\]$/', $name, $am)) {
-					$files[$am[1]]['name'][$am[2]] = $fileEntry['name'];
-					$files[$am[1]]['type'][$am[2]] = $fileEntry['type'];
-					$files[$am[1]]['tmp_name'][$am[2]] = $fileEntry['tmp_name'];
-					$files[$am[1]]['error'][$am[2]] = $fileEntry['error'];
-					$files[$am[1]]['size'][$am[2]] = $fileEntry['size'];
-				} else {
-					$files[$name] = $fileEntry;
-				}
+				// A file that was not kept has no temporary name and no size,
+				// as in PHP.
+				$fileFields[] = array($name, Q_WebServer_FormData::entry(
+					Q_WebServer_FormData::baseName($filename), $filename,
+					$partHeaders['content-type'] ?? '', $tmpPath, $error,
+					$error === UPLOAD_ERR_OK ? strlen($partBody) : 0
+				));
 			} else {
-				// Regular form field
-				// Handle array notation: tags[], data[key], etc.
-				if (preg_match('/^([^\[]+)\[([^\]]*)\]$/', $name, $am)) {
-					if ($am[2] === '') {
-						$post[$am[1]][] = $partBody;
-					} else {
-						$post[$am[1]][$am[2]] = $partBody;
-					}
-				} else {
-					$post[$name] = $partBody;
-				}
+				$postFields[] = array($name, $partBody);
 			}
 		}
+
+		// Names such as "a[0][id]", "tags[]" and "f[x][]" become nested
+		// arrays by exactly the rules PHP applies to every request variable.
+		$builtPost = Q_WebServer_FormData::post($postFields);
+		$builtFiles = Q_WebServer_FormData::files($fileFields);
+		$post = $post ? array_replace_recursive($post, $builtPost) : $builtPost;
+		$files = $files ? array_replace_recursive($files, $builtFiles) : $builtFiles;
 	}
 
 	// ── Response helpers ─────────────────────────────────

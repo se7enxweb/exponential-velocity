@@ -2078,6 +2078,7 @@ class Q_WebServer_Compat
 			return;
 		}
 		$boundary = $m[1] ?: $m[2];
+		if (!class_exists('Q_WebServer_FormData', false)) require_once __DIR__ . '/FormData.php';
 		$parts = explode('--' . $boundary, $body);
 
 		// Remove first (empty) and last (--) parts
@@ -2094,6 +2095,13 @@ class Q_WebServer_Compat
 			return;
 		}
 
+		$uploadsEnabled = !in_array(strtolower((string) self::_ini_get('file_uploads')),
+			array('0', '', 'off', 'false', 'no'), true);
+		$maxFiles = (int) (self::_ini_get('max_file_uploads') ?: 20);
+		$fileCount = 0;
+		$skipFiles = false;
+		$postFields = array();
+		$fileFields = array();
 		foreach ($parts as $part) {
 			$part = ltrim($part, "\r\n");
 			$split = strpos($part, "\r\n\r\n");
@@ -2116,18 +2124,29 @@ class Q_WebServer_Compat
 			}
 
 			$disposition = $headers['content-disposition'] ?? '';
-			if (!preg_match('/name="([^"]*)"/', $disposition, $nm)) continue;
+			if (!preg_match('/\bname="([^"]*)"/', $disposition, $nm)) continue;
 			$fieldName = $nm[1];
 
-			if (preg_match('/filename="([^"]*)"/', $disposition, $fn)) {
+			if (preg_match('/\bfilename="([^"]*)"/', $disposition, $fn)) {
 				// File upload with size enforcement
 				$filename = $fn[1];
 				$contentLength = strlen($content);
-				$type = $headers['content-type'] ?? 'application/octet-stream';
+				$type = $headers['content-type'] ?? '';
+
+				// As in PHP: uploads disabled, one file too many or a name
+				// with broken brackets leaves out this file and every later
+				// one; an empty field does not count towards the limit.
+				if ($skipFiles || !$uploadsEnabled || $fileCount >= $maxFiles
+					|| !Q_WebServer_FormData::fileNameIsWellFormed($fieldName)) {
+					$skipFiles = true;
+					continue;
+				}
+				if ($filename !== '') $fileCount++;
 
 				if ($filename === '') {
 					$error = UPLOAD_ERR_NO_FILE;
 					$tmpPath = '';
+					$type = '';
 				} elseif ($contentLength > $maxFileSize) {
 					$error = UPLOAD_ERR_INI_SIZE;
 					$tmpPath = '';
@@ -2138,64 +2157,22 @@ class Q_WebServer_Compat
 					$error = UPLOAD_ERR_OK;
 				}
 
-				$entry = array(
-					'name'     => $filename,
-					'type'     => $type,
-					'tmp_name' => $tmpPath,
-					'error'    => $error,
-					'size'     => $contentLength,
-				);
-				self::setNestedValue($_FILES, $fieldName, $entry, true);
+				$fileFields[] = array($fieldName, Q_WebServer_FormData::entry(
+					Q_WebServer_FormData::baseName($filename), $filename, $type, $tmpPath, $error,
+					$error === UPLOAD_ERR_OK ? $contentLength : 0
+				));
 			} else {
 				// Regular form field
-				self::setNestedValue($_POST, $fieldName, $content, false);
+				$postFields[] = array($fieldName, $content);
 			}
 		}
-	}
 
-	/**
-	 * Set a nested value in $_POST or $_FILES from form field names
-	 * like "user[name]" or "files[]".
-	 */
-	private static function setNestedValue(&$array, $fieldName, $value, $isFile)
-	{
-		// Simple name (no brackets)
-		if (strpos($fieldName, '[') === false) {
-			if ($isFile) {
-				$array[$fieldName] = $value;
-			} else {
-				$array[$fieldName] = $value;
-			}
-			return;
-		}
-
-		// Parse bracketed keys: "user[address][city]" → ['user', 'address', 'city']
-		preg_match('/^([^\[]+)/', $fieldName, $base);
-		$keys = array($base[1]);
-		preg_match_all('/\[([^\]]*)\]/', $fieldName, $brackets);
-		$keys = array_merge($keys, $brackets[1]);
-
-		$ref = &$array;
-		$lastIdx = count($keys) - 1;
-		foreach ($keys as $idx => $key) {
-			if ($key === '' && $idx === $lastIdx) {
-				// [] means append
-				if ($isFile) {
-					// $_FILES array notation is special — each property is an array
-					foreach ($value as $prop => $val) {
-						$ref[$prop][] = $val;
-					}
-				} else {
-					$ref[] = $value;
-				}
-				return;
-			}
-			if (!isset($ref[$key]) || !is_array($ref[$key])) {
-				$ref[$key] = array();
-			}
-			$ref = &$ref[$key];
-		}
-		$ref = $value;
+		// Nested names ("a[0][id]", "tags[]") by the rules PHP uses for
+		// every request variable; see Q_WebServer_FormData.
+		$builtPost = Q_WebServer_FormData::post($postFields);
+		$builtFiles = Q_WebServer_FormData::files($fileFields);
+		$_POST = $_POST ? array_replace_recursive($_POST, $builtPost) : $builtPost;
+		$_FILES = $_FILES ? array_replace_recursive($_FILES, $builtFiles) : $builtFiles;
 	}
 
 	// ── URL Rewrite Engine ──────────────────────────────
