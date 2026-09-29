@@ -65,6 +65,40 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.37 — multipart form fields with nested names reach $_POST as PHP builds them
+
+2026-09-29
+
+### Fixed
+
+- **Nested field names in a multipart body.** The multipart parser
+  understood one level of brackets: `tags[]` and `a[b]` worked, but
+  `Attributes[0][id]` was stored under that literal string, so the
+  application found no `Attributes` at all. The same fields sent urlencoded
+  go through `parse_str()` and arrived intact, so the fault showed only in
+  forms posted as multipart -- which includes every `fetch()` with a
+  `FormData` body. Both multipart parsers, `Q_WebServer::parseMultipart()`
+  and `Q_WebServer_Compat::parseMultipart()`, now build `$_POST` and
+  `$_FILES` through the new `Q_WebServer_FormData`, which registers the
+  names with `parse_str()` -- the code PHP registers every request variable
+  with -- and puts the values in afterwards, so binary values never pass
+  through the query-string encoding. Nested brackets, `[]` appends at any
+  depth, mixed numeric and string keys, repeated names, spaces and dots in
+  top-level names, unmatched brackets and `max_input_nesting_level` behave
+  as in PHP.
+- **`$_FILES` in PHP's layout.** A file field named `f[a][b]` gives
+  `$_FILES['f']['name']['a']['b']`, and the same for `full_path`, `type`,
+  `tmp_name`, `error` and `size`. As in PHP, an empty file field reports
+  `UPLOAD_ERR_NO_FILE` with no type and does not count towards
+  `max_file_uploads`; the file name loses any path the client sent
+  (`full_path` keeps it); a file that was not kept has no temporary name and
+  a size of 0; and uploads disabled, one file too many or a file field with
+  broken brackets leave out that file and every later one, while text
+  fields are still read.
+- `tests/unit-multipart-form-fields.php` posts each case to `php -S` and to
+  both parsers and requires identical results: keys, order, types and the
+  uploaded files' contents.
+
 ## v0.0.4.36 — a warm-up that fails halfway no longer answers every request with its page
 
 2026-09-28
