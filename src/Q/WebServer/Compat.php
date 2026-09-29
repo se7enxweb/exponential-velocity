@@ -3458,6 +3458,25 @@ class Q_WebServer_CompatFileWrapper
 		return fseek($this->handle, $offset, $whence) === 0;
 	}
 
+	/**
+	 * The underlying resource, for a stream that needs a real file descriptor
+	 * below it: "compress.zlib://" (gzopen(), copy() into or out of a .gz, the
+	 * kernel's package archives), stream_select() and the like. Without it
+	 * PHP cannot open "compress.zlib://<path>" through this wrapper at all,
+	 * and reports the file as "can not be opened for reading". A transformed
+	 * file is served from memory and has no descriptor to give.
+	 * @method stream_cast
+	 * @param {integer} $cast_as STREAM_CAST_FOR_SELECT or STREAM_CAST_AS_STREAM
+	 * @return {resource|false}
+	 */
+	public function stream_cast($cast_as)
+	{
+		if ($this->transformed or !is_resource($this->handle)) {
+			return false;
+		}
+		return $this->handle;
+	}
+
 	public function stream_stat()
 	{
 		// A transformed file is served from memory. Its stat carries the
