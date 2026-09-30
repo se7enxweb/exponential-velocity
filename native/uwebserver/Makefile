@@ -16,19 +16,34 @@ OUT      ?= ../../sbin/uwebserver
 UWEB_VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo unknown)
 UWEB_BUILD   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo source)
 
-WARN     = -Wall -Wextra -Wformat=2
+# Every warning that finds real mistakes, and -Werror so none is shipped;
+# WERROR= builds anyway with a compiler that warns about something new.
+WARN     = -Wall -Wextra -Wformat=2 -Wformat-signedness -Wshadow -Wnull-dereference \
+           -Wstrict-prototypes -Wpointer-arith -Wcast-align -Wwrite-strings -Wundef \
+           -Wvla -Wimplicit-fallthrough -Wduplicated-cond -Wlogical-op
+WERROR  ?= -Werror
 CFLAGS  ?= -O2
 LIBS     = -lssl -lcrypto
 DEFS     = -DUWEB_VERSION='"$(UWEB_VERSION)"' -DUWEB_BUILD='"$(UWEB_BUILD)"'
 
 SOURCES  = uwebserver.c u_options.h u_http.h u_mime.h u_log.h u_tls.h u_sendfile.h
 
-.PHONY: all install clean
+.PHONY: all sanitize install clean
+
+# AddressSanitizer and UndefinedBehaviorSanitizer: a build for testing, never
+# for serving (make sanitize; the tests take UWEB_TEST_CFLAGS for the same).
+SANITIZE = -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all
+SAN_OUT ?= uwebserver-sanitize
 
 all: $(OUT)
 
 $(OUT): $(SOURCES)
-	$(CC) $(CFLAGS) $(WARN) $(DEFS) -o $@ uwebserver.c $(LDFLAGS) $(LIBS)
+	$(CC) $(CFLAGS) $(WARN) $(WERROR) $(DEFS) -o $@ uwebserver.c $(LDFLAGS) $(LIBS)
+
+sanitize: $(SAN_OUT)
+
+$(SAN_OUT): $(SOURCES)
+	$(CC) $(SANITIZE) $(WARN) $(WERROR) $(DEFS) -o $@ uwebserver.c $(LDFLAGS) $(LIBS)
 
 install: $(OUT)
 	install -D -m 0755 $(OUT) $(DESTDIR)$(PREFIX)/sbin/uwebserver
@@ -36,4 +51,4 @@ install: $(OUT)
 	install -D -m 0644 uwebserver.bash-completion $(DESTDIR)$(PREFIX)/share/bash-completion/completions/uwebserver
 
 clean:
-	rm -f $(OUT)
+	rm -f $(OUT) $(SAN_OUT)

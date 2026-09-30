@@ -335,10 +335,48 @@ and it exits 0. With `--workers` the parent stops the workers so.
 
 ### Security
 
-The review of 0.0.4.42 and what it changed are in the next sections of this
-document as they are written; the short form: nothing outside the root is
-ever served, a client can never make the server block, wait or spin, root is
-dropped before the first request, and the build is hardened.
+uwebserver was reviewed for 0.0.4.42 in four waves, each a review, a list of
+findings with a severity, the fixes, and a test that proves each fix:
+
+1. [memory safety and parsing](#wave-1-memory-safety-and-parsing)
+2. [resource exhaustion and denial of service](#wave-2-resource-exhaustion-and-denial-of-service)
+3. [privileges and TLS](#wave-3-privileges-and-tls)
+4. [hardening and fuzzing](#wave-4-hardening-and-fuzzing)
+
+Severity: **high**, a remote client can make the server do what it must not
+(serve what it should not, read a stream wrongly, stop serving others);
+**medium**, it takes an unusual set-up or only degrades the service;
+**low**, a defect with no effect on others' data or availability; **info**, a
+change of default or of hygiene. "0.0.4.41" marks what the released program
+did; "new" marks what the review found in the code written for 0.0.4.42 before
+it was released.
+
+The sanitizer run: `make -C native/uwebserver sanitize` builds with
+AddressSanitizer and UndefinedBehaviorSanitizer (`-fsanitize=address,undefined
+-fno-sanitize-recover=all`), and every `tests/unit-uwebserver-*.php` test runs
+against such a build when `UWEB_TEST_CFLAGS` carries those flags (the
+sanitizers need their runtimes, `libasan` and `libubsan`). Any report stops the
+process and fails the test.
+
+#### Wave 1: memory safety and parsing
+
+| # | Severity | Finding | Fix | Test |
+|---|---|---|---|---|
+| 1.1 | high, 0.0.4.41 | Any argument other than the about flags started the server, `--help` and typing errors included, on every interface at port 8080 | the whole command line is read first; errors exit 2 and start nothing | `unit-uwebserver-cli.php` |
+| 1.2 | high, 0.0.4.41 | A request head that filled the 8 KiB buffer without its end was dropped and reading went on, so the rest of it was read as the start of new requests | 431 and the connection closed | `unit-uwebserver-parser.php`, "a head that fills the buffer" |
+| 1.3 | medium, 0.0.4.41 | The request was barely parsed: the path was whatever lay between the first two spaces, nothing was validated, and `Connection: close` was found by a case-sensitive search anywhere in the head, so a header value holding it closed the connection and `connection: close` did not | a strict head parser (`u_http.h`, RFC 9112): CRLF only, no folding, token names, no control characters, one Host, Content-Length digits that agree, never with Transfer-Encoding, the version checked | `unit-uwebserver-parser.php` (46 malformed and boundary heads) |
+| 1.4 | medium, 0.0.4.41 | The connection table took descriptor 0 as "free": a connection accepted on descriptor 0 (standard input closed by a supervisor) was never closed | a table of pointers, NULL for free | "with standard input closed" |
+| 1.5 | low, 0.0.4.41 | A certificate's DNS names were read with `strlen` from ASN.1 data, which need not end in NUL | `ASN1_STRING_length`, bounds on every copy | `unit-uwebserver-tls.php`, the start-up line |
+| 1.6 | low, 0.0.4.41 | The response cache cut keys at 127 bytes and kept whole responses, `Date` and `Connection` included, so a cached `keep-alive` went to a request that asked for `close` | the cache is gone | `unit-uwebserver-static.php`, HTTP/1.0 and keep-alive; `pipelining.php` |
+| 1.7 | high, new | a path is the one thing a client controls that reaches the file system | percent-decoding, then `..`, `%2F`, NUL and control characters refused, dot names hidden, and the file opened beneath the root with `openat2(RESOLVE_BENEATH)`, so no path, link or race leads out | `unit-uwebserver-static.php` (16 paths that must not be served, links out, a FIFO) |
+| 1.8 | low, new | The configuration reader used `fgets`, which cannot see a NUL inside a line | `getline`, whose length is the true one | "a NUL byte in the configuration file" |
+| 1.9 | low, new | A CR that ended a write, before the request line, was answered 400 instead of waiting for its LF | wait for it | "a request a byte at a time" |
+| 1.10 | low, new | A JSON access log line with long escaped fields was cut at 4 KiB into invalid JSON | a buffer sized for the longest line | "every JSON log line parses" |
+| 1.11 | low, new | The `Location` of a directory redirect carried query bytes above 0x7e as they came | encoded | "a directory redirect keeps the query" |
+| 1.12 | info, new | `/.well-known/` counted as hidden, which breaks ACME and `security.txt` (RFC 8615) | served at the top of the root; dot names inside it are still hidden | "/.well-known/ is served" |
+| 1.13 | info, 0.0.4.41 | 58 warnings with `-Wall -Wextra -Wformat=2`, from the generated code and unused functions | none, with a stricter set (`-Wformat=2 -Wformat-signedness -Wshadow -Wnull-dereference -Wstrict-prototypes -Wpointer-arith -Wcast-align -Wwrite-strings -Wundef -Wvla -Wimplicit-fallthrough -Wduplicated-cond -Wlogical-op`) and `-Werror` in the Makefile | `unit-uwebserver-docs.php` builds with the Makefile |
+| 1.14 | info, new | GCC 14 saw a possible NULL dereference (`-Wnull-dereference`): the option looked up for a bare port was used unchecked | checked | the Makefile build with GCC 14 under `-Werror` |
+| 1.15 | info | ASan, UBSan and LeakSanitizer over every uwebserver test (everything the process holds is freed at a clean exit, so a leak is visible) | no report | the sanitizer run above |
 
 ### Changes from 0.0.4.41
 

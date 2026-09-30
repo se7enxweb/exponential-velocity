@@ -30,6 +30,7 @@ typedef struct {
     UwStr method, target, path, query;
     int   minor;               /* HTTP/1.<minor>: 0 or 1 */
     UwStr host, connection, te, inm, ims, range, if_range, accept_encoding, referer, user_agent;
+    int   has_te;              /* a Transfer-Encoding was given (with any value) */
     int   host_count;
     int   has_cl;              /* a Content-Length was given */
     long long content_length;
@@ -79,6 +80,7 @@ static int uw_parse_request(const char *buf, size_t len, size_t max_head, size_t
     for (int skipped = 0; skipped < 4 && pos + 1 < len && buf[pos] == '\r' && buf[pos + 1] == '\n'; skipped++) pos += 2;
     if (pos < len && (buf[pos] == '\r' || buf[pos] == '\n')) {
         if (buf[pos] == '\n' || (pos + 1 < len && buf[pos + 1] != '\n')) return -400;
+        if (pos + 1 == len) return UW_NEED_MORE;             /* a CR whose LF is still to come */
     }
 
     /* Request line: METHOD SP TARGET SP HTTP/1.x CRLF */
@@ -161,7 +163,7 @@ static int uw_parse_request(const char *buf, size_t len, size_t max_head, size_t
             if (cl_seen && n != r->content_length) return -400;
             cl_seen = 1; r->has_cl = 1; r->content_length = n;
         }
-        else if (uw_streq_ci(name, "transfer-encoding")) { r->te = val; if (!val.n) r->te.n = 1; }
+        else if (uw_streq_ci(name, "transfer-encoding")) { r->te = val; r->has_te = 1; }
         else if (uw_streq_ci(name, "if-none-match")) r->inm = val;
         else if (uw_streq_ci(name, "if-modified-since")) r->ims = val;
         else if (uw_streq_ci(name, "range")) r->range = val;
@@ -171,7 +173,7 @@ static int uw_parse_request(const char *buf, size_t len, size_t max_head, size_t
         else if (uw_streq_ci(name, "user-agent")) r->user_agent = val;
     }
     if (i > max_head) return -431;
-    if (r->te.n && r->has_cl) return -400;            /* both: a smuggling shape */
+    if (r->has_te && r->has_cl) return -400;            /* both: a smuggling shape */
     if (r->minor == 1 && r->host_count != 1) return -400;
     if (r->host_count > 1) return -400;
 
@@ -242,7 +244,8 @@ static int uw_normalize_path(const char *p, size_t n, char *out, size_t outcap, 
             }
             if (sl == 1 && out[seg] == '.') { o = seg; if (end) *slash = 1; continue; }
             if (sl == 2 && out[seg] == '.' && out[seg + 1] == '.') return UW_PATH_BAD;
-            if (out[seg] == '.' && !allow_hidden) return UW_PATH_HIDDEN;
+            /* A dot name is hidden; /.well-known/ (RFC 8615: ACME, security.txt) is not. */
+            if (out[seg] == '.' && !allow_hidden && !(seg == 0 && sl == 11 && memcmp(out, ".well-known", 11) == 0)) return UW_PATH_HIDDEN;
             if (!end) {
                 if (o + 1 >= outcap) return UW_PATH_LONG;
                 out[o++] = '/';

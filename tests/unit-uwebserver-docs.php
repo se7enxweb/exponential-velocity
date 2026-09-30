@@ -69,7 +69,9 @@ check('...and a value after =', $lines[1] ?? null, 'never');
 // The Makefile builds the program.
 if (trim((string) shell_exec('command -v make 2>/dev/null')) !== '') {
 	$out = uw_dir() . '/made';
-	exec('make -s -C ' . escapeshellarg("$root/native/uwebserver") . ' OUT=' . escapeshellarg($out) . ' 2>&1', $mo, $mrc);
+	$extra = getenv('UWEB_TEST_LIBS') ? ' LIBS=' . escapeshellarg(getenv('UWEB_TEST_LIBS')) : '';
+	if (trim((string) shell_exec('git -C ' . escapeshellarg($root) . ' describe --tags --abbrev=0 2>/dev/null')) === '') $extra .= ' UWEB_VERSION=v0.0.0';
+	exec('make -s -C ' . escapeshellarg("$root/native/uwebserver") . ' OUT=' . escapeshellarg($out) . $extra . ' 2>&1', $mo, $mrc);
 	check('make -C native/uwebserver builds it', array($mrc, is_executable($out)), array(0, true));
 	if (is_executable($out)) {
 		list($vrc, $vout) = uw_run($out, array('--version'));

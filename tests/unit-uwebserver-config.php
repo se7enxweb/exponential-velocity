@@ -125,7 +125,7 @@ check('--print-config reads back to the same settings', array($rc2, $out2), arra
 list($rc, $out) = uw_run($bin, array("--config=$conf", '--header=X-Cli: 1', '--etag', "--port=" . ($port + 1), '--print-config'));
 check('the command line overrides the file', strpos($out, "etag = yes\n") !== false && strpos($out, 'port = ' . ($port + 1) . "\n") !== false);
 check('...and a repeated option given there replaces the file\'s values', strpos($out, "header = X-Cli: 1\n") !== false && strpos($out, 'X-From') === false);
-list($rc, $out) = uw_run($bin, array('--print-config'), 5, array('UWEBSERVER_CONFIG' => $conf, 'PATH' => getenv('PATH')));
+list($rc, $out) = uw_run($bin, array('--print-config'), 5, array_merge(getenv(), array('UWEBSERVER_CONFIG' => $conf)));
 check('UWEBSERVER_CONFIG names the file when --config is not given', strpos($out, "port = $port\n") !== false);
 list($rc, $out) = uw_run($bin, array('-c', $conf, '-t'));
 check('-c FILE -t: valid, exit 0', array($rc, strpos($out, "configuration is valid; it would serve on http://127.0.0.1:$port") !== false), array(0, true));

@@ -24,6 +24,7 @@ node_modules/
 # sbin/uwebserver, and they are tracked. bin/uwebserver is the forwarder at
 # the binary's former path, a tracked script (docs/layout.md, "Programs").
 sbin/uwebserver
+native/uwebserver/uwebserver-sanitize
 sbin/qbixserver
 bin/qbixserver
 qbixserver-linux-*

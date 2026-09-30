@@ -71,6 +71,15 @@
 #define UWEB_BUILD "source"
 #endif
 
+/* EAGAIN and EWOULDBLOCK are the same number on Linux, and need not be elsewhere. */
+static int uw_would_block(int e) {
+#if EAGAIN == EWOULDBLOCK
+    return e == EAGAIN;
+#else
+    return e == EAGAIN || e == EWOULDBLOCK;
+#endif
+}
+
 #define UW_DEFAULT_ADDR    "127.0.0.1"
 #define UW_DEFAULT_PORT    8000
 #define UW_DEFAULT_TLSPORT 8443
@@ -449,13 +458,16 @@ static int uw_apply(UwConfig *c, const UwOpt *o, const char *val, int negated, i
 static void uw_read_config(UwConfig *c, const char *file) {
     FILE *f = fopen(file, "re");
     if (!f) { fprintf(stderr, "%s: cannot read the configuration file %s: %s\n", uw_progname, file, strerror(errno)); exit(2); }
-    char line[4096];
+    char *line = NULL;
+    size_t linecap = 0;
+    ssize_t got;
     int lineno = 0;
-    while (fgets(line, sizeof line, f)) {
+    /* getline gives the true length, so a NUL inside a line is seen, not cut at. */
+    while ((got = getline(&line, &linecap, f)) >= 0) {
         lineno++;
-        size_t len = strlen(line);
-        if (len == sizeof line - 1 && line[len - 1] != '\n') { fprintf(stderr, "%s: %s:%d: line too long\n", uw_progname, file, lineno); exit(2); }
-        if (memchr(line, '\0', len) != NULL && strlen(line) != len) { fprintf(stderr, "%s: %s:%d: a NUL byte\n", uw_progname, file, lineno); exit(2); }
+        size_t len = (size_t)got;
+        if (len > 4096) { fprintf(stderr, "%s: %s:%d: line too long\n", uw_progname, file, lineno); exit(2); }
+        if (memchr(line, '\0', len) != NULL) { fprintf(stderr, "%s: %s:%d: a NUL byte\n", uw_progname, file, lineno); exit(2); }
         while (len && (line[len - 1] == '\n' || line[len - 1] == '\r' || line[len - 1] == ' ' || line[len - 1] == '\t')) line[--len] = '\0';
         char *p = line;
         while (*p == ' ' || *p == '\t') p++;
@@ -483,6 +495,7 @@ static void uw_read_config(UwConfig *c, const char *file) {
             if (uw_apply(c, o, NULL, !on, 0, name, err, sizeof err) != 0) { fprintf(stderr, "%s: %s:%d: %s\n", uw_progname, file, lineno, err); exit(2); }
         }
     }
+    free(line);
     fclose(f);
 }
 
@@ -852,7 +865,7 @@ static int uw_open_beneath(const char *rel) {
     if (uw_have_openat2) {
         struct open_how how;
         memset(&how, 0, sizeof how);
-        how.flags = (uint64_t)flags;
+        how.flags = (uint64_t)(unsigned)flags;
         how.resolve = RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS;
         if (strcmp(cfg.symlinks, "never") == 0) how.resolve |= RESOLVE_NO_SYMLINKS;
         long fd = syscall(SYS_openat2, rootfd, p, &how, sizeof how);
@@ -899,6 +912,18 @@ static int uw_url_encode(Conn *c, const char *s, size_t n) {
             char e[3] = { '%', hex[ch >> 4], hex[ch & 15] };
             if (uw_out_add(c, e, 3) != 0) return -1;
         }
+    }
+    return 0;
+}
+
+/* A query for a Location header: as the client sent it (the parser let no
+ * control character or blank through), with bytes above 0x7e encoded. */
+static int uw_query_encode(Conn *c, const char *s, size_t n) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < n; i++) {
+        unsigned char ch = (unsigned char)s[i];
+        if (ch > 0x20 && ch < 0x7f) { if (uw_out_add(c, &s[i], 1) != 0) return -1; }
+        else { char e[3] = { '%', hex[ch >> 4], hex[ch & 15] }; if (uw_out_add(c, e, 3) != 0) return -1; }
     }
     return 0;
 }
@@ -1150,7 +1175,7 @@ static void uw_serve_static(Conn *c, const UwRequest *r, int head_only) {
             close(fd);
             Conn loc; memset(&loc, 0, sizeof loc);
             int bad = uw_out_add(&loc, "Location: /", 11) || uw_url_encode(&loc, rel, strlen(rel)) || uw_out_add(&loc, "/", 1);
-            if (!bad && r->query.n) bad = uw_out_add(&loc, "?", 1) || uw_out_add(&loc, r->query.p, r->query.n);
+            if (!bad && r->query.n) bad = uw_out_add(&loc, "?", 1) || uw_query_encode(&loc, r->query.p, r->query.n);
             if (!bad) bad = uw_out_add(&loc, "\r\n", 2);
             if (bad) { free(loc.out); uw_error(c, 414, head_only); return; }
             uw_simple(c, 301, "text/plain; charset=utf-8", "301 Moved Permanently\n", head_only, loc.out);
@@ -1236,7 +1261,7 @@ static void uw_handle(Conn *c, const UwRequest *r) {
     int head_only = r->method.n == 4 && memcmp(r->method.p, "HEAD", 4) == 0;
     int get = r->method.n == 3 && memcmp(r->method.p, "GET", 3) == 0;
 
-    if (r->te.n) { c->keep_alive = 0; uw_error(c, 501, head_only); return; }     /* chunked bodies are not read */
+    if (r->has_te) { c->keep_alive = 0; uw_error(c, 501, head_only); return; }     /* chunked bodies are not read */
     if (r->has_cl && r->content_length > cfg.max_body) { c->keep_alive = 0; uw_error(c, 413, head_only); return; }
     if (r->has_cl) c->discard = r->content_length;
     if (!get && !head_only) { c->keep_alive = 0; uw_error(c, uw_known_method(r->method) ? 405 : 501, 0); return; }
@@ -1248,7 +1273,7 @@ static void uw_handle(Conn *c, const UwRequest *r) {
 static void uw_access_log(Conn *c) {
     c->l_logged = 1;
     if (access_fd < 0 || !c->l_status) return;
-    char line[4096], ts[64];
+    char line[8192], ts[64];   /* the longest JSON line (every field escaped at its longest) fits */
     struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1);
     long ms = (long)((t1.tv_sec - c->l_start.tv_sec) * 1000 + (t1.tv_nsec - c->l_start.tv_nsec) / 1000000);
     time_t t = time(NULL);
@@ -1301,7 +1326,7 @@ static int uw_read_some(Conn *c) {
         } else {
             n = read(c->fd, c->in + c->in_len, room);
             if (n < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) return UW_READ_WAIT;
+                if (uw_would_block(errno)) return UW_READ_WAIT;
                 if (errno == EINTR) continue;
                 return UW_READ_CLOSED;
             }
@@ -1368,7 +1393,7 @@ static int uw_write_some(Conn *c) {
             if (w <= 0) return -1;
         } else {
             w = write(c->fd, c->out + c->out_off, left);
-            if (w < 0) { if (errno == EAGAIN || errno == EWOULDBLOCK) return 0; if (errno == EINTR) continue; return -1; }
+            if (w < 0) { if (uw_would_block(errno)) return 0; if (errno == EINTR) continue; return -1; }
         }
         c->out_off += (size_t)w;
         total_bytes += w;
@@ -1393,7 +1418,7 @@ static int uw_write_some(Conn *c) {
             total_bytes += w;
         } else {
             ssize_t w = uw_sendfile_step(c->fd, c->file_fd, &c->file_off, left > (1u << 20) ? (1u << 20) : left);
-            if (w < 0) { if (errno == EAGAIN || errno == EWOULDBLOCK) return 0; if (errno == EINTR) continue; return -1; }
+            if (w < 0) { if (uw_would_block(errno)) return 0; if (errno == EINTR) continue; return -1; }
             if (w == 0) return -1;                    /* the file shrank while it was sent */
             total_bytes += w;
         }
@@ -1461,7 +1486,7 @@ static void uw_conn_run(Conn *c, uint32_t ev) {
             for (;;) {
                 ssize_t n = read(c->fd, junk, sizeof junk);
                 if (n > 0) { c->lingered += (size_t)n; if (c->lingered > 256 * 1024) { uw_conn_close(c); return; } continue; }
-                if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
+                if (n < 0 && (uw_would_block(errno))) return;
                 if (n < 0 && errno == EINTR) continue;
                 uw_conn_close(c);
                 return;
@@ -1882,8 +1907,32 @@ static void uw_validate(void) {
     if (uw_resolve_listeners(err, sizeof err) != 0) uw_usage_error("%s", err);
 }
 
+/* Everything the process holds, freed at exit, so that a leak checker run
+ * over the tests sees only what a request left behind. */
+static UwParsed parsed;
+
+static void uw_free_list(UwList *l) {
+    for (int i = 0; i < l->n; i++) free(l->v[i]);
+    l->n = 0;
+}
+
+static void uw_cleanup(void) {
+    free(parsed.args); parsed.args = NULL;
+    free(parsed.words); parsed.words = NULL;
+    uw_free_list(&cfg.listen); uw_free_list(&cfg.tls_listen); uw_free_list(&cfg.header);
+    char **strs[] = { &cfg.bind, &cfg.root, &cfg.index, &cfg.symlinks, &cfg.mime_types, &cfg.default_type,
+                      &cfg.charset, &cfg.cache_control, &cfg.server_name, &cfg.cert, &cfg.key, &cfg.chain,
+                      &cfg.tls_min, &cfg.tls_ciphers, &cfg.tls_suites, &cfg.access_log, &cfg.access_format,
+                      &cfg.error_log, &cfg.pid_file, &cfg.user, &cfg.group, &cfg.chroot_dir };
+    for (size_t i = 0; i < sizeof strs / sizeof strs[0]; i++) { free(*strs[i]); *strs[i] = NULL; }
+    for (size_t i = 0; i < uw_mime_extra_n; i++) { free(uw_mime_extra[i].ext); free(uw_mime_extra[i].type); }
+    free(uw_mime_extra); uw_mime_extra = NULL; uw_mime_extra_n = 0;
+    free(conns); conns = NULL;
+    if (ssl_ctx) { SSL_CTX_free(ssl_ctx); ssl_ctx = NULL; }
+}
+
 int main(int argc, char **argv) {
-    UwParsed parsed;
+    atexit(uw_cleanup);
     uw_parse_argv(uw_options, argc, argv, &parsed);   /* exits 2 on any error: nothing is done yet */
     uw_config_defaults(&cfg);
 
@@ -1924,7 +1973,7 @@ int main(int argc, char **argv) {
     }
     if (bare_port) {
         const UwOpt *po = uw_find_short(uw_options, 'p');
-        if (uw_apply(&cfg, po, bare_port, 0, 1, "port", err, sizeof err) != 0) uw_usage_error("%s", err);
+        if (!po || uw_apply(&cfg, po, bare_port, 0, 1, "port", err, sizeof err) != 0) uw_usage_error("%s", po ? err : "no --port option");
     }
     uw_validate();
     uw_log_level = cfg.quiet ? UW_LOG_ERROR : cfg.verbose ? UW_LOG_DEBUG : UW_LOG_NOTICE;
@@ -1976,6 +2025,5 @@ int main(int argc, char **argv) {
     int rc = cfg.workers > 1 ? uw_supervise() : uw_serve();
     uw_log(UW_LOG_NOTICE, "stopped after %lld requests, %lld bytes sent", total_requests, total_bytes);
     uw_remove_pid_file();
-    if (ssl_ctx) SSL_CTX_free(ssl_ctx);
     return rc;
 }

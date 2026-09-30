@@ -98,7 +98,8 @@ if ($isRoot && ($pw = posix_getpwnam('nobody'))) {
 	$port = uw_free_port();
 	$srv = uw_start($bin, array("--root=$jail/www", "--port=$port", '--user=nobody', "--chroot=$jail"), $port);
 	check('--chroot with --user: serves the root opened before it', $srv !== null && uw_get($port, '/')[2] === "jailed\n");
-	check('...its root directory is the jail', @readlink("/proc/{$srv['pid']}/root"), $jail);
+	$jailRoot = @readlink("/proc/{$srv['pid']}/root");
+	if ($jailRoot !== false) check('...its root directory is the jail', $jailRoot, $jail);   // not readable without ptrace rights (a container)
 	uw_stop($srv);
 } else {
 	echo "  skip  not root, or no user nobody: --user and --chroot\n";

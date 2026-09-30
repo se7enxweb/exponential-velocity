@@ -84,10 +84,13 @@ function uw_build($extra = '', $name = 'uwebserver')
 	if ($cc === '' || !is_file('/usr/include/openssl/ssl.h')) return $built[$name] = null;
 	$out = uw_dir() . '/' . $name;
 	$ver = trim((string) shell_exec('git -C ' . escapeshellarg($root) . ' describe --tags --abbrev=0 2>/dev/null')) ?: 'v0.0.0';
-	$cmd = escapeshellarg($cc) . ' -O2 -Wall -Wextra ' . $extra
+	// UWEB_TEST_CFLAGS adds flags (the sanitizer run sets -fsanitize=...),
+	// UWEB_TEST_LIBS replaces the libraries (a system without the -dev links).
+	$libs = getenv('UWEB_TEST_LIBS') ?: '-lssl -lcrypto';
+	$cmd = escapeshellarg($cc) . ' -O2 -Wall -Wextra ' . getenv('UWEB_TEST_CFLAGS') . ' ' . $extra
 		. ' -DUWEB_VERSION=' . escapeshellarg('"' . $ver . '"') . ' -DUWEB_BUILD=' . escapeshellarg('"test"')
 		. ' -o ' . escapeshellarg($out) . ' ' . escapeshellarg("$root/native/uwebserver/uwebserver.c")
-		. ' -lssl -lcrypto 2>&1';
+		. ' ' . $libs . ' 2>&1';
 	exec($cmd, $o, $rc);
 	if ($rc !== 0) {
 		echo "  build failed:\n    " . implode("\n    ", array_slice($o, 0, 30)) . "\n";
@@ -140,13 +143,18 @@ function uw_root_args()
 /** The address a TCP port on this host is listening on, from ss(8), or null. */
 function uw_bound_address($port)
 {
-	$out = (string) shell_exec('ss -ltnH 2>/dev/null');
-	foreach (explode("\n", $out) as $line) {
-		$f = preg_split('/\s+/', trim($line));
-		if (count($f) < 4) continue;
-		$local = $f[3];
-		$p = strrpos($local, ':');
-		if ($p !== false && (int) substr($local, $p + 1) === (int) $port) return substr($local, 0, $p);
+	// /proc/net/tcp and tcp6: the local address in hex, state 0A is LISTEN.
+	foreach (array('/proc/net/tcp' => 4, '/proc/net/tcp6' => 6) as $file => $fam) {
+		foreach (array_slice(explode("\n", (string) @file_get_contents($file)), 1) as $line) {
+			$f = preg_split('/\s+/', trim($line));
+			if (count($f) < 4 || $f[3] !== '0A') continue;
+			list($hexaddr, $hexport) = explode(':', $f[1]);
+			if (hexdec($hexport) !== (int) $port) continue;
+			$bin = '';
+			foreach (str_split($hexaddr, 8) as $word) $bin .= strrev(hex2bin($word));   // each 32-bit word is little-endian
+			$a = inet_ntop($bin);
+			return $fam === 6 ? "[$a]" : $a;
+		}
 	}
 	return null;
 }
