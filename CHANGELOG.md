@@ -67,7 +67,7 @@ edited down to what a reader actually needs.
 
 ## v0.0.4.38 — large uploads get a clean 413 or arrive whole, and compressed files open through the file layer
 
-2026-09-30
+2026-09-29
 
 ### Fixed
 
