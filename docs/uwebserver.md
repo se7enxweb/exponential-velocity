@@ -31,6 +31,30 @@ man docs/uwebserver.1                      # the manual page
 
 ---
 
+### Upgrading from 0.0.4.41 or earlier
+
+What changes for anyone who started uwebserver before 0.0.4.42:
+
+- **It listens on `127.0.0.1:8000` by default, not on every interface at 8080.**
+  The old program bound `0.0.0.0:8080` for any argument it did not know, which
+  on a server is the public address and the port Velocity itself uses. To keep
+  the old address, say so: `--listen='*:8080'`. `--port=N` alone now binds
+  `127.0.0.1:N`.
+- **As root it serves only with `--user` or `--allow-root`.** With `--user` it
+  drops to that user once the ports are open; `--allow-root` keeps root on
+  purpose. Without either it refuses to start (exit 2).
+- **An unknown option, a missing value or a bad value starts nothing.** It
+  prints the error and "Try 'uwebserver --help'" on stderr and exits 2;
+  `--help` prints the usage and exits 0. `--cert` without `--key` is an error.
+- **Small visible differences:** the `Server` header is `uwebserver` (no
+  version), and the start-up line goes to stderr.
+
+**Nothing in the site starts uwebserver.** The Velocity engine, its packages,
+the container image, the release workflows and the Exponential installation
+never run it, so upgrading changes nothing for a site: only people and tests
+start it. Its unused former runtime headers (`u_runtime.h`,
+`u_merkle_cache.h`) were removed in 0.0.4.42.
+
 ### Where it is and who uses it
 
 | Path | What |
@@ -46,7 +70,6 @@ man docs/uwebserver.1                      # the manual page
 | `native/uwebserver/fuzz_request.c` | the fuzz harness of the request parsing (libFuzzer, or its own fuzzer) |
 | `native/uwebserver/uwebserver.bash-completion` | bash completion |
 | `docs/uwebserver.1` | the manual page |
-| `native/uwebserver/u_runtime.h`, `u_merkle_cache.h` | no longer compiled (see [What it was](#what-it-was-in-00441)) |
 | `sbin/uwebserver` | the built program, committed: built for each release with `make -C native/uwebserver` (GCC 11.5 on EL 9, x86-64, linked against the system's OpenSSL 3). On another system, build it again the same way |
 | `bin/uwebserver` | a forwarder at the former path that `exec`s `sbin/uwebserver` ([layout.md](layout.md#programs-bin-and-sbin)) |
 

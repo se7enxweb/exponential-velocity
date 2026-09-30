@@ -167,6 +167,10 @@ edited down to what a reader actually needs.
 - `tests/unit-nfpm-render.php` checks `/usr/bin/vc-qshell` and that nothing
   named `qshell` is installed; `tests/unit-moved-programs.php` compares `--help`
   and a usage error of both uwebserver paths when the binary has a `--help`.
+- `native/uwebserver/u_runtime.h` and `u_merkle_cache.h`, no longer compiled since the generated
+  code was removed, are removed too. `docs/uwebserver.md` gains "Upgrading from 0.0.4.41
+  or earlier": the new default address, root and bad options, and that nothing in
+  a site starts uwebserver.
 
 ## v0.0.4.41 — the programs move to sbin/ and bin/, and every former path keeps working
 

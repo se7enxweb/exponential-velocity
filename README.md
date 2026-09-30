@@ -206,6 +206,11 @@ with the sources.
 | the shell | `bin/qshell.php` | `qshell.php` |
 | an application's make-up, for the panel | `bin/qbix-appinfo.php` | — |
 
+**uwebserver from 0.0.4.42 on** listens on `127.0.0.1:8000` by default (it used to take
+every interface at 8080), serves as root only with `--user` or `--allow-root`, and
+starts nothing on an unknown option. Nothing in a site starts it, so a site is
+unaffected; see [Upgrading](docs/uwebserver.md#upgrading-from-00441-or-earlier).
+
 The packages install `qbixserver`, `qbixctl` and `qbixconsole` in `/usr/sbin` and
 keep links at `/usr/bin`; the systemd unit starts `/usr/sbin/qbixserver`. From
 0.0.4.42 they install the shell too, as `/usr/bin/vc-qshell` (a link to
