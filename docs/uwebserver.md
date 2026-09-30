@@ -47,7 +47,7 @@ man docs/uwebserver.1                      # the manual page
 | `native/uwebserver/uwebserver.bash-completion` | bash completion |
 | `docs/uwebserver.1` | the manual page |
 | `native/uwebserver/u_runtime.h`, `u_merkle_cache.h` | no longer compiled (see [What it was](#what-it-was-in-00441)) |
-| `sbin/uwebserver` | the built program. Not committed (`.gitignore`): it is built on the machine that runs it |
+| `sbin/uwebserver` | the built program, committed: built for each release with `make -C native/uwebserver` (GCC 11.5 on EL 9, x86-64, linked against the system's OpenSSL 3). On another system, build it again the same way |
 | `bin/uwebserver` | a forwarder at the former path that `exec`s `sbin/uwebserver` ([layout.md](layout.md#programs-bin-and-sbin)) |
 
 Nothing in the engine starts it. `src/` never names it, the packages and the
@@ -437,7 +437,8 @@ process and fails the test.
 | 4.6 | info | The final review, with nothing to change: signal handlers only set a flag; every descriptor is opened `O_CLOEXEC`; `SIGPIPE` is ignored; nothing is run through a shell; the environment is read for `UWEBSERVER_CONFIG` only; OpenSSL's error queue is cleared around every call; dates are read and written in the C locale | as it is | the whole suite |
 
 The ten-minute fuzz run of 0.0.4.42, under AddressSanitizer and
-UndefinedBehaviorSanitizer with GCC 14: FUZZ_RESULT. The first run stopped at
+UndefinedBehaviorSanitizer with GCC 14: 13 393 920 inputs in 600 seconds (seed
+20260930), no broken promise and no sanitizer report. An earlier run stopped at
 once on a promise of the harness itself that was too strong: that a normalised
 path normalises to itself again. A file may be named `%2e%2e` (requested as
 `%252e%252e`), which is decoded once, rightly, and would decode to `..` a
@@ -515,9 +516,10 @@ blocking, inside the accept loop. `SSL_CTX_set_alpn_protos` (a client-side call)
 was used on the server context, so no ALPN was ever selected.
 
 **Build.** `gcc -O2 ... -o sbin/uwebserver native/uwebserver/uwebserver.c -lssl -lcrypto -lpthread -lm`,
-by hand. The binary found in the checkout was made that way with GCC 11.5 (EL
-9) at v0.0.4.30: a position-dependent executable (`EXEC`, not PIE), partial
-RELRO, no immediate binding, no stack protector and no `_FORTIFY_SOURCE`.
+by hand. The committed binary had been made that way with GCC 11.5 (EL 9) at
+v0.0.4.30 and not since, so releases 0.0.4.31 to 0.0.4.41 carried it: a
+position-dependent executable (`EXEC`, not PIE), partial RELRO, no immediate
+binding, no stack protector and no `_FORTIFY_SOURCE`.
 
 **Tests.** `tests/pipelining.php` (six cases, against a server started by hand)
 and the three about flags in `tests/unit-moved-programs.php`. None ran
