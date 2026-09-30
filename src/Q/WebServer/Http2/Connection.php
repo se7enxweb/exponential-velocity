@@ -106,6 +106,22 @@ class Q_WebServer_Http2_Connection
 		'idleSeconds' => 120,
 	);
 
+	/**
+	 * The largest request body the application accepts, in bytes; 0 for no
+	 * limit other than limits['bodySize']. The server sets it from
+	 * post_max_size, as HTTP/1.1 already applied it.
+	 *
+	 * A body over it is answered 413 on its own stream, which is then reset
+	 * with NO_ERROR so the client stops sending (RFC 9113 section 8.1); the
+	 * connection and every other stream on it carry on. Without it a body
+	 * over post_max_size was held whole and handed to a worker, and came back
+	 * a 502.
+	 *
+	 * @property $maxRequestBody
+	 * @type {integer}
+	 */
+	public $maxRequestBody = 0;
+
 	/** @var integer Streams opened on this connection, ever. */
 	public $streamsOpened = 0;
 
@@ -556,7 +572,60 @@ class Q_WebServer_Http2_Connection
 		if ($this->streams[$stream]['endStream']) {
 			return $this->dispatch($stream);
 		}
+		// A body announced larger than the application accepts is refused
+		// before any of it is kept.
+		if ($this->maxRequestBody > 0) {
+			foreach ((array) $list as $pair) {
+				if ($pair[0] === 'content-length' and ctype_digit((string) $pair[1])
+					and (int) $pair[1] > $this->maxRequestBody
+				) {
+					return $this->refuseBody($stream);
+				}
+			}
+		}
 		return true;
+	}
+
+	/**
+	 * Answer a stream whose body is too large with 413, and ask the client to
+	 * stop sending it: RST_STREAM with NO_ERROR once the answer is out, as
+	 * RFC 9113 section 8.1 describes for a response sent before the request
+	 * is complete. Only this stream ends; the connection carries on.
+	 *
+	 * @method refuseBody
+	 * @param {integer} $stream
+	 * @return {boolean}
+	 */
+	protected function refuseBody($stream)
+	{
+		$this->streams[$stream]['refused'] = true;
+		$this->streams[$stream]['body'] = '';
+		$this->streams[$stream]['resetWhenSent'] = true;
+		$this->respond($stream, array(
+			'status' => 413,
+			'headers' => array('content-type' => 'text/plain; charset=utf-8'),
+			'body' => 'Payload Too Large',
+		));
+		return true;
+	}
+
+	/**
+	 * Credit the connection's receive window for DATA that is not kept -- a
+	 * stream already answered, reset or refused. Those bytes still count
+	 * against the connection window (RFC 9113 section 6.9), and without the
+	 * credit a connection that had discarded enough of them stopped
+	 * receiving anything at all.
+	 *
+	 * @method creditDiscarded
+	 * @param {array} $frame
+	 */
+	protected function creditDiscarded($frame)
+	{
+		$F = 'Q_WebServer_Http2_Frame';
+		$size = strlen($frame['payload']);
+		if ($size) {
+			$this->write($F::build($F::WINDOW_UPDATE, 0, 0, $F::uint32($size)));
+		}
 	}
 
 	/**
@@ -570,7 +639,10 @@ class Q_WebServer_Http2_Connection
 	{
 		$F = 'Q_WebServer_Http2_Frame';
 		$stream = $frame['stream'];
-		if (!isset($this->streams[$stream])) return true;
+		if (!isset($this->streams[$stream]) or !empty($this->streams[$stream]['refused'])) {
+			$this->creditDiscarded($frame);
+			return true;
+		}
 
 		$payload = $F::unpad($frame['payload'], $frame['flags']);
 		if ($payload === null) {
@@ -579,6 +651,15 @@ class Q_WebServer_Http2_Connection
 		}
 
 		$this->streams[$stream]['body'] .= $payload;
+
+		// Over the application's limit -- a body sent without a
+		// content-length, or longer than it said: refused on this stream.
+		if ($this->maxRequestBody > 0
+			and strlen($this->streams[$stream]['body']) > $this->maxRequestBody
+		) {
+			$this->creditDiscarded($frame);
+			return $this->refuseBody($stream);
+		}
 
 		// A body is held whole before the application sees it, so its size is
 		// a memory cost this process pays on the peer's say-so.
@@ -929,6 +1010,11 @@ class Q_WebServer_Http2_Connection
 			$this->streams[$stream]['sendWindow'] -= strlen($chunk);
 
 			if ($last) {
+				// A refusal sent while the client was still sending: now that
+				// the whole answer is out, tell it to stop.
+				if (!empty($this->streams[$stream]['resetWhenSent'])) {
+					$this->write($F::build($F::RST_STREAM, 0, $stream, $F::uint32(0)));
+				}
 				$this->streams[$stream]['finished'] = true;
 				unset($this->streams[$stream]);
 				return;

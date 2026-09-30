@@ -985,7 +985,7 @@ class Q_WebServer_Pool
 			$hdr = self::readExact($socket, 4);
 			if ($hdr === false) break;
 			$len = unpack('N', $hdr)[1];
-			if ($len > 10485760) break;
+			if ($len > self::maxRequestFrame()) break;
 			$json = self::readExact($socket, $len);
 			if ($json === false) break;
 			$req = json_decode($json, true);
@@ -1747,8 +1747,38 @@ class Q_WebServer_Pool
 		// afterwards began mid-message. writeFully() completes the record or
 		// reports that it could not, and does not block the parent -- which is
 		// dispatching for every other worker and client at the same time.
+		if (strlen($msg) > self::maxRequestFrame()) {
+			// More than a worker will read. Sent anyway, the worker would
+			// stop reading and exit without a word, and the visitor would get
+			// a 502 for a request that is simply too large. The server's own
+			// size checks normally refuse such a body long before this; this
+			// is what is left when they could not (no post_max_size at all).
+			$this->workers[$index]['busy'] = false;
+			$this->workers[$index]['idleSince'] = microtime(true);
+			unset($this->workerClients[$index], $this->workerResponders[$index],
+				$this->workerScripts[$index], $this->workerBuffers[$index],
+				$this->workerRequestHeaders[$index], $this->workerRequests[$index],
+				$this->workerStarted[$index]);
+			if ($responder) {
+				call_user_func($responder, array('status' => 413,
+					'headers' => array('Content-Type' => 'text/plain; charset=utf-8'),
+					'body' => 'Payload Too Large'));
+			} elseif (is_resource($client)) {
+				Q_WebServer::refuseBody($client, (int) $client);
+			}
+			if ($this->pending) {
+				$next = array_shift($this->pending);
+				$this->sendTo($index, $next[0], $next[1], $next[2], $next[3] ?? null);
+			}
+			return;
+		}
 		$packet = pack('N', strlen($msg)) . $msg;
-		if (!Q_WebServer::writeFully($this->workers[$index]['socket'], $packet)) {
+		// The deadline grows with the frame: two seconds was the whole
+		// allowance for any request, and a large upload handed to a worker
+		// that was reading it the whole time could run past it -- counted as a
+		// dead worker, recycled mid-read, and retried or answered 502.
+		if (!Q_WebServer::writeFully($this->workers[$index]['socket'], $packet,
+			2.0 + strlen($packet) / 10485760)) {
 			// Worker died before receiving the request — recycle and re-queue.
 			// Safe for any method: the worker never had it. The responder goes
 			// back on the queue too: without it a request that arrived over
@@ -2562,6 +2592,29 @@ class Q_WebServer_Pool
 	}
 
 	// ── Wire helpers ─────────────────────────────────────
+
+	/**
+	 * The largest request frame a worker accepts from the parent.
+	 *
+	 * The frame is the request as JSON, and the body inside it grows on the
+	 * way: base64 for binary (4/3), JSON escapes for text (up to 6x for
+	 * control characters). A fixed 10MB cap meant that a binary upload of
+	 * about 7.5MB -- inside the default post_max_size of 8MB -- made the
+	 * worker stop reading and exit, and every larger body allowed by a raised
+	 * post_max_size did the same: the visitor saw a 502. The cap now follows
+	 * the body limit the server enforces, and stays a guard against a
+	 * corrupted length prefix, never a second, smaller body limit.
+	 *
+	 * @method maxRequestFrame
+	 * @static
+	 * @return {integer}
+	 */
+	static function maxRequestFrame()
+	{
+		$limit = class_exists('Q_WebServer', false) ? (int) Q_WebServer::$maxPostSize : 0;
+		if ($limit <= 0) return 1073741824; // no post_max_size: 1GB
+		return max(10485760, 6 * $limit + 1048576);
+	}
 
 	protected static function readExact($sock, $n)
 	{

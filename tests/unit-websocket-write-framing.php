@@ -211,7 +211,8 @@ check('the WebSocket helper delegates rather than keeping a second copy',
 // old check caught a dead worker but treated a short write as a success, which
 // is the case that desynchronises the pipe for every later request.
 check('the pool dispatches requests through writeFully',
-	(bool) preg_match('/Q_WebServer::writeFully\(\$this->workers\[\$index\]\[\x27socket\x27\], \$packet\)/', $poolSrc),
+	// A deadline may follow as a third argument (it grows with the frame).
+	(bool) preg_match('/Q_WebServer::writeFully\(\$this->workers\[\$index\]\[\x27socket\x27\], \$packet\s*[,)]/', $poolSrc),
 	true);
 
 check('the pool no longer writes a request with a bare fwrite',

@@ -737,6 +737,8 @@ class Q_WebServer
 		$conn = new Q_WebServer_Http2_Connection($client, function ($request) use ($key) {
 			return Q_WebServer::http2Request($key, $request);
 		});
+		// The same body limit HTTP/1.1 applies: post_max_size, 0 for none.
+		$conn->maxRequestBody = max(0, (int) self::$maxPostSize);
 		self::$http2[$key] = $conn;
 		$conn->start();
 
@@ -1897,6 +1899,7 @@ class Q_WebServer
 		self::$timeoutWatchers[$key] = Q_Evented::delay($readTimeout, function () use ($key) {
 			Q_WebServer::closeClient($key);
 		});
+		self::$timerKind[$key] = 'head';
 	}
 
 
@@ -2016,21 +2019,226 @@ class Q_WebServer
 		return null;
 	}
 
-	static function requestComplete($buf)
+	static function requestComplete($buf, $key = null)
 	{
 		$sepLen = 0;
 		$headerEnd = self::headerEnd($buf, $sepLen);
 		if ($headerEnd === false) return false;
 		if ($buf[0] !== 'P') return true;   // only POST/PUT/PATCH carry a body
-		if (preg_match('/transfer-encoding:\s*chunked/i', $buf)) {
-			$bodyPart = substr($buf, $headerEnd + $sepLen);
-			return strpos($bodyPart, "\r\n0\r\n") !== false
-				|| strpos($bodyPart, "\n0\n") !== false;
+		// The same reading of the head, and of a chunked body, as
+		// onClientData() makes. When the two disagreed -- a chunked body
+		// whose data contained "\r\n0\r\n" -- this said "complete", the read
+		// was skipped, onClientData() said "not yet", and nothing ever read
+		// the rest.
+		$head = substr($buf, 0, $headerEnd);
+		if (preg_match('/^transfer-encoding:[ \t]*[^\r\n]*chunked/im', $head)) {
+			$scan = self::chunkedScan($key, $buf, $headerEnd + $sepLen);
+			// A malformed or oversized body is "complete" in the sense that
+			// matters here: there is nothing more to wait for before it is
+			// answered.
+			return $scan['error'] or $scan['end'] !== null
+				or (self::$maxPostSize > 0 and $scan['decoded'] > self::$maxPostSize);
 		}
 		$cl = 0;
-		if (preg_match('/content-length:\s*(\d+)/i', $buf, $m)) $cl = (int) $m[1];
+		if (preg_match('/^content-length:[ \t]*(\d+)/im', $head, $m)) $cl = (int) $m[1];
 		if ($cl <= 0) return true;
+		if (self::$maxPostSize > 0 and $cl > self::$maxPostSize) return true;
 		return (strlen($buf) - $headerEnd - $sepLen) >= $cl;
+	}
+
+	/**
+	 * How far a chunked body has arrived: the bytes it decodes to so far,
+	 * and the offset in the buffer just past its end once the last chunk and
+	 * any trailers are in.
+	 *
+	 * Measured incrementally. The buffer only grows while one request is
+	 * being read, so the scan resumes where it stopped rather than walking a
+	 * body of many small chunks from the start on every read. $key is the
+	 * connection whose progress is kept; null scans without keeping any.
+	 *
+	 * @method chunkedScan
+	 * @static
+	 * @param {integer|null} $key
+	 * @param {string} $buf the whole buffer, head included
+	 * @param {integer} $start the offset where the body begins
+	 * @return {array} decoded (int), end (int|null), error (bool)
+	 */
+	static function chunkedScan($key, $buf, $start)
+	{
+		$state = ($key !== null and isset(self::$chunkScans[$key])
+			and self::$chunkScans[$key]['start'] === $start)
+			? self::$chunkScans[$key]
+			: array('start' => $start, 'pos' => $start, 'decoded' => 0,
+				'trailers' => false, 'end' => null, 'error' => false);
+		$len = strlen($buf);
+		while ($state['end'] === null and !$state['error']) {
+			$nl = strpos($buf, "\n", $state['pos']);
+			if ($nl === false) {
+				// A size line or trailer line longer than any real one is not
+				// going to end.
+				if ($len - $state['pos'] > 4096) $state['error'] = true;
+				break;
+			}
+			$line = rtrim(substr($buf, $state['pos'], $nl - $state['pos']), "\r");
+			if ($state['trailers']) {
+				// After the last chunk: trailer fields, ended by an empty line.
+				$state['pos'] = $nl + 1;
+				if ($line === '') $state['end'] = $state['pos'];
+				continue;
+			}
+			// chunk-size [; chunk-ext]
+			$size = trim(strtok($line, ';'));
+			if ($size === '' or strlen($size) > 15 or !ctype_xdigit($size)) {
+				$state['error'] = true;
+				break;
+			}
+			$n = hexdec($size);
+			if ($n === 0) {
+				$state['trailers'] = true;
+				$state['pos'] = $nl + 1;
+				continue;
+			}
+			// Counted as soon as it is announced, so a body is refused on the
+			// chunk that takes it over the limit rather than after it arrives.
+			$dataEnd = $nl + 1 + $n;
+			$state['announced'] = $n;
+			if ($dataEnd + 1 > $len) break;
+			// The chunk's own CRLF (or LF).
+			if ($buf[$dataEnd] === "\r") {
+				if ($dataEnd + 2 > $len) break;
+				if ($buf[$dataEnd + 1] !== "\n") { $state['error'] = true; break; }
+				$state['pos'] = $dataEnd + 2;
+			} elseif ($buf[$dataEnd] === "\n") {
+				$state['pos'] = $dataEnd + 1;
+			} else {
+				$state['error'] = true;
+				break;
+			}
+			$state['decoded'] += $n;
+			unset($state['announced']);
+		}
+		if ($key !== null) self::$chunkScans[$key] = $state;
+		return array(
+			'decoded' => $state['decoded'] + ($state['announced'] ?? 0),
+			'end' => $state['end'],
+			'error' => $state['error'],
+		);
+	}
+
+	/**
+	 * Keep the connection's read deadline right for where the request is.
+	 *
+	 * "head": the headers have Q.webserver.timeout.read seconds from the
+	 * first byte, counted once. "body": the body may take as long as it
+	 * needs, as long as it keeps arriving -- the deadline moves with every
+	 * read. Before, one deadline counted from the connection's accept (or
+	 * the idle timer of a kept-alive connection, which nothing cancelled
+	 * until a request was complete) closed a connection whose upload was
+	 * still arriving, and the client saw a reset part-way through sending.
+	 *
+	 * @method armRequestTimer
+	 * @static
+	 * @param {integer} $key
+	 * @param {string} $kind "head" or "body"
+	 */
+	static function armRequestTimer($key, $kind)
+	{
+		$current = self::$timerKind[$key] ?? null;
+		if ($kind === 'head' and $current === 'head' and isset(self::$timeoutWatchers[$key])) {
+			return;
+		}
+		if (isset(self::$timeoutWatchers[$key])) {
+			Q_Evented::cancel(self::$timeoutWatchers[$key]);
+		}
+		static $readTimeout = null;
+		if ($readTimeout === null) $readTimeout = (float) Q_Config::get('Q', 'webserver', 'timeout', 'read', 30);
+		self::$timerKind[$key] = $kind;
+		self::$timeoutWatchers[$key] = Q_Evented::delay($readTimeout, function () use ($key) {
+			Q_WebServer::closeClient($key);
+		});
+	}
+
+	/**
+	 * Refuse a request body over post_max_size with a 413 the client can
+	 * actually read.
+	 *
+	 * Closing straight after writing the 413 is what the server used to do,
+	 * and with the client still sending, the kernel answers a close() with
+	 * unread data waiting by resetting the connection -- which can destroy
+	 * the 413 before the client has read it. So the same file got a clean
+	 * 413 one time and a reset the next. Now the response says
+	 * "Connection: close", and whatever the client still sends is read and
+	 * thrown away until it stops (it usually stops at once, having read the
+	 * 413), for at most Q.webserver.timeout.linger seconds of silence and
+	 * Q.webserver.timeout.lingerTotal seconds in all. Only then is the
+	 * connection closed.
+	 *
+	 * @method refuseBody
+	 * @static
+	 * @param {resource} $client
+	 * @param {integer} $key
+	 */
+	static function refuseBody($client, $key)
+	{
+		if (isset(self::$timeoutWatchers[$key])) {
+			Q_Evented::cancel(self::$timeoutWatchers[$key]);
+			unset(self::$timeoutWatchers[$key]);
+		}
+		unset(self::$chunkScans[$key]);
+		self::sendResponse($client, 413, 'Payload Too Large',
+			'text/plain; charset=utf-8', array('Connection' => 'close'));
+		if (!is_resource($client) or !isset(self::$clients[$key])) {
+			self::closeClient($key);
+			return;
+		}
+		$total = (float) Q_Config::get('Q', 'webserver', 'timeout', 'lingerTotal', 30);
+		self::$clientState[$key] = 'draining';
+		self::$buffers[$key] = '';
+		self::$drainUntil[$key] = microtime(true) + $total;
+		self::$timerKind[$key] = 'linger';
+		self::armLingerTimer($key);
+	}
+
+	/**
+	 * Read and discard what a refused client is still sending; close when it
+	 * stops, goes quiet, or has had its time.
+	 *
+	 * @method drainClient
+	 * @static
+	 * @param {integer} $key
+	 */
+	static function drainClient($key)
+	{
+		$client = self::$clients[$key] ?? null;
+		if (!is_resource($client)) {
+			self::closeClient($key);
+			return;
+		}
+		for ($reads = 0; $reads < 1024; ++$reads) {
+			$chunk = @fread($client, 65536);
+			if ($chunk === false or ($chunk === '' and feof($client))) {
+				self::closeClient($key);
+				return;
+			}
+			if ($chunk === '') break;
+		}
+		if (microtime(true) >= (self::$drainUntil[$key] ?? 0)) {
+			self::closeClient($key);
+			return;
+		}
+		self::armLingerTimer($key);
+	}
+
+	/** @ignore */
+	protected static function armLingerTimer($key)
+	{
+		if (isset(self::$timeoutWatchers[$key])) {
+			Q_Evented::cancel(self::$timeoutWatchers[$key]);
+		}
+		$idle = (float) Q_Config::get('Q', 'webserver', 'timeout', 'linger', 5);
+		$left = (self::$drainUntil[$key] ?? 0) - microtime(true);
+		self::$timeoutWatchers[$key] = Q_Evented::delay(max(0.01, min($idle, $left)),
+			function () use ($key) { Q_WebServer::closeClient($key); });
 	}
 
 	static function onClientData($client)
@@ -2052,6 +2260,13 @@ class Q_WebServer
 			return;
 		}
 
+		// A request that was refused is being read to its end and thrown away,
+		// so the client is not reset while the refusal is on its way to it.
+		if ((self::$clientState[$key] ?? '') === 'draining') {
+			self::drainClient($key);
+			return;
+		}
+
 		self::$clientState[$key] = 'reading';
 
 		// Check if we already have a complete request from pipelining.
@@ -2063,7 +2278,7 @@ class Q_WebServer
 		// -- so any body larger than one 64KB read was silently truncated.
 		// Only skip the read when the FULL body is already buffered.
 		$buf = self::$buffers[$key] ?? '';
-		$havePipelined = ($buf !== '' && self::requestComplete($buf));
+		$havePipelined = ($buf !== '' && self::requestComplete($buf, $key));
 
 		if (!$havePipelined) {
 			$chunk = @fread($client, 65536);
@@ -2089,7 +2304,15 @@ class Q_WebServer
 		$sepLen = 0;
 		$headerEnd = self::headerEnd($buf, $sepLen);
 		if ($headerEnd === false) {
-			if (strlen($buf) > 65536) self::closeClient($key);
+			if (strlen($buf) > 65536) {
+				self::closeClient($key);
+				return;
+			}
+			// The first bytes of a request on a kept-alive connection end
+			// its idle wait: from here the headers have the read timeout to
+			// arrive, counted once, so a client trickling them in cannot hold
+			// the connection open for ever.
+			self::armRequestTimer($key, 'head');
 			return;
 		}
 
@@ -2105,24 +2328,55 @@ class Q_WebServer
 
 		// Wait for complete body on POST/PUT/PATCH
 		$firstChar = $buf[0];
+		$chunkedEnd = null;
+		$bodyLen = 0;
 		if ($firstChar === 'P') { // POST, PUT, PATCH all start with P
+			// Read from the head only, and only as whole header lines: the
+			// body is the client's data, and a body that merely contains the
+			// text "content-length: 99999999" or "transfer-encoding: chunked"
+			// -- an uploaded log file, say -- used to be read as framing.
+			$head = substr($buf, 0, $headerEnd);
+			$isChunked = (bool) preg_match('/^transfer-encoding:[ \t]*[^\r\n]*chunked/im', $head);
 			$cl = 0;
-			$isChunked = (bool) preg_match('/transfer-encoding:\s*chunked/i', $buf);
-			if (preg_match('/content-length:\s*(\d+)/i', $buf, $m)) {
+			if (preg_match('/^content-length:[ \t]*(\d+)/im', $head, $m)) {
 				$cl = (int) $m[1];
 			}
-			// Respect PHP's post_max_size (default 8M)
-			if ($cl > self::$maxPostSize) {
-				self::sendResponse($client, 413, 'Payload Too Large');
-				self::closeClient($key);
+			// Respect PHP's post_max_size (default 8M), as soon as the head
+			// says how big the body is, before any of the body is kept. 0 is
+			// PHP's own spelling of "no limit".
+			$limit = self::$maxPostSize;
+			if ($limit > 0 and $cl > $limit) {
+				self::refuseBody($client, $key);
 				return;
 			}
 			if ($isChunked) {
-				// Chunked: wait for terminating 0\r\n\r\n
-				$bodyPart = substr($buf, $headerEnd + $sepLen);
-				if (strpos($bodyPart, "\r\n0\r\n") === false && strpos($bodyPart, "\n0\n") === false) return;
+				// A chunked body says its size one chunk at a time, so it is
+				// measured as it arrives: refused the moment it passes the
+				// limit, and complete exactly where its last chunk and
+				// trailers end -- not wherever "\r\n0\r\n" first happens to
+				// appear inside the data.
+				$scan = self::chunkedScan($key, $buf, $headerEnd + $sepLen);
+				if ($scan['error']) {
+					self::sendResponse($client, 400, 'Bad Request: malformed chunked body',
+						'text/plain; charset=utf-8', array('Connection' => 'close'));
+					self::closeClient($key);
+					return;
+				}
+				if ($limit > 0 and $scan['decoded'] > $limit) {
+					self::refuseBody($client, $key);
+					return;
+				}
+				if ($scan['end'] === null) {
+					self::armRequestTimer($key, 'body');
+					return;
+				}
+				$chunkedEnd = $scan['end'];
 			} elseif ($cl > 0) {
-				if (strlen($buf) - $headerEnd - $sepLen < $cl) return;
+				if (strlen($buf) - $headerEnd - $sepLen < $cl) {
+					self::armRequestTimer($key, 'body');
+					return;
+				}
+				$bodyLen = $cl;
 			}
 		}
 
@@ -2131,17 +2385,12 @@ class Q_WebServer
 			Q_Evented::cancel(self::$timeoutWatchers[$key]);
 			unset(self::$timeoutWatchers[$key]);
 		}
+		unset(self::$timerKind[$key], self::$chunkScans[$key]);
 
-		// Calculate consumed bytes for pipelining support
-		$headerEnd = strpos($buf, "\r\n\r\n");
-		$bodyLen = 0;
-		$firstChar = $buf[0];
-		if ($firstChar === 'P') { // POST/PUT/PATCH
-			if (preg_match('/content-length:\s*(\d+)/i', $buf, $clm)) {
-				$bodyLen = (int) $clm[1];
-			}
-		}
-		$consumed = $headerEnd + 4 + $bodyLen;
+		// Calculate consumed bytes for pipelining support. A chunked body
+		// ends where its scan found the end; counting only the head left the
+		// whole body behind as if it were the next request on the connection.
+		$consumed = $chunkedEnd !== null ? $chunkedEnd : $headerEnd + $sepLen + $bodyLen;
 
 		$start = microtime(true);
 		$parsed = self::parseRequest($buf);
@@ -2323,6 +2572,10 @@ class Q_WebServer
 					Q_WebServer::closeClient($key);
 				}
 			);
+			// Replaced by the read timeout as soon as the next request's
+			// first bytes arrive (armRequestTimer), so an upload that begins
+			// just before the idle time is up is not cut off mid-body.
+			self::$timerKind[$key] = 'keepalive';
 
 			// If there's already a complete request in the buffer, process it now
 			if ($leftover !== '' && strpos($leftover, "\r\n\r\n") !== false) {
@@ -6685,7 +6938,8 @@ WORKER;
 			unset(self::$clients[$key]);
 		}
 		unset(self::$buffers[$key], self::$clientInfo[$key],
-			self::$keepAliveCount[$key], self::$clientState[$key]);
+			self::$keepAliveCount[$key], self::$clientState[$key],
+			self::$timerKind[$key], self::$chunkScans[$key], self::$drainUntil[$key]);
 	}
 
 	/**
@@ -6735,6 +6989,12 @@ WORKER;
 	private static $clientInfo = array();      // key => [ip, connectTime]
 	static $keepAliveCount = array();   // key => int
 	private static $timeoutWatchers = array();  // key => evented timer id
+	/** @var array key => what the timer above is waiting for: head, body, keepalive, linger */
+	private static $timerKind = array();
+	/** @var array key => how far a chunked request body has been scanned */
+	private static $chunkScans = array();
+	/** @var array key => when a refused request's connection is closed at the latest */
+	private static $drainUntil = array();
 	static $clientState = array();     // key => 'reading'|'waiting'|'idle'
 	private static $acceptWatcher = null;
 	private static $running = false;
