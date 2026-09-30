@@ -1,0 +1,332 @@
+.\" uwebserver(1) -- the manual page of uwebserver, Exponential Velocity.
+.\" Kept equal to `uwebserver --help` by tests/unit-uwebserver-docs.php.
+.TH UWEBSERVER 1 "2026-09-30" "Exponential Velocity 0.0.4.42" "User Commands"
+.SH NAME
+uwebserver \- a small web server: static files or built-in answers, over HTTP/1.1 and HTTPS
+.SH SYNOPSIS
+.B uwebserver
+[\fIOPTION\fR]...
+.br
+.B uwebserver
+\fB\-\-root\fR=\fIDIR\fR [\fIOPTION\fR]...
+.br
+.B uwebserver
+\fB\-\-config\fR=\fIFILE\fR \fB\-\-check\fR
+.SH DESCRIPTION
+.B uwebserver
+answers HTTP/1.1 and HTTP/1.0, over TCP and over TLS, from one event loop per
+process. With
+.BR \-\-root ,
+it serves the files under a directory: GET and HEAD, conditional requests, one
+byte range, precompressed
+.I .gz
+files and, when asked for, directory listings. Without it, it answers
+.IR / ,
+.I /json
+and
+.I /health
+itself, as a baseline for benchmarks of Exponential Velocity.
+.PP
+It listens on
+.B 127.0.0.1:8000
+unless told otherwise, and never on every interface unless that is asked for.
+As root it serves only with
+.B \-\-user
+(to which it changes once the ports are open) or
+.BR \-\-allow\-root .
+.PP
+Every long option also works with one dash
+.RB ( \-root=DIR ),
+a value may follow as
+.BI \-\- name = value
+or as the next word, one\-letter options bundle
+.RB ( \-qd ),
+and
+.B \-\-
+ends the options. Every switch has a
+.BI \-\-no\- name
+form. Long names are never abbreviated. A
+.I SIZE
+may end in k, m or g (powers of 1024); a number of
+.I SECONDS
+of 0 means no limit.
+.SH OPTIONS
+.SS General
+.TP
+.BR \-h ", " \-\-help
+Print the usage and exit.
+.TP
+.BR \-V ", " \-\-version
+Print the version and exit. \fB\-v\fR, \fB\-version\fR, \fB\-\-copyright\fR and \fB\-copyright\fR do the same.
+.TP
+.B \-\-about
+Print the version with the build details and exit.
+.TP
+.BR \-c ", " \-\-config =\fIFILE\fR
+Read settings from \fIFILE\fR (see \fBCONFIGURATION FILE\fR).
+.TP
+.BR \-t ", " \-\-check ", " \-\-test\-config
+Check the configuration and everything the start needs (the root, the
+certificate and key, the logs, the user), print the addresses it would serve
+on, serve nothing, and exit.
+.TP
+.B \-\-print\-config
+Print every setting in effect, in the configuration file format, and exit.
+.TP
+.BR \-q ", " \-\-quiet
+Log errors only.
+.TP
+.B \-\-verbose
+Log connection events too: timeouts, malformed requests, refused connections.
+.SS Listening
+.TP
+.BR \-l ", " \-\-listen =[\fIADDR\fR:]\fIPORT\fR
+Serve HTTP on \fIADDR\fR:\fIPORT\fR. Repeatable. \fIADDR\fR is a numeric IPv4
+address, an IPv6 address in brackets (\fB[::1]\fR; an IPv6 listener takes IPv6
+only), \fB*\fR for every IPv4 address, or \fBlocalhost\fR; without it, the
+\fB\-\-bind\fR address.
+.TP
+.BR \-b ", " \-\-bind =\fIADDR\fR
+The address of \fB\-\-port\fR and \fB\-\-tls\-port\fR (127.0.0.1).
+.TP
+.BR \-p ", " \-\-port =\fIPORT\fR
+Serve HTTP on the \fB\-\-bind\fR address at \fIPORT\fR (8000). The HTTP
+listener of \fB\-\-bind\fR:\fB\-\-port\fR is there when either is given, or
+when no \fB\-\-listen\fR and no \fB\-\-tls\-listen\fR are.
+.TP
+.BR \-\-tls\-listen =[\fIADDR\fR:]\fIPORT\fR
+Serve HTTPS there. Repeatable. Needs \fB\-\-cert\fR and \fB\-\-key\fR.
+.TP
+.BR \-\-tls\-port =\fIPORT\fR
+Serve HTTPS on the \fB\-\-bind\fR address at \fIPORT\fR (8443, which is used
+when \fB\-\-cert\fR is given without a \fB\-\-tls\-listen\fR).
+.TP
+.B \-\-reuse\-port
+Let other servers share the ports (SO_REUSEPORT). Off: a port in use is an
+error, never shared.
+.TP
+.BR \-\-backlog =\fIN\fR
+Connections waiting to be accepted (511).
+.SS Content
+.TP
+.BR \-r ", " \-\-root =\fIDIR\fR
+Serve the files under \fIDIR\fR. Nothing outside it is ever reached: files are
+opened beneath it (openat2, RESOLVE_BENEATH), a path with a \fB..\fR segment,
+an encoded \fB/\fR or NUL is refused, and so is a link that leads out.
+Without \fB\-\-root\fR, the built-in answers.
+.TP
+.BR \-\-index =\fINAMES\fR
+The files that answer for a directory, separated by commas (index.html).
+.TP
+.B \-\-directory\-listing
+List a directory that has no index file (off: 403).
+.TP
+.B \-\-hidden\-files
+Serve names that start with a dot (off: they answer 404, so \fI.git\fR or
+\fI.env\fR are never served by mistake).
+.TP
+.BR \-\-symlinks =\fBinside\fR|\fBnever\fR
+Follow symbolic links that stay inside \fIDIR\fR (inside; a link with an
+absolute target is resolved from / and so never is), or none at all.
+.TP
+.BR \-\-mime\-types =\fIFILE\fR
+More media types, in the \fImime.types\fR format; they win over the built-in
+table.
+.TP
+.BR \-\-default\-type =\fITYPE\fR
+The type of a file whose extension is not known (application/octet-stream).
+.TP
+.BR \-\-charset =\fINAME\fR
+Added to text types (utf-8). Empty: none.
+.TP
+.BR \-\-cache\-control =\fIVALUE\fR
+The Cache-Control header of files (none).
+.TP
+.B \-\-etag
+Send ETag and answer If-None-Match and If-Range with it (on).
+.TP
+.B \-\-gzip\-static
+Send \fIFILE\fR.gz, with Content-Encoding: gzip, to a client that accepts gzip
+(off).
+.TP
+.BR \-H ", " \-\-header =\(aq\fINAME\fR: \fIVALUE\fR\(aq
+Add a header to every response. Repeatable. Headers the server sets itself
+(Content-Length, Connection, Date ...) cannot be given.
+.TP
+.BR \-\-server\-name =\fINAME\fR
+The value of the Server header (uwebserver; no version is ever sent).
+.TP
+.B \-\-server\-header
+Send a Server header (on).
+.SS Limits and timeouts
+.TP
+.BR \-w ", " \-\-workers =\fIN\fR
+Worker processes (1, at most 256). A worker that ends is replaced; workers
+that keep ending stop the server.
+.TP
+.BR \-\-max\-connections =\fIN\fR
+Open connections per worker (1024). More are closed at once.
+.TP
+.BR \-\-max\-requests =\fIN\fR
+Requests per connection (1000); 0: no limit.
+.TP
+.BR \-\-max\-header\-size =\fISIZE\fR
+The request line and headers together (8k; 1k to 1m). Larger: 431.
+.TP
+.BR \-\-max\-uri\-length =\fISIZE\fR
+The request target (4k). Longer: 414.
+.TP
+.BR \-\-max\-body\-size =\fISIZE\fR
+A request body, which is read and discarded (1m). Larger: 413.
+.TP
+.BR \-\-header\-timeout =\fISECONDS\fR
+To receive a whole request head, from its first byte (10).
+.TP
+.BR \-\-read\-timeout =\fISECONDS\fR
+Between reads of a request body (30).
+.TP
+.BR \-\-write\-timeout =\fISECONDS\fR
+Without progress sending a response (30).
+.TP
+.BR \-\-keepalive\-timeout =\fISECONDS\fR
+Idle between two requests of a connection (5); 0: no keep-alive.
+.TP
+.BR \-\-tls\-handshake\-timeout =\fISECONDS\fR
+To complete a TLS handshake (10).
+.SS TLS
+.TP
+.BR \-\-cert =\fIFILE\fR
+The certificate, PEM; it may hold the chain after it.
+.TP
+.BR \-\-key =\fIFILE\fR
+Its private key, PEM. Refused when other users may read or change it, or its
+group may change it; a warning when its group may read it.
+.TP
+.BR \-\-chain =\fIFILE\fR
+More chain certificates, PEM.
+.TP
+.BR \-\-tls\-min\-version =\fB1.2\fR|\fB1.3\fR
+The oldest TLS version accepted (1.2).
+.TP
+.BR \-\-tls\-ciphers =\fILIST\fR
+TLS 1.2 ciphers, an OpenSSL cipher list (default: ECDHE key exchange with
+AES-GCM or ChaCha20-Poly1305 only).
+.TP
+.BR \-\-tls\-ciphersuites =\fILIST\fR
+TLS 1.3 suites (OpenSSL's default).
+.SS Logging
+.TP
+.BR \-\-access\-log =\fIFILE\fR|\fB\-\fR|\fBoff\fR
+Log each request to \fIFILE\fR, or to standard output with \fB\-\fR (off).
+Bytes a client sent are escaped (\ex\fIHH\fR in text, \eu00\fIHH\fR in JSON),
+so a request can never add a line or a field.
+.TP
+.BR \-\-access\-log\-format =\fIFORMAT\fR
+\fBcommon\fR, \fBcombined\fR or \fBjson\fR (combined).
+.TP
+.BR \-\-error\-log =\fIFILE\fR|\fB\-\fR
+Log messages to \fIFILE\fR, or to standard error with \fB\-\fR (\-).
+Files are created with mode 0640 and never through a symbolic link.
+.SS Process
+.TP
+.BR \-d ", " \-\-daemon
+Run in the background. The command returns once the server serves, with 0, or
+with 1 when it could not start.
+.TP
+.BR \-f ", " \-\-foreground
+Run in the foreground (the default).
+.TP
+.BR \-\-pid\-file =\fIFILE\fR
+Write the process id to \fIFILE\fR and hold a lock on it while running; a
+second server with the same file does not start.
+.TP
+.BR \-u ", " \-\-user =\fIUSER\fR
+Run as \fIUSER\fR (a name or a number, not root) once the ports are open and
+the certificate, key and logs are opened. Needs root.
+.TP
+.BR \-g ", " \-\-group =\fIGROUP\fR
+Run as \fIGROUP\fR (default: the group of \fIUSER\fR). Supplementary groups
+are dropped.
+.TP
+.BR \-\-chroot =\fIDIR\fR
+Change the root directory to \fIDIR\fR before dropping to \fIUSER\fR. Needs
+root. \fB\-\-root\fR is opened before, so it may lie inside \fIDIR\fR.
+.TP
+.B \-\-allow\-root
+Serve as root without \fB\-\-user\fR. Refused otherwise.
+.SH CONFIGURATION FILE
+One setting per line: the long name of an option without its dashes, then its
+value, as \fIname\fR = \fIvalue\fR or \fIname value\fR; a switch alone, as
+\fIname\fR = yes|no, or as \fBno\-\fR\fIname\fR. A line whose first non-blank
+character is \fB#\fR is a comment. A value may be quoted to keep blanks at its
+ends. Repeatable settings (\fBlisten\fR, \fBtls\-listen\fR, \fBheader\fR) are
+given once per value.
+.PP
+The file is read first, then the command line; a repeatable option given on
+the command line replaces the file's values. \fB\-\-help\fR, \fB\-\-version\fR,
+\fB\-\-config\fR, \fB\-\-check\fR and \fB\-\-print\-config\fR are not settings.
+An unknown setting or a bad value stops the program with the file and line.
+\fB\-\-print\-config\fR prints a file that reads back to the same settings.
+.PP
+.nf
+    # /etc/uwebserver.conf
+    root = /srv/www
+    listen = 127.0.0.1:8000
+    listen = [::1]:8000
+    user = www
+    access\-log = /var/log/uwebserver/access.log
+    gzip\-static
+    header = X\-Frame\-Options: DENY
+.fi
+.SH ENVIRONMENT
+.TP
+.B UWEBSERVER_CONFIG
+The configuration file, when \fB\-\-config\fR is not given. No other variable
+changes what the server does: an inherited environment must not change what
+it exposes.
+.SH SIGNALS
+.TP
+.BR SIGTERM ", " SIGINT ", " SIGHUP
+Stop: close the ports, close idle connections, let those in the middle of a
+request finish (for at most 10 seconds), then exit 0. With \fB\-\-workers\fR,
+the parent stops the workers the same way.
+.SH EXIT STATUS
+.TP
+.B 0
+Success; with \fB\-\-check\fR, the configuration is valid.
+.TP
+.B 1
+The server could not start (a port in use, a file it cannot open, a key that
+does not match, root without \fB\-\-user\fR), stopped on an error, or
+\fB\-\-check\fR found a problem.
+.TP
+.B 2
+A usage error: an unknown option, a missing or bad value, options that
+contradict each other, or a bad configuration file. Nothing was started.
+.SH EXAMPLES
+.TP
+.B uwebserver \-\-root=/srv/www
+The files of /srv/www on http://127.0.0.1:8000/.
+.TP
+.B uwebserver \-r /srv/www \-l \(aq*:80\(aq \-u www \-\-access\-log=/var/log/uweb.log
+Every IPv4 address, port 80, as the user www, with an access log.
+.TP
+.B uwebserver \-r . \-\-tls\-listen=8443 \-\-cert=site.crt \-\-key=site.key \-\-tls\-min\-version=1.3
+HTTPS with TLS 1.3 only on 127.0.0.1:8443, beside HTTP on 127.0.0.1:8000.
+.TP
+.B uwebserver \-\-port=8081 \-\-workers=4
+The built-in answers, for a benchmark, from four processes.
+.SH FILES
+.TP
+.I docs/uwebserver.md
+The full documentation, in the Exponential Velocity tree.
+.SH SEE ALSO
+.BR openat2 (2),
+.BR sendfile (2),
+.BR ciphers (1ssl)
+.SH COPYRIGHT
+Copyright (C) 2026 7x (se7enx.com) \-\- Exponential Velocity.
+Copyright (C) 2024\-2026 Qbix, Inc.
+License MIT: <https://opensource.org/license/mit>.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.

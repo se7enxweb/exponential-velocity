@@ -179,10 +179,10 @@ sbin/qbixserver.php      the server
 sbin/qbixctl.php         control, the apachectl way
 sbin/qbixconsole.php     every console command
 sbin/qbixserver.phar     the server as one archive (committed; what the packages run)
-sbin/uwebserver          the small C web server for benchmarks and tests (built)
+sbin/uwebserver          the small C web server: static files, benchmarks (built; docs/uwebserver.md)
 bin/qshell.php           the shell at a terminal, and the server's shell runner
 bin/qbix-appinfo.php     what a Qbix application is made of, for the panel
-native/uwebserver/       uwebserver.c and its headers: source, not a program
+native/uwebserver/       uwebserver.c, its headers, Makefile, bash completion: source, not a program
 ```
 
 Each program reads the engine's files from the directory above its own

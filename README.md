@@ -202,7 +202,7 @@ with the sources.
 | control, the `apachectl` way | `sbin/qbixctl.php` | `qbixctl.php` |
 | the console's commands | `sbin/qbixconsole.php` | `qbixconsole.php` |
 | the server as one archive | `sbin/qbixserver.phar` | `bin/qbixserver.phar` (the same file) |
-| the small C server for benchmarks | `sbin/uwebserver` (source: `native/uwebserver/`) | `bin/uwebserver` |
+| the small C server: static files, and a baseline for benchmarks ([docs/uwebserver.md](docs/uwebserver.md)) | `sbin/uwebserver` (source: `native/uwebserver/`; `make -C native/uwebserver`) | `bin/uwebserver` |
 | the shell | `bin/qshell.php` | `qshell.php` |
 | an application's make-up, for the panel | `bin/qbix-appinfo.php` | — |
 

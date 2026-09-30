@@ -164,28 +164,28 @@ static const UwOpt uw_options[] = {
     { "about",          0,   C,     OPT_ABOUT,         NULL, "print the version with build details and exit" },
     { "copyright",      0,   C | H, OPT_ABOUT,         NULL, NULL },
     { "",               'v', C | H, OPT_VERSION,       NULL, NULL },
-    { "config",         'c', C | V, OPT_CONFIG,        "FILE", "read settings from FILE (the long names, without --)" },
-    { "check",          't', C,     OPT_CHECK,         NULL, "check the configuration and exit (also --test-config)" },
+    { "config",         'c', C | V, OPT_CONFIG,        "FILE", "read settings from FILE (see the manual)" },
+    { "check",          't', C,     OPT_CHECK,         NULL, "check the configuration, serve nothing, exit" },
     { "test-config",    0,   C | H, OPT_CHECK,         NULL, NULL },
-    { "print-config",   0,   C,     OPT_PRINT_CONFIG,  NULL, "print the settings in effect as a config file, and exit" },
+    { "print-config",   0,   C,     OPT_PRINT_CONFIG,  NULL, "print the settings as a config file and exit" },
     { "quiet",          'q', 0,     OPT_QUIET,         NULL, "log errors only" },
-    { "verbose",        0,   0,     OPT_VERBOSE,       NULL, "log connection events too (timeouts, bad requests)" },
+    { "verbose",        0,   0,     OPT_VERBOSE,       NULL, "log connection events too (timeouts...)" },
 
-    { "listen",         'l', V | R, OPT_LISTEN,        "[ADDR:]PORT", "serve HTTP there; repeatable. ADDR: IPv4, [IPv6], * or localhost" },
+    { "listen",         'l', V | R, OPT_LISTEN,        "[ADDR:]PORT", "serve HTTP there (repeatable; ADDR: see below)" },
     { "bind",           'b', V,     OPT_BIND,          "ADDR", "the address of --port and --tls-port (127.0.0.1)" },
     { "port",           'p', V,     OPT_PORT,          "PORT", "serve HTTP on ADDR:PORT (8000)" },
-    { "tls-listen",     0,   V | R, OPT_TLS_LISTEN,    "[ADDR:]PORT", "serve HTTPS there; repeatable (needs --cert and --key)" },
-    { "tls-port",       0,   V,     OPT_TLS_PORT,      "PORT", "serve HTTPS on ADDR:PORT (8443, when --cert is given)" },
-    { "reuse-port",     0,   S,     OPT_REUSE_PORT,    NULL, "share the ports with other servers (SO_REUSEPORT; off)" },
+    { "tls-listen",     0,   V | R, OPT_TLS_LISTEN,    "[ADDR:]PORT", "serve HTTPS there (repeatable; needs --cert)" },
+    { "tls-port",       0,   V,     OPT_TLS_PORT,      "PORT", "serve HTTPS on ADDR:PORT (8443 with --cert)" },
+    { "reuse-port",     0,   S,     OPT_REUSE_PORT,    NULL, "let other servers share the ports (off)" },
     { "backlog",        0,   V,     OPT_BACKLOG,       "N", "connections waiting to be accepted (511)" },
 
-    { "root",           'r', V,     OPT_ROOT,          "DIR", "serve the files under DIR (without: the built-in answers)" },
-    { "index",          0,   V,     OPT_INDEX,         "NAMES", "the files that answer for a directory, by commas (index.html)" },
+    { "root",           'r', V,     OPT_ROOT,          "DIR", "serve the files under DIR (default: built-in)" },
+    { "index",          0,   V,     OPT_INDEX,         "NAMES", "index files, by commas (index.html)" },
     { "directory-listing", 0, S,    OPT_DIRLIST,       NULL, "list a directory that has no index file (off)" },
     { "hidden-files",   0,   S,     OPT_HIDDEN,        NULL, "serve names that start with a dot (off: 404)" },
-    { "symlinks",       0,   V,     OPT_SYMLINKS,      "inside|never", "follow links that stay inside DIR, or none (inside)" },
+    { "symlinks",       0,   V,     OPT_SYMLINKS,      "inside|never", "follow links inside DIR, or none (inside)" },
     { "mime-types",     0,   V,     OPT_MIME,          "FILE", "more media types, in the mime.types format" },
-    { "default-type",   0,   V,     OPT_DEFAULT_TYPE,  "TYPE", "for unknown extensions (application/octet-stream)" },
+    { "default-type",   0,   V,     OPT_DEFAULT_TYPE,  "TYPE", "for other files (application/octet-stream)" },
     { "charset",        0,   V,     OPT_CHARSET,       "NAME", "added to text types (utf-8; empty: none)" },
     { "cache-control",  0,   V,     OPT_CACHE_CONTROL, "VALUE", "the Cache-Control header of files (none)" },
     { "etag",           0,   S,     OPT_ETAG,          NULL, "send ETag and answer If-None-Match (on)" },
@@ -206,20 +206,20 @@ static const UwOpt uw_options[] = {
     { "keepalive-timeout", 0, V,    OPT_KEEPALIVE_TIMEOUT, "SECONDS", "idle between requests; 0: no keep-alive (5)" },
     { "tls-handshake-timeout", 0, V, OPT_HANDSHAKE_TIMEOUT, "SECONDS", "to complete a TLS handshake (10)" },
 
-    { "cert",           0,   V,     OPT_CERT,          "FILE", "the certificate for HTTPS (PEM; may hold the chain)" },
-    { "key",            0,   V,     OPT_KEY,           "FILE", "its private key (PEM; must not be readable by others)" },
+    { "cert",           0,   V,     OPT_CERT,          "FILE", "the certificate, PEM, may hold the chain" },
+    { "key",            0,   V,     OPT_KEY,           "FILE", "its private key, PEM, readable by no other user" },
     { "chain",          0,   V,     OPT_CHAIN,         "FILE", "more chain certificates (PEM)" },
     { "tls-min-version", 0,  V,     OPT_TLS_MIN,       "1.2|1.3", "the oldest TLS version accepted (1.2)" },
-    { "tls-ciphers",    0,   V,     OPT_TLS_CIPHERS,   "LIST", "TLS 1.2 ciphers, an OpenSSL list (ECDHE with AEAD)" },
+    { "tls-ciphers",    0,   V,     OPT_TLS_CIPHERS,   "LIST", "TLS 1.2 ciphers, as OpenSSL lists them" },
     { "tls-ciphersuites", 0, V,     OPT_TLS_SUITES,    "LIST", "TLS 1.3 suites (OpenSSL's default)" },
 
-    { "access-log",     0,   V,     OPT_ACCESS_LOG,    "FILE|-|off", "log each request to FILE, - for standard output (off)" },
+    { "access-log",     0,   V,     OPT_ACCESS_LOG,    "FILE|-|off", "log requests to FILE, - is standard output (off)" },
     { "access-log-format", 0, V,    OPT_ACCESS_FORMAT, "FORMAT", "common, combined or json (combined)" },
-    { "error-log",      0,   V,     OPT_ERROR_LOG,     "FILE|-", "messages to FILE, - for standard error (-)" },
+    { "error-log",      0,   V,     OPT_ERROR_LOG,     "FILE|-", "log messages to FILE, - is standard error (-)" },
 
     { "daemon",         'd', S,     OPT_DAEMON,        NULL, "run in the background (off)" },
     { "foreground",     'f', 0,     OPT_FOREGROUND,    NULL, "run in the foreground (the default)" },
-    { "pid-file",       0,   V,     OPT_PID_FILE,      "FILE", "write the process id to FILE, locked while running" },
+    { "pid-file",       0,   V,     OPT_PID_FILE,      "FILE", "write the process id to FILE, locked" },
     { "user",           'u', V,     OPT_USER,          "USER", "run as USER once the ports are open (needs root)" },
     { "group",          'g', V,     OPT_GROUP,         "GROUP", "run as GROUP (default: the group of USER)" },
     { "chroot",         0,   V,     OPT_CHROOT,        "DIR", "change the root directory to DIR (needs root)" },
@@ -265,7 +265,10 @@ static void uw_print_help(void) {
         if (strlen(left) > 28) printf("  %s\n  %-28s %s\n", left, "", o->help);
         else printf("  %-28s %s\n", left, o->help);
     }
-    printf("\nWith --config, the file's settings come first and the command line overrides\n"
+    printf("\nADDR is a numeric IPv4 address, an IPv6 address in brackets ([::1]), * for\n"
+           "every IPv4 address, or localhost. Without --listen, --bind or --port the\n"
+           "server listens on 127.0.0.1:8000 only.\n\n"
+           "With --config, the file's settings come first and the command line overrides\n"
            "them; a repeatable option given on the command line replaces the file's values.\n"
            "UWEBSERVER_CONFIG names a configuration file when --config is not given.\n\n"
            "Exit status:\n"

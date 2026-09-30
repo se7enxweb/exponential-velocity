@@ -1,0 +1,62 @@
+# bash completion for uwebserver                                -*- shell-script -*-
+#
+# Installed by `make -C native/uwebserver install` as
+# $PREFIX/share/bash-completion/completions/uwebserver; or source it.
+# The option list is kept equal to `uwebserver --help` by
+# tests/unit-uwebserver-docs.php.
+
+_uwebserver()
+{
+    local cur prev
+    cur=${COMP_WORDS[COMP_CWORD]}
+    prev=${COMP_WORDS[COMP_CWORD-1]}
+
+    local opts="--help --version --about --config --check --print-config --quiet --verbose
+        --listen --bind --port --tls-listen --tls-port --reuse-port --no-reuse-port --backlog
+        --root --index --directory-listing --no-directory-listing --hidden-files --no-hidden-files
+        --symlinks --mime-types --default-type --charset --cache-control --etag --no-etag
+        --gzip-static --no-gzip-static --header --server-name --server-header --no-server-header
+        --workers --max-connections --max-requests --max-header-size --max-uri-length --max-body-size
+        --header-timeout --read-timeout --write-timeout --keepalive-timeout --tls-handshake-timeout
+        --cert --key --chain --tls-min-version --tls-ciphers --tls-ciphersuites
+        --access-log --access-log-format --error-log
+        --daemon --no-daemon --foreground --pid-file --user --group --chroot --allow-root --no-allow-root"
+
+    # --name=VALUE: complete the value, whether readline split the word at
+    # the '=' (COMP_WORDBREAKS holds it by default) or not.
+    if [[ $prev == = && $COMP_CWORD -ge 2 ]]; then
+        prev=${COMP_WORDS[COMP_CWORD-2]}
+    elif [[ $cur == = ]]; then
+        prev=${COMP_WORDS[COMP_CWORD-1]}
+        cur=
+    elif [[ $cur == --*=* ]]; then
+        prev=${cur%%=*}
+        cur=${cur#*=}
+    elif [[ $cur == -* ]]; then
+        COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+        return 0
+    fi
+
+    case $prev in
+        -r|--root|--chroot)
+            COMPREPLY=( $(compgen -d -- "$cur") ) ;;
+        -c|--config|--cert|--key|--chain|--mime-types|--pid-file|--access-log|--error-log)
+            COMPREPLY=( $(compgen -f -- "$cur") ) ;;
+        --symlinks)
+            COMPREPLY=( $(compgen -W "inside never" -- "$cur") ) ;;
+        --access-log-format)
+            COMPREPLY=( $(compgen -W "common combined json" -- "$cur") ) ;;
+        --tls-min-version)
+            COMPREPLY=( $(compgen -W "1.2 1.3" -- "$cur") ) ;;
+        -u|--user)
+            COMPREPLY=( $(compgen -u -- "$cur") ) ;;
+        -g|--group)
+            COMPREPLY=( $(compgen -g -- "$cur") ) ;;
+        -l|--listen|--tls-listen|-b|--bind)
+            COMPREPLY=( $(compgen -W "127.0.0.1: [::1]: localhost: *:" -- "$cur") ) ;;
+        *)
+            COMPREPLY=() ;;
+    esac
+    return 0
+}
+complete -o default -F _uwebserver uwebserver

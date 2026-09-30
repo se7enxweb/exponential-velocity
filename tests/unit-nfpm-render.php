@@ -97,7 +97,10 @@ foreach (array('debian-12', 'ubuntu-24.04', 'el-9', 'el-10') as $distro) {
 	$pharLink = $byDst["$share/bin/qbixserver.phar"] ?? array();
 	check("$distro keeps the phar's former path, $share/bin/qbixserver.phar, as a link to ../sbin/qbixserver.phar",
 		array($pharLink['type'] ?? null, $pharLink['src'] ?? null), array('symlink', '../sbin/qbixserver.phar'));
-	check("$distro leaves the uwebserver benchmark binary out", count(array_filter($dst, function ($d) { return strpos($d, 'uwebserver') !== false; })), 0);
+	// The program, its sources and its completion stay out; its documentation
+	// (docs/uwebserver.md, docs/uwebserver.1) comes with the rest of docs/.
+	check("$distro leaves the uwebserver benchmark binary out", count(array_filter($dst, function ($d) { return strpos($d, 'uwebserver') !== false && strpos($d, '/usr/share/exponential-velocity/docs/') !== 0; })), 0);
+	check("$distro ships the uwebserver documentation with docs/", isset($byDst['/usr/share/exponential-velocity/docs/uwebserver.md'], $byDst['/usr/share/exponential-velocity/docs/uwebserver.1']), true);
 }
 
 // The unit starts the daemon at its /usr/sbin path.
