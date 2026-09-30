@@ -207,7 +207,10 @@ with the sources.
 | an application's make-up, for the panel | `bin/qbix-appinfo.php` | — |
 
 The packages install `qbixserver`, `qbixctl` and `qbixconsole` in `/usr/sbin` and
-keep links at `/usr/bin`; the systemd unit starts `/usr/sbin/qbixserver`.
+keep links at `/usr/bin`; the systemd unit starts `/usr/sbin/qbixserver`. From
+0.0.4.42 they install the shell too, as `/usr/bin/vc-qshell` (a link to
+`bin/qshell.php`; `qshell` is the name of Qiniu's command-line tool), and the
+container image as `/usr/local/bin/vc-qshell`.
 
 What makes this distribution different is that nothing had to change to get
 there. Every former path is a forwarder that runs the new program in the same

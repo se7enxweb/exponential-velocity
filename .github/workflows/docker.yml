@@ -113,6 +113,8 @@ jobs:
           set -e
           docker run --rm qbix-test:$TAG cat /usr/share/exponential-velocity/image-extensions.txt
           docker run --rm qbix-test:$TAG qbixctl ext:check --variant='${{ matrix.variant }}'
+          # The shell under the packages' name, vc-qshell, and nothing named qshell.
+          docker run --rm qbix-test:$TAG sh -ec 'vc-qshell --version | head -1 | grep -q "^vc-qshell (" && ! command -v qshell'
           cid=$(docker run -d -p 18080:8080 qbix-test:$TAG)
           for i in $(seq 1 20); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/Q/health || true)

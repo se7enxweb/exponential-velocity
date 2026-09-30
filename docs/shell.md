@@ -263,6 +263,16 @@ At a terminal, `php bin/qshell.php` starts the same shell without a server, and
 is in `bin/`; `qshell.php` at the top of the tree, its former path, is a forwarder
 to it ([layout.md, Programs](layout.md#programs-bin-and-sbin)).
 
+**`vc-qshell`, as installed.** The deb and rpm packages install the shell as
+`/usr/bin/vc-qshell`, and the container image as `/usr/local/bin/vc-qshell`: a
+link to `bin/qshell.php` in the installed tree
+(`/usr/share/exponential-velocity/bin/qshell.php`), so `vc-qshell`,
+`vc-qshell -c 'health'` and `vc-qshell --version` work from any directory for any
+user. The name is not `qshell` because `/usr/bin/qshell` is the name of Qiniu's
+`qshell` command-line tool, and a package must not take another program's name;
+nothing named `qshell` is installed in a program directory. Before 0.0.4.42 the
+packages did not install the shell as a command at all.
+
 **From the phar, the packages, the container image and the binaries.** The runner
 and the console tools are embedded in the phar, which all of these start, and a
 script inside a phar cannot be handed to PHP by path. So the server starts its own

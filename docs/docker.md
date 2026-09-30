@@ -61,7 +61,9 @@ docker run -d -p 8080:8080 -v "$PWD:/srv/site" \
 
 `qbixserver`, `qbixctl` and `qbixconsole` are on the PATH inside the image, in
 `/usr/local/sbin` with links at their former paths in `/usr/local/bin`
-([layout.md, Programs](layout.md#programs-bin-and-sbin)):
+([layout.md, Programs](layout.md#programs-bin-and-sbin)), and the shell as
+`vc-qshell`, a link at `/usr/local/bin/vc-qshell` to `bin/qshell.php`
+([shell.md](shell.md)):
 
 ```bash
 docker exec web qbixctl ext:check          # this image against its baseline

@@ -230,6 +230,7 @@ restarts one started by the old path as well; the pattern
 | `packaging/bin/qbix-ext` | unchanged | a build helper run from the checkout, never installed |
 | `/usr/bin/qbixserver`, `qbixctl`, `qbixconsole` (packages) | `/usr/sbin/...` | where a system keeps daemons and their administration commands; `/usr/bin/...` stay, as links, because `/usr/sbin` is not on every user's `PATH` |
 | `/usr/local/bin/...` (container image) | `/usr/local/sbin/...` | as in the packages; `/usr/local/bin/...` are links |
+| (not installed before 0.0.4.42) | `/usr/bin/vc-qshell` (packages), `/usr/local/bin/vc-qshell` (image) | the shell, a user command: a link to `bin/qshell.php` in the installed tree. Not `qshell`, which is the name of Qiniu's command-line tool; the name is the packaging's, the tree itself keeps `bin/qshell.php` |
 | `/usr/share/exponential-velocity/bin/qbixserver.phar` | `/usr/share/exponential-velocity/sbin/qbixserver.phar` | the tree's own layout; the former path is a link |
 | `build-phar.php`, `build-app.php`, `build-binary.sh` | unchanged | build tools run in a checkout, like a `configure` script; never installed |
 | `src/Q/WebServer/Distribution/*/*info.php` | unchanged | helpers a distribution's panel runs from beside its class, not commands |

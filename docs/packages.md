@@ -93,6 +93,7 @@ The server listens on 8080 until `/etc/qbix/ports.conf` says otherwise.
 /usr/sbin/qbixctl                   control: start/stop/status, sites, ext:check ...
 /usr/sbin/qbixconsole               every console command
 /usr/bin/qbixserver, qbixctl, qbixconsole   links to the three above, their former paths
+/usr/bin/vc-qshell                  the shell: a link to bin/qshell.php in the tree (docs/shell.md)
 /etc/qbix/                          the configuration tree (layout.md)
   qbix.conf  ports.conf  envvars
   sites-available/default.conf      enabled by the symlink in sites-enabled/

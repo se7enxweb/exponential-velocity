@@ -98,6 +98,13 @@ docker run --rm -v "$PWD/$(dirname "$pkg"):/pkgs:ro" "${oldmount[@]}" "$image" s
   grep -qs '^ExecStart=/usr/sbin/qbixserver ' /usr/lib/systemd/system/exponential-velocity.service /lib/systemd/system/exponential-velocity.service \
     || { echo 'the unit does not start /usr/sbin/qbixserver'; exit 1; }
   echo 'programs in /usr/sbin, links in /usr/bin: yes'
+  # The shell as vc-qshell, a link to bin/qshell.php in the package; nothing
+  # named qshell (Qiniu's command-line tool has that name).
+  [ -L /usr/bin/vc-qshell ] && [ \"\$(readlink -f /usr/bin/vc-qshell)\" = /usr/share/exponential-velocity/bin/qshell.php ] \
+    || { echo '/usr/bin/vc-qshell does not lead to bin/qshell.php'; exit 1; }
+  [ ! -e /usr/bin/qshell ] || { echo '/usr/bin/qshell is installed'; exit 1; }
+  vc-qshell --version | head -1 | grep -q '^vc-qshell (' || { echo 'vc-qshell --version does not answer'; exit 1; }
+  echo 'the shell is /usr/bin/vc-qshell: yes'
   qbixctl ext:check --variant=lite
   echo '== serving as the service user'
   cd /var/lib/exponential-velocity

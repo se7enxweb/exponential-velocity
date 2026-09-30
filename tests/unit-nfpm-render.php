@@ -75,6 +75,16 @@ foreach (array('debian-12', 'ubuntu-24.04', 'el-9', 'el-10') as $distro) {
 		$bin = $byDst["/usr/bin/$t"] ?? array();
 		check("$distro keeps /usr/bin/$t as a link to ../sbin/$t", array($bin['type'] ?? null, $bin['src'] ?? null), array('symlink', "../sbin/$t"));
 	}
+	// The shell, a user command: /usr/bin/vc-qshell, a link to bin/qshell.php
+	// in the package, and nothing named qshell (Qiniu's command-line tool).
+	$shell = $byDst['/usr/bin/vc-qshell'] ?? array();
+	check("$distro installs /usr/bin/vc-qshell as a link to ../share/exponential-velocity/bin/qshell.php",
+		array($shell['type'] ?? null, $shell['src'] ?? null), array('symlink', '../share/exponential-velocity/bin/qshell.php'));
+	check("$distro installs the executable shell that /usr/bin/vc-qshell leads to",
+		($byDst['/usr/share/exponential-velocity/bin/qshell.php']['file_info']['mode'] ?? null), 0755);
+	check("$distro installs nothing named qshell in a program directory", count(array_filter($dst, function ($d) {
+		return (bool) preg_match('#^/usr/(local/)?s?bin/qshell(\.php)?$#', $d);
+	})), 0);
 	check("$distro puts no regular file in /usr/bin", count(array_filter($s['contents'], function ($c) {
 		return strncmp($c['dst'], '/usr/bin/', 9) === 0 && ($c['type'] ?? '') !== 'symlink';
 	})), 0);

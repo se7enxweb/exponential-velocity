@@ -10,7 +10,8 @@
  * the console tools, the baseline, the designs and docs), qbixserver /
  * qbixctl / qbixconsole in /usr/sbin -- a daemon and its administration
  * commands, as the Filesystem Hierarchy Standard places them -- with links at
- * their former paths in /usr/bin, a systemd unit, and the /etc/qbix tree
+ * their former paths in /usr/bin, the shell as /usr/bin/vc-qshell (a link to
+ * bin/qshell.php in the tree), a systemd unit, and the /etc/qbix tree
  * (docs/layout.md) as configuration that upgrades never overwrite. Inside
  * /usr/share/exponential-velocity the tree keeps its own layout (sbin/, bin/
  * and the forwarders at the former paths, docs/layout.md "Programs");
@@ -105,6 +106,10 @@ foreach (array('qbixserver', 'qbixctl', 'qbixconsole') as $t) {
 	// and /usr/sbin is not on every user's PATH.
 	$contents[] = array('src' => "../sbin/$t", 'dst' => "/usr/bin/$t", 'type' => 'symlink');
 }
+// The shell, bin/qshell.php, a user command: /usr/bin/vc-qshell, a link into
+// the package. Not /usr/bin/qshell, which is the name of Qiniu's qshell
+// command-line tool.
+$contents[] = array('src' => '../share/exponential-velocity/bin/qshell.php', 'dst' => '/usr/bin/vc-qshell', 'type' => 'symlink');
 $contents[] = array('src' => 'packaging/systemd/exponential-velocity.service', 'dst' => "$unitDir/exponential-velocity.service", 'file_info' => array('mode' => 0644));
 $contents[] = array('src' => 'packaging/systemd/exponential-velocity.default', 'dst' => '/etc/default/exponential-velocity', 'type' => 'config|noreplace', 'file_info' => array('mode' => 0644));
 foreach (array('qbix.conf', 'ports.conf', 'envvars', 'sites-available/default.conf') as $f) {

@@ -28,6 +28,9 @@ RUN set -eux; \
       install -m 0755 "/usr/share/exponential-velocity/packaging/sbin/$t" "/usr/local/sbin/$t"; \
       ln -s "../sbin/$t" "/usr/local/bin/$t"; \
     done; \
+    # The shell, a user command, under the packages' name for it: vc-qshell,
+    # a link to bin/qshell.php (qshell is Qiniu's command-line tool).
+    ln -s /usr/share/exponential-velocity/bin/qshell.php /usr/local/bin/vc-qshell; \
     mkdir -p /app /etc/qbix; \
     # The image's former install path, for mounts and scripts that name it.
     ln -s exponential-velocity /usr/share/qbix-webserver; \
