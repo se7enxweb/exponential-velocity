@@ -31,7 +31,7 @@
 Persistent workers with automatic state reset. Combines fpm's throughput with fork-per-request's memory isolation.
 
 ```bash
-php qbixserver.php --app=/path/to/myapp --workers=40
+php sbin/qbixserver.php --app=/path/to/myapp --workers=40
 ```
 
 The parent preloads your framework (classes, config, routes, autoloader), takes a snapshot of every static property on every user-defined class, then forks N workers. Each worker handles requests in a loop. Between requests, the snapshot is restored — all statics, globals, superglobals, and response state are reset to their preloaded values. Cost: about 0.5 ms for a small application and 4–5 ms for a CMS with ~600 classes ([measured](workers.md#what-a-worker-costs)), vs ~8ms for a full fork.

@@ -88,9 +88,11 @@ The server listens on 8080 until `/etc/qbix/ports.conf` says otherwise.
 
 ```
 /usr/share/exponential-velocity/          the server: phar, console tools, baseline, designs, docs
-/usr/bin/qbixserver                 the server
-/usr/bin/qbixctl                    control: start/stop/status, sites, ext:check ...
-/usr/bin/qbixconsole                every console command
+  sbin/qbixserver.phar              the phar the service runs (bin/qbixserver.phar: a link to it)
+/usr/sbin/qbixserver                the server
+/usr/sbin/qbixctl                   control: start/stop/status, sites, ext:check ...
+/usr/sbin/qbixconsole               every console command
+/usr/bin/qbixserver, qbixctl, qbixconsole   links to the three above, their former paths
 /etc/qbix/                          the configuration tree (layout.md)
   qbix.conf  ports.conf  envvars
   sites-available/default.conf      enabled by the symlink in sites-enabled/
@@ -103,6 +105,14 @@ The server listens on 8080 until `/etc/qbix/ports.conf` says otherwise.
 Everything under `/etc` is configuration: an upgrade never overwrites a file you
 changed. Enable and disable sites, snippets and modules with `qbixctl ensite`,
 `dissite`, `enconf`, `disconf`, `enmod` and `dismod` ([layout.md](layout.md)).
+
+The server and its administration commands are in `/usr/sbin` from 0.0.4.41, as
+the Filesystem Hierarchy Standard places a daemon, and the unit starts
+`/usr/sbin/qbixserver`. `/usr/bin/qbixserver`, `qbixctl` and `qbixconsole` stay, as
+links: units, cron jobs and scripts that name them keep working, and a user whose
+`PATH` has no `/usr/sbin` (Debian's default for everyone but root) still finds
+them. A service started before the upgrade is restarted by it under the new unit
+([layout.md, Programs](layout.md#programs-bin-and-sbin)).
 
 ---
 

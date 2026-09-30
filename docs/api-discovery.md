@@ -152,7 +152,7 @@ If a template already has `key[]` and `sig[]` (partially signed by another party
 The built-in event loop uses `stream_select` — zero dependencies, works everywhere. But if you install [amphp](https://amphp.org/), the server upgrades to a full HTTP/2 server with no code changes:
 
 ```bash
-composer require amphp/http-server amphp/socket php qbixserver.php --port=8443
+composer require amphp/http-server amphp/socket php sbin/qbixserver.php --port=8443
 ```
 
 The server detects amphp automatically and switches to its event loop and HTTP driver. You get:

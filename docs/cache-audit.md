@@ -220,7 +220,7 @@ source tree, 8 workers, `opcache.enable_cli=1` in every configuration so the
 uncached case is not handicapped:
 
 ```sh
-php [-d apc.enable_cli=1 -d apc.shm_size=128M] -d opcache.enable_cli=1 qbixserver.php \
+php [-d apc.enable_cli=1 -d apc.shm_size=128M] -d opcache.enable_cli=1 sbin/qbixserver.php \
     --config=<config> --root=<root> --host=127.0.0.1 --port=8090 --workers=8
 php tests/bench-load.php http://127.0.0.1:8090/<page> --http1 --levels=1,4,16,64 --requests=2000
 ```

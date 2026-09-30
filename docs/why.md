@@ -63,7 +63,7 @@ If you're looking beyond php-fpm, you've probably seen FrankenPHP and Swoole. He
 | | FrankenPHP | Swoole | Qbix Server |
 |---|---|---|---|
 | **Language** | Go + C (embeds PHP) | C extension for PHP | Pure PHP |
-| **Install** | Download Go binary or Docker | `pecl install swoole` (compiles C) | `php qbixserver.php` — nothing to install |
+| **Install** | Download Go binary or Docker | `pecl install swoole` (compiles C) | `php sbin/qbixserver.php` — nothing to install |
 | **Architecture** | Worker mode (persistent) | Coroutine-based (persistent) | Persistent workers with snapshot restore (default). Fork-per-request available for maximum isolation |
 | **State leaks** | ⚠️ Possible — workers persist, must audit statics | ⚠️ Possible — must manage globals carefully | ✅ Fork mode: impossible (process dies). Octane: snapshot restores all statics/globals/superglobals between requests |
 | **PHP compatibility** | Most code works, some edge cases | Many extensions incompatible, blocking I/O breaks coroutines | ✅ 100% — standard PHP, nothing unusual |
@@ -123,7 +123,7 @@ pecl install swoole             # compiles C, may fail on some systems
 # Then edit php.ini, restart php...
 
 # Qbix Server
-php qbixserver.php  # done
+php sbin/qbixserver.php  # done
 ```
 
 ### When to choose what

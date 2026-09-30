@@ -37,7 +37,7 @@ Anything beyond the automatic ceiling is a deliberate choice, made with
 `--workers`.
 
 ```sh
-php qbixserver.php --root=web --workers=32
+php sbin/qbixserver.php --root=web --workers=32
 ```
 
 ---

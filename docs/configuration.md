@@ -156,7 +156,7 @@ troubleshooting: [HTTPS and Certificates](https.md).
 Watch `classes/`, `handlers/`, and `config/` for file changes:
 
 ```bash
-php qbixserver.php --hotreload
+php sbin/qbixserver.php --hotreload
 ```
 
 Or via config:
@@ -338,9 +338,9 @@ Before the hand-configuration below, there are presets. `--preset=NAME` (or
 and any framework-specific settings that application needs, in one flag:
 
 ```
-php bin/qbixserver.phar --root=public --preset=laravel
-php bin/qbixserver.phar --root=.      --preset=wordpress
-php bin/qbixserver.phar --root=.      --preset=exponential
+php sbin/qbixserver.phar --root=public --preset=laravel
+php sbin/qbixserver.phar --root=.      --preset=wordpress
+php sbin/qbixserver.phar --root=.      --preset=exponential
 ```
 
 | Preset | Rewrite | Notable |
@@ -371,7 +371,7 @@ You can run existing PHP applications on Qbix Server without modifying their cod
 **WordPress:**
 
 ```
-wordpress-site/ ├── qbixserver.php          ← copy here ├── src/                    ← copy here ├── config/ │   └── server.json └── web/                    ← symlink or copy of WordPress root
+wordpress-site/ ├── sbin/qbixserver.php          ← copy here ├── src/                    ← copy here ├── config/ │   └── server.json └── web/                    ← symlink or copy of WordPress root
     ├── wp-admin/
     ├── wp-content/
     ├── wp-includes/
@@ -398,7 +398,7 @@ The pattern `\.php$` sends all PHP files through `php-cgi`. The fallback sends u
 **Laravel:**
 
 ```
-laravel-app/ ├── qbixserver.php ├── src/ ├── config/ │   └── server.json ├── web/                    ← symlink to Laravel's public/ │   ├── index.php │   └── .htaccess           ← ignored (no Apache) ├── app/ ├── routes/ ├── storage/ └── vendor/
+laravel-app/ ├── sbin/qbixserver.php ├── src/ ├── config/ │   └── server.json ├── web/                    ← symlink to Laravel's public/ │   ├── index.php │   └── .htaccess           ← ignored (no Apache) ├── app/ ├── routes/ ├── storage/ └── vendor/
 ```
 
 ```json
@@ -419,7 +419,7 @@ All requests that don't match a static file go to `index.php`. Laravel's router 
 **Symfony:**
 
 ```
-symfony-app/ ├── qbixserver.php ├── src/ ├── config/ │   ├── server.json │   └── ...                 ← Symfony config files ├── web/                    ← symlink to Symfony's public/ │   └── index.php ├── src/                    ← Symfony source (separate from Qbix src/) ├── var/ └── vendor/
+symfony-app/ ├── sbin/qbixserver.php ├── src/ ├── config/ │   ├── server.json │   └── ...                 ← Symfony config files ├── web/                    ← symlink to Symfony's public/ │   └── index.php ├── src/                    ← Symfony source (separate from Qbix src/) ├── var/ └── vendor/
 ```
 
 Same config pattern. Symfony's front controller (`public/index.php`) handles all routing internally.

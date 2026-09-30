@@ -3,7 +3,7 @@
 Server-Sent Events (SSE) with four streaming modes.
 
 ```bash
-php qbixserver.php --root=examples/stream/web
+php sbin/qbixserver.php --root=examples/stream/web
 ```
 
 Open http://localhost:4000 — pick a mode and click Start.

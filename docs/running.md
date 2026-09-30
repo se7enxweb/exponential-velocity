@@ -3,24 +3,24 @@
 ### 1. From source (needs PHP 8.1+)
 
 ```bash
-php qbixserver.php
+php sbin/qbixserver.php
 ```
 
 ```bash
 # Listen on a Unix domain socket (for nginx proxy)
-php qbixserver.php --socket=/run/qbix/app.sock
+php sbin/qbixserver.php --socket=/run/qbix/app.sock
 
 # Both TCP and UDS simultaneously
-php qbixserver.php --port=8080 --socket=/run/qbix/app.sock
+php sbin/qbixserver.php --port=8080 --socket=/run/qbix/app.sock
 ```
 
 ### 2. PHAR — single ~280KB file (needs PHP)
 
 ```bash
-php bin/qbixserver.phar --port=80
+php sbin/qbixserver.phar --port=80
 
 # Or make it executable
-chmod +x bin/qbixserver.phar ./bin/qbixserver.phar --port=80
+chmod +x sbin/qbixserver.phar ./sbin/qbixserver.phar --port=80
 ```
 
 ### 3. Static binary — no PHP needed
@@ -43,7 +43,7 @@ The binary bundles PHP 8.3 + SQLite + OpenSSL + curl into a single ~15MB executa
 
 ### Option styles
 
-Every command line here — `qbixserver.php`, `qbixconsole`, `qbixctl` and the small C
+Every command line here — `sbin/qbixserver.php`, `qbixconsole`, `qbixctl` and the small C
 server — takes GNU and BSD spellings alike:
 
 | Form | Meaning |
@@ -68,7 +68,7 @@ Every option and command of the three is listed in [console.md](console.md).
 
 ```bash
 php -d phar.readonly=0 build-phar.php
-# Output: bin/qbixserver.phar
+# Output: sbin/qbixserver.phar (and the same file at bin/qbixserver.phar)
 ```
 
 ### Build the static binary
@@ -96,7 +96,7 @@ Qbix Server is extracted from the [Qbix Platform](https://github.com/Qbix/Platfo
 When you have a Qbix app, the server uses the full framework:
 
 ```bash
-php qbixserver.php --app=/path/to/myapp --port=80
+php sbin/qbixserver.php --app=/path/to/myapp --port=80
 ```
 
 In this mode:

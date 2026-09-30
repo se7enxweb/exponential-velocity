@@ -641,7 +641,7 @@ All three models in one project. HTTP handles pages and login. Per-connection We
 ### Project structure
 
 ```
-chat/ ├── qbixserver.php ├── config/ │   └── server.json ├── web/ │   ├── index.html              ← static: the chat UI │   └── api/ │   └── api/ │       ├── messages.php        ← HTTP: GET recent messages from DB │       └── login.php           ← HTTP: POST authenticate, return token ├── classes/ │   ├── Chat/ │   │   ├── Auth.php            ← shared: token validation │   │   └── Messages.php        ← shared: DB read/write │   └── ChatRoom.php            ← room state: static properties └── handlers/
+chat/ ├── sbin/qbixserver.php ├── config/ │   └── server.json ├── web/ │   ├── index.html              ← static: the chat UI │   └── api/ │   └── api/ │       ├── messages.php        ← HTTP: GET recent messages from DB │       └── login.php           ← HTTP: POST authenticate, return token ├── classes/ │   ├── Chat/ │   │   ├── Auth.php            ← shared: token validation │   │   └── Messages.php        ← shared: DB read/write │   └── ChatRoom.php            ← room state: static properties └── handlers/
     ├── auth/
     │   └── login.php           ← per-connection: authenticate
     ├── chat/
@@ -833,7 +833,7 @@ Room:           chat/room/join      → ChatRoom::$users, $names, $history
 ### Run it
 
 ```bash
-php qbixserver.php
+php sbin/qbixserver.php
 ```
 
 One command. Static files, REST API, authentication, access-controlled rooms, multi-tab awareness, and shared real-time chat — all from one PHP server.

@@ -139,7 +139,7 @@ qbixctl ext:build --variant=source
 Writes `dist/qbixserver-source-kit.tar.gz`: the phar, the manifest and its schema,
 the console with the sources it needs, [requirements.md](requirements.md), this page,
 and a `BUILD.md` with the recipe for every variant. Unpack it on the target machine
-and run `php qbixctl.php ext:build --variant=...` there.
+and run `php sbin/qbixctl.php ext:build --variant=...` there.
 
 ### In scripts and CI
 

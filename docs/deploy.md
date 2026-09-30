@@ -3,7 +3,7 @@
 Push your app to a remote server with one command:
 
 ```bash
-./qbixserver.php --deploy=production
+./sbin/qbixserver.php --deploy=production
 ```
 
 Configure targets in `config/deploy.json`:
@@ -157,7 +157,7 @@ Access log format (nginx-compatible combined + response time):
 192.168.1.1 - - [11/Aug/2026:14:30:00 +0000] "GET /api/users HTTP/1.1" 200 1234 "-" "Mozilla/5.0" 3.2ms
 ```
 
-Errors also go to stderr, so `php qbixserver.php 2>err.log` works without config.
+Errors also go to stderr, so `php sbin/qbixserver.php 2>err.log` works without config.
 
 ### Configuration
 

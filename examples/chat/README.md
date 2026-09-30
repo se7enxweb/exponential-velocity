@@ -3,7 +3,7 @@
 Real-time multi-room chat using WebSocket with Socket.IO protocol and server-side PHP room handlers.
 
 ```bash
-php qbixserver.php --root=examples/chat/web
+php sbin/qbixserver.php --root=examples/chat/web
 ```
 
 Open http://localhost:4000 — enter a name, join the conversation.

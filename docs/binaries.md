@@ -64,8 +64,8 @@ To see exactly what a variant carries on a platform, and what it leaves out and
 why:
 
 ```bash
-php qbixctl.php ext:list --variant=standard --platform=linux-x86_64 --php=8.3
-php qbixctl.php ext:plan --variant=full --platform=windows-x64
+php sbin/qbixctl.php ext:list --variant=standard --platform=linux-x86_64 --php=8.3
+php sbin/qbixctl.php ext:plan --variant=full --platform=windows-x64
 ```
 
 ### File names
@@ -100,7 +100,7 @@ dropped an extension fails by name. You can ask the same of any binary's PHP,
 from a checkout of this repository:
 
 ```bash
-QBIX_STATIC_BUILD=1 ./php-linux-x86_64-php8.3-standard qbixctl.php ext:check --variant=standard
+QBIX_STATIC_BUILD=1 ./php-linux-x86_64-php8.3-standard sbin/qbixctl.php ext:check --variant=standard
 ```
 
 ### What each platform leaves out
@@ -186,7 +186,7 @@ image ([docker.md](docker.md)) or the OS packages ([packages.md](packages.md)).
 php -d phar.readonly=0 build-phar.php
 
 # Combine into a single binary
-./spc micro:combine bin/qbixserver.phar -O qbixserver
+./spc micro:combine sbin/qbixserver.phar -O qbixserver
 chmod +x qbixserver
 ```
 

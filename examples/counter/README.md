@@ -3,7 +3,7 @@
 Live page view counter with real-time updates.
 
 ```bash
-php qbixserver.php --root=examples/counter/web
+php sbin/qbixserver.php --root=examples/counter/web
 ```
 
 Open http://localhost:4000 in multiple tabs — watch the count and viewer dots update.

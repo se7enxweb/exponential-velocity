@@ -204,7 +204,7 @@ Three separate defects, all "tests pass, production drops requests":
 - **Actually:** the shipped version is stamped at build time from the nearest
   tag. A release commit is built before its tag exists, so every release phar
   named the release before it.
-- **Recognise it:** `php bin/qbixserver.phar --version` on the tagged commit
+- **Recognise it:** `php sbin/qbixserver.phar --version` on the tagged commit
   shows the previous tag.
 - **Fix:** build the release phar with the version being cut:
   `QBIX_SHIP_VERSION=vX.Y.Z.N php -d phar.readonly=0 build-phar.php`

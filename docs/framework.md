@@ -5,7 +5,7 @@ Qbix Server isn't just a static file server with PHP bolted on. It's a micro-fra
 ### Project layout
 
 ```
-myproject/ ├── qbixserver.php              ← server entry point (or use the PHAR) ├── config/ │   └── server.json             ← server + app configuration ├── web/                        ← document root (publicly accessible) │   ├── index.html              ← static files served directly │   ├── style.css │   ├── api.php                 ← PHP scripts executed on request │   └── uploads/ ├── classes/                    ← your PHP classes (autoloaded when first used) │   ├── MyApp/ │   │   ├── User.php            ← MyApp\User or MyApp_User │   │   ├── Feed.php │   │   └── Auth.php │   └── vendor/ │       └── autoload.php        ← Composer autoloader (optional) ├── handlers/                   ← event handlers (loaded on demand) │   └── MyApp/ │       └── feed/ │           ├── post.php        ← handles "MyApp/feed/post" event │           └── validate.php    ← handles "MyApp/feed/validate" event └── views/                      ← PHP templates for Q::view()
+myproject/ ├── sbin/qbixserver.php              ← server entry point (or use the PHAR) ├── config/ │   └── server.json             ← server + app configuration ├── web/                        ← document root (publicly accessible) │   ├── index.html              ← static files served directly │   ├── style.css │   ├── api.php                 ← PHP scripts executed on request │   └── uploads/ ├── classes/                    ← your PHP classes (autoloaded when first used) │   ├── MyApp/ │   │   ├── User.php            ← MyApp\User or MyApp_User │   │   ├── Feed.php │   │   └── Auth.php │   └── vendor/ │       └── autoload.php        ← Composer autoloader (optional) ├── handlers/                   ← event handlers (loaded on demand) │   └── MyApp/ │       └── feed/ │           ├── post.php        ← handles "MyApp/feed/post" event │           └── validate.php    ← handles "MyApp/feed/validate" event └── views/                      ← PHP templates for Q::view()
     └── MyApp/
         └── feed/
             ├── page.php
@@ -150,7 +150,7 @@ The autoloader maps class names to file paths (`MyApp\User` → `classes/MyApp/U
 ```
 
 ```bash
-php qbixserver.php --workers=4
+php sbin/qbixserver.php --workers=4
 #  Autoloader: autoload.php
 #  Preloaded: 3 classes
 ```

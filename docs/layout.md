@@ -13,6 +13,7 @@ made or removed by the console.
 - [Enabling and disabling](#enabling-and-disabling)
 - [Overlays and distributions](#overlays-and-distributions)
 - [Checking what is used](#checking-what-is-used)
+- [Programs: bin/ and sbin/](#programs-bin-and-sbin)
 
 ---
 
@@ -86,7 +87,7 @@ The site file is given with `--config`: the server loads the site it is started
 for, not every enabled site at once.
 
 ```sh
-php qbixserver.php --config=/etc/qbix/sites-enabled/example.com.conf
+php sbin/qbixserver.php --config=/etc/qbix/sites-enabled/example.com.conf
 ```
 
 ---
@@ -152,7 +153,7 @@ up to `/`, or the panel refuses every sign-in: see
 ### Checking what is used
 
 ```sh
-php qbixserver.php --layout --conf-dir=auto     # the files that would be loaded, as JSON, then exit
+php sbin/qbixserver.php --layout --conf-dir=auto  # the files that would be loaded, as JSON, then exit
 qbixconsole layout:show                          # the stack, and what is available and enabled
 qbixconsole server:configtest                    # every file parses (qbixctl -t)
 ```
@@ -161,6 +162,85 @@ qbixconsole server:configtest                    # every file parses (qbixctl -t
 later winning. `server:configtest` prints `OK` or `BAD` for every file of every
 tree and exits non-zero when one does not parse; a file that does not parse is
 skipped by the server with a line on the console, never half-read.
+
+---
+
+### Programs: bin/ and sbin/
+
+The engine's own tree is laid out the way the Filesystem Hierarchy Standard lays
+out a system: the daemon and the commands that administer it in `sbin/`, the
+commands any user runs in `bin/`, sources with the sources. The installed
+packages follow the same split, `/usr/sbin` and `/usr/bin`. It came in with
+0.0.4.41; before, the programs sat at the top of the tree, and `bin/` held the
+phar, a helper and C sources side by side.
+
+```
+sbin/qbixserver.php      the server
+sbin/qbixctl.php         control, the apachectl way
+sbin/qbixconsole.php     every console command
+sbin/qbixserver.phar     the server as one archive (committed; what the packages run)
+sbin/uwebserver          the small C web server for benchmarks and tests (built)
+bin/qshell.php           the shell at a terminal, and the server's shell runner
+bin/qbix-appinfo.php     what a Qbix application is made of, for the panel
+native/uwebserver/       uwebserver.c and its headers: source, not a program
+```
+
+Each program reads the engine's files from the directory above its own
+(`dirname(__DIR__)`), the same way from a checkout, a Composer vendor copy and the
+phar, which carries this layout inside it and runs `sbin/qbixserver.php` from its
+stub.
+
+**Every former path keeps working.** Systemd units, init scripts, cron jobs,
+Composer's `vendor/bin`, programs that drive the server (a CMS's own control
+script) and the start records of running servers (`qbixctl restart` starts a
+server again the way it was started) name the old paths, so each old path is
+still there and behaves exactly like the new one:
+
+- the old `.php` files are forwarders: they `require` the new file in the same
+  process, so the command line (`$argv`), the process id, the process title that
+  `ps` and `pkill -f` see, standard input and output and the exit status are the
+  new file's. A server started as `php qbixserver.php ...` still shows as that,
+  and is found, reloaded and restarted as before;
+- `bin/qbixserver.phar` is the same file as `sbin/qbixserver.phar`, byte for
+  byte, written by `build-phar.php` and checked by `tests/phar-is-current.php`. A
+  copy rather than a symbolic link, so it is there however the tree was unpacked
+  (a Composer zip extracted without links, a file system without them). In the
+  packages it is a link;
+- `bin/uwebserver` is a shell forwarder that `exec`s `sbin/uwebserver`;
+- the one difference is a line on standard error, written only when standard
+  error is a terminal, saying where the program moved. Nothing a script reads
+  changes. `QBIX_MOVED_QUIET=1` silences it at a terminal too.
+
+`qbixctl` starts `sbin/qbixserver.php` and treats a server started by either path
+as this engine's (`Q_WebServer_Ctl::serverScripts()`), so it stops, reloads and
+restarts one started by the old path as well; the pattern
+`qbixserver.php.*--port=N` matches both.
+
+| Former path | Path now | Why |
+|---|---|---|
+| `qbixserver.php` | `sbin/qbixserver.php` | a daemon |
+| `qbixctl.php` | `sbin/qbixctl.php` | starts, stops and configures the daemon: administration |
+| `qbixconsole.php` | `sbin/qbixconsole.php` | its commands administer the server (sites, certificates, the panel's password, the cache) |
+| `qshell.php` | `bin/qshell.php` | the shell a user opens; it runs with that user's rights (the server's runner drops to `Q.shell.user`) |
+| `bin/qbixserver.phar` | `sbin/qbixserver.phar` | the daemon as one archive; the former path is the same file |
+| `bin/uwebserver` | `sbin/uwebserver` | a small daemon, for benchmarks; a forwarder stays at the former path |
+| `bin/uwebserver.c`, `bin/u_*.h` | `native/uwebserver/` | source code, not a program: kept as sources, in neither program directory |
+| `bin/qbix-appinfo.php` | unchanged | reads an application and reports; any user may run it |
+| `packaging/bin/qbixserver`, `qbixctl`, `qbixconsole` | `packaging/sbin/` | the wrappers the packages install in `/usr/sbin`; the former names are links to them |
+| `packaging/bin/qbix-ext` | unchanged | a build helper run from the checkout, never installed |
+| `/usr/bin/qbixserver`, `qbixctl`, `qbixconsole` (packages) | `/usr/sbin/...` | where a system keeps daemons and their administration commands; `/usr/bin/...` stay, as links, because `/usr/sbin` is not on every user's `PATH` |
+| `/usr/local/bin/...` (container image) | `/usr/local/sbin/...` | as in the packages; `/usr/local/bin/...` are links |
+| `/usr/share/exponential-velocity/bin/qbixserver.phar` | `/usr/share/exponential-velocity/sbin/qbixserver.phar` | the tree's own layout; the former path is a link |
+| `build-phar.php`, `build-app.php`, `build-binary.sh` | unchanged | build tools run in a checkout, like a `configure` script; never installed |
+| `src/Q/WebServer/Distribution/*/*info.php` | unchanged | helpers a distribution's panel runs from beside its class, not commands |
+| `qbix-build.php` (the build stamp) | unchanged | data the programs read, not a program |
+
+Composer's `bin` lists `sbin/qbixserver.php`, `sbin/qbixctl.php`,
+`sbin/qbixconsole.php` and `bin/qshell.php`, so `vendor/bin/` has all four under
+their own names.
+
+The forwarders stay for the 0.0.4 line at least; a release that removes them, if
+one ever does, is announced in the changelog before it happens.
 
 ---
 [← Back to README](../README.md)

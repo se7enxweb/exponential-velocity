@@ -39,6 +39,12 @@ need to actually run it in production:
 - **Operate it like Apache.** A Debian-style `/etc/vc` layout
   (`sites-available`/`sites-enabled`, `conf`/`mods`), `a2ensite`-style
   enable/disable, and `apache2ctl`-style start/stop/reload/status.
+- **Programs where UNIX keeps them.** The server and its administration
+  commands in `sbin/` (`/usr/sbin` from the packages), the shell and the other
+  user commands in `bin/`, C sources with the sources, and every former path
+  still runs the same program with the same arguments, output and exit status,
+  so no unit, script or running server has to change
+  ([Where the programs are](#where-the-programs-are-bin-and-sbin)).
 - **Built to stay up.** A worker pool that sizes itself to available RAM, a
   design where a worker dying never fails a request, correct TLS shutdown from
   forked workers, and safe operation under opcache.
@@ -82,7 +88,7 @@ Your code runs unmodified, in two modes:
 | 🚀 **Throughput** (I/O, same RAM) | 78 req/s (fpm/Swoole 4w) | **1,060 req/s** (100w) |
 | 🌐 **WebSocket** | Needs a separate server | Built in |
 | 🧩 **Cache invalidation** | Whole-page only | `X-Q-Cache-Tree` — per-component |
-| ⚙️ **Setup** | nginx + fpm pools + sockets | `php qbixserver.php` |
+| ⚙️ **Setup** | nginx + fpm pools + sockets | `php sbin/qbixserver.php` |
 
 See [BENCHMARKS.md](docs/BENCHMARKS.md) for full methodology and [reset.md](docs/reset.md) for what gets restored between requests.
 
@@ -145,7 +151,7 @@ You can also package your entire app — code, assets, SQLite database — into 
 ```bash
 git clone https://github.com/Qbix/webserver
 cd webserver
-php qbixserver.php
+php sbin/qbixserver.php
 ```
 
 ### Download a binary
@@ -180,6 +186,36 @@ curl -LO https://github.com/se7enxweb/exponential-velocity/releases/latest/downl
 php qbixserver.phar --root=./web
 ```
 
+### Where the programs are: bin/ and sbin/
+
+From 0.0.4.41 the tree keeps its programs the way UNIX and Linux systems do
+(the Filesystem Hierarchy Standard): the daemon and the commands that
+administer it in `sbin/`, the commands any user runs in `bin/`, and source code
+with the sources.
+
+| Program | Path | Former path (still works) |
+|---|---|---|
+| the server | `sbin/qbixserver.php` | `qbixserver.php` |
+| control, the `apachectl` way | `sbin/qbixctl.php` | `qbixctl.php` |
+| the console's commands | `sbin/qbixconsole.php` | `qbixconsole.php` |
+| the server as one archive | `sbin/qbixserver.phar` | `bin/qbixserver.phar` (the same file) |
+| the small C server for benchmarks | `sbin/uwebserver` (source: `native/uwebserver/`) | `bin/uwebserver` |
+| the shell | `bin/qshell.php` | `qshell.php` |
+| an application's make-up, for the panel | `bin/qbix-appinfo.php` | — |
+
+The packages install `qbixserver`, `qbixctl` and `qbixconsole` in `/usr/sbin` and
+keep links at `/usr/bin`; the systemd unit starts `/usr/sbin/qbixserver`.
+
+What makes this distribution different is that nothing had to change to get
+there. Every former path is a forwarder that runs the new program in the same
+process, so a systemd unit, a cron job, a Composer `vendor/bin` link, a CMS's
+control script or a `pkill -f 'qbixserver.php'` pattern keeps working, and a
+server started by an old path is still found, reloaded and restarted by
+`qbixctl` exactly as it was started. Standard output, input and the exit status
+are the new program's; the only sign is one line on standard error, and only at
+a terminal (`QBIX_MOVED_QUIET=1` hides it). The full table of what moved, and
+why, is in [docs/layout.md](docs/layout.md#programs-bin-and-sbin).
+
 ## Use With Your Existing Codebase
 
 If you already have a PHP app running on nginx + php-fpm, switching is one command. The server reads your `.htaccess`, rewrites URLs to your front controller, and runs your code with 44 functions shimmed so static variables, sessions, and headers work correctly between requests.
@@ -188,35 +224,35 @@ If you already have a PHP app running on nginx + php-fpm, switching is one comma
 
 ```bash
 cd my-laravel-app
-php /path/to/qbixserver.php --root=public --preset=laravel --port=8080
+php /path/to/sbin/qbixserver.php --root=public --preset=laravel --port=8080
 ```
 
 **Symfony:**
 
 ```bash
 cd my-symfony-app
-php /path/to/qbixserver.php --root=public --preset=symfony --port=8080
+php /path/to/sbin/qbixserver.php --root=public --preset=symfony --port=8080
 ```
 
 **WordPress:**
 
 ```bash
 cd my-wordpress-site
-php /path/to/qbixserver.php --root=. --preset=wordpress --port=8080
+php /path/to/sbin/qbixserver.php --root=. --preset=wordpress --port=8080
 ```
 
 **Drupal:**
 
 ```bash
 cd my-drupal-site
-php /path/to/qbixserver.php --root=web --preset=drupal --port=8080
+php /path/to/sbin/qbixserver.php --root=web --preset=drupal --port=8080
 ```
 
 **Exponential** (the eZ Publish 4 legacy line):
 
 ```bash
 cd my-exponential-site
-php /path/to/qbixserver.php --root=. --preset=exponential --port=8080
+php /path/to/sbin/qbixserver.php --root=. --preset=exponential --port=8080
 ```
 
 The `exponential` preset keeps the source-code transform on and preserves the
@@ -226,7 +262,7 @@ need. See [Configuration](docs/configuration.md#framework-presets--the-one-flag-
 **Any PHP app with a front controller:**
 
 ```bash
-php /path/to/qbixserver.php --root=public --port=8080
+php /path/to/sbin/qbixserver.php --root=public --port=8080
 ```
 
 If the root directory has an `index.php`, all clean URLs automatically route to it (the same behavior as `try_files $uri $uri/ /index.php` in nginx). If there's a `.htaccess`, its `RewriteRule` and `RewriteCond` directives are applied.
@@ -441,7 +477,7 @@ Six example apps are included in `examples/`:
 | [collab](examples/collab) | Collaborative editing |
 
 ```bash
-php qbixserver.php --root=examples/todo/web --port=8080
+php sbin/qbixserver.php --root=examples/todo/web --port=8080
 ```
 
 ## Migrating from another server

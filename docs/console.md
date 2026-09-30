@@ -6,6 +6,12 @@ named commands grouped by namespace, with `list` and `help`. `qbixctl` answers t
 the words of `apache2ctl` and the `a2ensite` family, and runs the matching console
 command.
 
+All three are in `sbin/` of the engine's tree, `sbin/qbixserver.php`,
+`sbin/qbixctl.php` and `sbin/qbixconsole.php`, and the packages install them in
+`/usr/sbin` (with links in `/usr/bin`). Their former paths at the top of the tree
+run them unchanged, same arguments, output and exit status
+([layout.md, Programs](layout.md#programs-bin-and-sbin)).
+
 - [qbixserver.php](#qbixserverphp)
 - [qbixconsole](#qbixconsole)
 - [qbixctl](#qbixctl)
@@ -17,9 +23,9 @@ command.
 ### qbixserver.php
 
 ```sh
-php qbixserver.php --root=web --port=8080 --workers=8
-php qbixserver.php --config=/etc/qbix/sites-enabled/example.com.conf
-php qbixserver.php --help
+php sbin/qbixserver.php --root=web --port=8080 --workers=8
+php sbin/qbixserver.php --config=/etc/qbix/sites-enabled/example.com.conf
+php sbin/qbixserver.php --help
 ```
 
 | Option | Meaning |

@@ -6,14 +6,14 @@ Self-healing distributed task list + chat with full-stack microservice isolation
 
 ```bash
 # Single server (all features, simple setup)
-php qbixserver.php --root=examples/swarm/web --port=4001
+php sbin/qbixserver.php --root=examples/swarm/web --port=4001
 
 # Or: authority + sandbox (microservice isolation)
-php qbixserver.php --root=examples/swarm/web --config=examples/swarm/config/authority.json
-php qbixserver.php --root=examples/swarm/web --config=examples/swarm/config/sandbox.json
+php sbin/qbixserver.php --root=examples/swarm/web --config=examples/swarm/config/authority.json
+php sbin/qbixserver.php --root=examples/swarm/web --config=examples/swarm/config/sandbox.json
 
 # Or: multi-node cluster (peer replication)
-PEERS=http://localhost:4001 php qbixserver.php --root=examples/swarm/web --port=4002
+PEERS=http://localhost:4001 php sbin/qbixserver.php --root=examples/swarm/web --port=4002
 ```
 
 ## What it demonstrates
@@ -87,11 +87,11 @@ The sandbox never loaded `payment.php`. The function `swarm_payment()` never exe
 
 ```bash
 # Development — everything on one server, no isolation
-php qbixserver.php --root=examples/swarm/web --port=4001
+php sbin/qbixserver.php --root=examples/swarm/web --port=4001
 
 # Staging — sandbox forwards to authority, both on localhost
-php qbixserver.php --root=examples/swarm/web --config=examples/swarm/config/authority.json
-php qbixserver.php --root=examples/swarm/web --config=examples/swarm/config/sandbox.json
+php sbin/qbixserver.php --root=examples/swarm/web --config=examples/swarm/config/authority.json
+php sbin/qbixserver.php --root=examples/swarm/web --config=examples/swarm/config/sandbox.json
 
 # Production — authority on a private network, sandbox public-facing
 # authority.json: port 4001, bind to 10.0.0.1 (private)

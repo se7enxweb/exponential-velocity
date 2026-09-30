@@ -6,19 +6,19 @@ Qbix Server v1.1 includes a compatibility layer that intercepts PHP's built-in f
 
 ```bash
 # Laravel
-php qbixserver.php --root=public --preset=laravel
+php sbin/qbixserver.php --root=public --preset=laravel
 
 # Symfony
-php qbixserver.php --root=public --preset=symfony
+php sbin/qbixserver.php --root=public --preset=symfony
 
 # WordPress
-php qbixserver.php --root=. --preset=wordpress
+php sbin/qbixserver.php --root=. --preset=wordpress
 
 # Drupal
-php qbixserver.php --root=. --preset=drupal
+php sbin/qbixserver.php --root=. --preset=drupal
 
 # Any framework with .htaccess
-php qbixserver.php --root=. --config=compat.json
+php sbin/qbixserver.php --root=. --config=compat.json
 ```
 
 Where `compat.json` is:

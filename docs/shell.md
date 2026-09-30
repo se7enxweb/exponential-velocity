@@ -258,14 +258,18 @@ about 30 ms, an add in under 0.2 ms.
 | `Q.shell.toggleKey` | `` ` `` | the key that opens the console |
 | `Q.shell.allowedOrigins` | `[]` | more origins allowed to open the shell's WebSocket (a proxy's public URL) |
 
-At a terminal, `php qshell.php` starts the same shell without a server, and
-`php qshell.php -c 'health'` runs one line.
+At a terminal, `php bin/qshell.php` starts the same shell without a server, and
+`php bin/qshell.php -c 'health'` runs one line. The shell is a user command, so it
+is in `bin/`; `qshell.php` at the top of the tree, its former path, is a forwarder
+to it ([layout.md, Programs](layout.md#programs-bin-and-sbin)).
 
 **From the phar, the packages, the container image and the binaries.** The runner
 and the console tools are embedded in the phar, which all of these start, and a
 script inside a phar cannot be handed to PHP by path. So the server starts its own
 phar (or, for a static binary, itself) with an internal switch: `--qshell` runs the
-embedded `qshell.php`, `--qconsole` the embedded console tools. The same works by
-hand, `php qbixserver.phar --qshell -c 'health'`. From a source checkout nothing
-changes: `qshell.php` beside the server is run as it is. An installation with no
-runner at all answers `503` with that reason, never `429` ("too many jobs").
+embedded `bin/qshell.php`, `--qconsole` the embedded console tools
+(`sbin/qbixconsole.php`). The same works by hand,
+`php sbin/qbixserver.phar --qshell -c 'health'`. From a source checkout nothing
+changes: `bin/qshell.php` of the server's tree is run as it is (in a tree from
+before 0.0.4.41, `qshell.php` at its top). An installation with no runner at all
+answers `503` with that reason, never `429` ("too many jobs").

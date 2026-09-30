@@ -3,7 +3,7 @@
 CRUD todo list backed by SQLite.
 
 ```bash
-php qbixserver.php --root=examples/todo/web
+php sbin/qbixserver.php --root=examples/todo/web
 ```
 
 Open http://localhost:4000 — add tasks, check them off, delete them.

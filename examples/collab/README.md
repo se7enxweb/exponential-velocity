@@ -3,7 +3,7 @@
 Real-time collaborative kanban board with server-side PHP room handlers and live cursor tracking.
 
 ```bash
-php qbixserver.php --root=examples/collab/web
+php sbin/qbixserver.php --root=examples/collab/web
 ```
 
 Open http://localhost:4000 — enter a name, share the URL to invite others.

@@ -59,7 +59,9 @@ docker run -d -p 8080:8080 -v "$PWD:/srv/site" \
   qbixserver --root=/srv/site/public --port=8080 --workers=16
 ```
 
-`qbixctl` and `qbixconsole` are on the PATH inside the image:
+`qbixserver`, `qbixctl` and `qbixconsole` are on the PATH inside the image, in
+`/usr/local/sbin` with links at their former paths in `/usr/local/bin`
+([layout.md, Programs](layout.md#programs-bin-and-sbin)):
 
 ```bash
 docker exec web qbixctl ext:check          # this image against its baseline
