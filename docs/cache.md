@@ -38,6 +38,27 @@ echo renderFeed();
 The cache is consulted in the server process, before a worker is chosen, so a hit
 costs no worker at all.
 
+Only `enabled: true` turns it on. With nothing about the cache in any loaded
+file, it is off: no page is kept, and nothing is written to `dir` or to
+`files/cache/reverse`. With a [configuration directory](layout.md), the usual
+place is a module that states it, `mods-available/cache.conf`:
+
+```json
+{ "Q": { "web": { "cache": { "enabled": true, "dir": "/var/cache/qbix/example.com" } } } }
+```
+
+`qbixctl enmod cache` turns it on at the next restart, and `qbixctl dismod
+cache` turns it off again: with the module gone, nothing says `enabled`, and
+the cache stays off. A module that sets only `dir` or `defaultTtl` does not
+turn it on. The site's own file (`--config`) is read last, so
+`enabled: false` there switches the cache off whatever a module says; a
+setting saved in the control panel wins over all of them.
+
+Before v0.0.4.39 the server's built-in default was `enabled: true`, although
+this page said otherwise: a server with no cache setting cached every public
+page into `files/cache/reverse`, and disabling the cache module did not stop
+it. An installation that relied on that must now say `enabled: true`.
+
 ---
 
 ### What is kept

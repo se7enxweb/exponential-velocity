@@ -682,8 +682,13 @@ $defaultConfig = array(
 			),
 		),
 		'web' => array(
+			// The response cache is off until a setting turns it on -- the
+			// cache mod, or Q.web.cache.enabled: true in any loaded file --
+			// as docs/cache.md and Q_WebServer_Cache::init() have it. A
+			// default of true here cached every installation that states
+			// nothing, and one whose cache mod was disabled.
 			'cache' => array(
-				'enabled'    => true,
+				'enabled'    => false,
 				'defaultTtl' => 0,
 				'components' => array('enabled' => false),
 			),
