@@ -65,6 +65,43 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.39 — the response cache is off unless a setting turns it on
+
+2026-09-30
+
+### Fixed
+
+- **No cache setting means no cache.** The server's built-in defaults set
+  `Q.web.cache.enabled` to `true`, although `docs/cache.md`, the README and
+  `Q_WebServer_Cache::init()` all said `false`. A server that configured
+  nothing about the cache therefore kept every public page it served, in
+  `files/cache/reverse` below the application directory; and one that
+  enabled the cache through its cache module and later disabled the module
+  (`qbixctl dismod cache`, `mod:disable cache`) went on caching after a
+  restart, because the module was the only file that said anything about
+  the cache. The default is now `false`.
+
+### Behaviour change
+
+- **Enabling the cache is an explicit `enabled: true`**, in a module such as
+  `mods-available/cache.conf` or in the site's own file. An installation
+  whose cache module or configuration states `enabled: true` caches exactly
+  as before; the site file (`--config`) still wins over a module, and a
+  setting saved in the control panel over both. An installation that relied
+  on the old default, with no `enabled` anywhere, stops caching: add
+  `"Q": { "web": { "cache": { "enabled": true } } }` to keep it. A module
+  that sets only `dir`, `defaultTtl` or other cache settings no longer turns
+  the cache on by itself.
+
+### Tests
+
+- `tests/unit-cache-off-unless-enabled.php` starts real servers on a page
+  sending `Cache-Control: public, max-age=300`: with no cache setting (no
+  hit, nothing stored anywhere), with the cache module enabled (hits, stored
+  in its directory), with the module disabled by the engine's own tool and
+  the server restarted (no hit, nothing stored), and with `enabled` true and
+  false in the site file. 4 of its 15 cases fail against v0.0.4.38.
+
 ## v0.0.4.38 — large uploads get a clean 413 or arrive whole, and compressed files open through the file layer
 
 2026-09-29
