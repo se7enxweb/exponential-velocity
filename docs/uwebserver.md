@@ -248,7 +248,8 @@ and `tls`. Every byte a client sent that is not printable ASCII, and `"` and
 never add a line or a field to a log. Each line is one `write(2)` to a file
 opened with `O_APPEND`, so lines of several workers never mix. Log files are
 created with mode 0640, never through a symbolic link, and must be regular
-files. An error log line reads
+files with one name (no hard link) that belong to the server's user or to the
+user it runs as; the pid file too. An error log line reads
 `2026-09-30T12:00:00Z uwebserver[1234]: notice: serving /srv/www on http://127.0.0.1:8000`.
 
 ### Processes and privileges
@@ -259,7 +260,7 @@ files. An error log line reads
 | `--pid-file=FILE` | the process id, with a lock held while running |
 | `-u`, `--user=USER` | the user to run as once the ports are open (root only) |
 | `-g`, `--group=GROUP` | the group (default: the user's); supplementary groups are dropped |
-| `--chroot=DIR` | the root directory to change to before dropping to the user (root only) |
+| `--chroot=DIR` | the root directory to change to before dropping to the user (root only, with `--user`) |
 | `--allow-root` | serve as root without `--user` |
 
 **As root it serves only with `--user` or `--allow-root`.** The start, in
@@ -308,6 +309,9 @@ file; a repeatable option given on the command line replaces the file's values.
 `help`, `version`, `config`, `check` and `print-config` are not settings. An
 unknown setting or a bad value stops it with exit status 2, naming the file and
 the line (`uwebserver: /etc/uwebserver.conf:4: invalid port 'x' for 'port'`).
+Run as root, it reads only a file owned by root that other users cannot change
+(a file its group may change is read, with a warning), the way `sshd` treats
+its own.
 
 `--print-config` prints every setting in effect in this format, and what it
 prints reads back to the same settings (`bind`, `port` and `tls-port` are
@@ -397,6 +401,24 @@ process and fails the test.
 | 2.13 | low | A directory listing is bounded: 20 000 names | as it is | "a directory of 20 050 names" |
 | 2.14 | info | `--max-requests` per connection (1000) | as it is | "--max-requests=3" |
 | 2.15 | info, 0.0.4.41 | `u_serve_file` (never called) spun on EAGAIN inside `sendfile` | replaced by one non-blocking step (`u_sendfile.h`) | the file tests above |
+
+#### Wave 3: privileges and TLS
+
+| # | Severity | Finding | Fix | Test |
+|---|---|---|---|---|
+| 3.1 | high, 0.0.4.41 | It listened on every IPv4 interface by default | 127.0.0.1:8000 by default; every interface only with `--listen='*:PORT'` | `unit-uwebserver-config.php`, the defaults and the former spellings of the port |
+| 3.2 | high, 0.0.4.41 | `SO_REUSEPORT` on every listener: a second start on a port in use, by the same user, took a share of a running server's connections instead of failing | only with `--reuse-port` | "a second server on a port in use: exit 1" |
+| 3.3 | medium, 0.0.4.41 | It ran as whoever started it, root included, with no way to drop privileges | as root it serves only with `--user` (dropped after binding) or `--allow-root`; `--user=root` refused; `--group`, `--chroot` | "as root without --user or --allow-root: exit 1"; `unit-uwebserver-process.php`, `--user=nobody` (real, effective and saved uid and gid, no supplementary groups) |
+| 3.4 | medium, new | The logs and the pid file were opened by name, so a hard link made in advance (to `/etc/passwd`, say) would have had a server started as root append to or truncate that file | a file the server writes must have one name and belong to the server's user or the user it runs as; symbolic links were already refused (`O_NOFOLLOW`) | `unit-uwebserver-privileges.php`: a second name, another user's file, a link |
+| 3.5 | medium, new | Root would take its settings from a configuration file any user may change, or another user owns | refused (exit 2); a warning when its group may change it | "as root, a configuration file any user may change" |
+| 3.6 | low, new | `--chroot` without `--user` would change the root directory of a process that is still root, which does not hold it | a usage error | "--chroot without --user" |
+| 3.7 | low, new | The order of the drop: every file is opened and every port bound first, then the root directory changed, then the supplementary groups, the group and the user (`setresgid`, `setresuid`), and the process checks that root cannot be had back and that all three ids changed; after it the process is not dumpable | as it is | `unit-uwebserver-process.php`, `unit-uwebserver-privileges.php` ("not dumpable") |
+| 3.8 | medium, 0.0.4.41 | TLS 1.2 used OpenSSL's default ciphers, CBC and key exchange without forward secrecy included | ECDHE with AES-GCM or ChaCha20-Poly1305 only; `--tls-ciphers`, `--tls-ciphersuites`, `--tls-min-version` | "a CBC cipher: refused", "TLS 1.1: refused", `unit-uwebserver-tls.php` (`--tls-min-version=1.3`) |
+| 3.9 | low, new | Session tickets would be encrypted with one key for the life of the process, shared by every worker | no tickets; sessions resume from the server's cache | "TLS 1.2: no session ticket" |
+| 3.10 | low, 0.0.4.41 | The ALPN list was set with a client-side call, so nothing was selected; offering `h2` must never select it | a server callback that selects `http/1.1` or nothing | "ALPN offering only h2: none chosen" |
+| 3.11 | info | Compression and renegotiation are off | as it is | "no compression" |
+| 3.12 | medium, new | A private key others may read | refused; a warning when its group may read it; a key that does not match the certificate is refused | `unit-uwebserver-tls.php`, the key cases |
+| 3.13 | info | File modes: logs are created 0640, the pid file 0644, with `O_NOFOLLOW` and `O_CLOEXEC`; no descriptor reaches a child | as it is | `unit-uwebserver-process.php`, the modes |
 
 ### Changes from 0.0.4.41
 

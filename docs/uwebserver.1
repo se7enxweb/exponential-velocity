@@ -226,7 +226,9 @@ so a request can never add a line or a field.
 .TP
 .BR \-\-error\-log =\fIFILE\fR|\fB\-\fR
 Log messages to \fIFILE\fR, or to standard error with \fB\-\fR (\-).
-Files are created with mode 0640 and never through a symbolic link.
+Files are created with mode 0640 and never through a symbolic link, and must
+have one name (no hard link) and belong to the server's user or to \fIUSER\fR;
+the pid file too.
 .SS Process
 .TP
 .BR \-d ", " \-\-daemon
@@ -250,7 +252,7 @@ are dropped.
 .TP
 .BR \-\-chroot =\fIDIR\fR
 Change the root directory to \fIDIR\fR before dropping to \fIUSER\fR. Needs
-root. \fB\-\-root\fR is opened before, so it may lie inside \fIDIR\fR.
+root and \fB\-\-user\fR. \fB\-\-root\fR is opened before, so it may lie inside \fIDIR\fR.
 .TP
 .B \-\-allow\-root
 Serve as root without \fB\-\-user\fR. Refused otherwise.
@@ -266,6 +268,7 @@ The file is read first, then the command line; a repeatable option given on
 the command line replaces the file's values. \fB\-\-help\fR, \fB\-\-version\fR,
 \fB\-\-config\fR, \fB\-\-check\fR and \fB\-\-print\-config\fR are not settings.
 An unknown setting or a bad value stops the program with the file and line.
+Run as root, it reads only a file owned by root that other users cannot change.
 \fB\-\-print\-config\fR prints a file that reads back to the same settings.
 .PP
 .nf

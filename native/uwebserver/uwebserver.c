@@ -231,7 +231,7 @@ static const UwOpt uw_options[] = {
     { "pid-file",       0,   V,     OPT_PID_FILE,      "FILE", "write the process id to FILE, locked" },
     { "user",           'u', V,     OPT_USER,          "USER", "run as USER once the ports are open (needs root)" },
     { "group",          'g', V,     OPT_GROUP,         "GROUP", "run as GROUP (default: the group of USER)" },
-    { "chroot",         0,   V,     OPT_CHROOT,        "DIR", "change the root directory to DIR (needs root)" },
+    { "chroot",         0,   V,     OPT_CHROOT,        "DIR", "change the root directory to DIR (with --user)" },
     { "allow-root",     0,   S,     OPT_ALLOW_ROOT,    NULL, "serve as root without --user (refused otherwise)" },
     { NULL, 0, 0, 0, NULL, NULL }
 };
@@ -458,6 +458,16 @@ static int uw_apply(UwConfig *c, const UwOpt *o, const char *val, int negated, i
 static void uw_read_config(UwConfig *c, const char *file) {
     FILE *f = fopen(file, "re");
     if (!f) { fprintf(stderr, "%s: cannot read the configuration file %s: %s\n", uw_progname, file, strerror(errno)); exit(2); }
+    /* Root does not take its settings from a file other users may change. */
+    struct stat cst;
+    if (geteuid() == 0 && fstat(fileno(f), &cst) == 0) {
+        if ((cst.st_mode & S_IWOTH) || cst.st_uid != 0) {
+            fprintf(stderr, "%s: the configuration file %s may be changed by %s; as root, it is not read\n", uw_progname, file,
+                    (cst.st_mode & S_IWOTH) ? "any user (chmod o-w it)" : "the user who owns it (chown root it)");
+            exit(2);
+        }
+        if (cst.st_mode & S_IWGRP) fprintf(stderr, "%s: warning: the configuration file %s may be changed by its group\n", uw_progname, file);
+    }
     char *line = NULL;
     size_t linecap = 0;
     ssize_t got;
@@ -1634,19 +1644,43 @@ static int uw_serve(void) {
  * Start-up: files, privileges, processes
  * ════════════════════════════════════════════════════════════════════════ */
 
-/* Opens a log file for appending; "-" is the given standard descriptor. */
-static int uw_open_log(const char *spec, int std_fd) {
-    if (strcmp(spec, "-") == 0) return std_fd;
-    int fd = open(spec, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NOCTTY, 0640);
-    if (fd < 0) return -1;
-    struct stat st;
-    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) { close(fd); errno = EINVAL; return -1; }
-    return fd;
-}
-
 static uid_t run_uid;
 static gid_t run_gid;
 static int drop_privileges = 0;
+
+/*
+ * Whether a file the server is about to write (a log, the pid file) is one
+ * it may write: a regular file, with no other name (a hard link would let
+ * whoever made it point the server, perhaps running as root, at a file of
+ * someone else, such as /etc/passwd), owned by the server's user or the user
+ * it will run as. Opening with O_NOFOLLOW has already refused a symbolic
+ * link. 0, or -1 with the reason in why.
+ */
+static int uw_file_is_ours(int fd, const char *path, char *why, size_t whylen) {
+    struct stat st;
+    if (fstat(fd, &st) != 0) { snprintf(why, whylen, "%s: %s", path, strerror(errno)); return -1; }
+    if (!S_ISREG(st.st_mode)) { snprintf(why, whylen, "%s is not a regular file", path); return -1; }
+    if (st.st_nlink != 1) { snprintf(why, whylen, "%s has %lu names (hard links); refusing to write to it", path, (unsigned long)st.st_nlink); return -1; }
+    if (st.st_uid != geteuid() && !(drop_privileges && st.st_uid == run_uid)) {
+        snprintf(why, whylen, "%s belongs to another user (uid %u); refusing to write to it", path, (unsigned)st.st_uid);
+        return -1;
+    }
+    return 0;
+}
+
+/* Opens a log file for appending; "-" is the given standard descriptor.
+ * Returns the descriptor, or -1 with the reason in why. */
+static int uw_open_log(const char *spec, int std_fd, char *why, size_t whylen) {
+    if (strcmp(spec, "-") == 0) return std_fd;
+    int fd = open(spec, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NOCTTY, 0640);
+    if (fd < 0) {
+        snprintf(why, whylen, "cannot open the log %s: %s", spec, errno == ELOOP ? "it is a symbolic link" : strerror(errno));
+        return -1;
+    }
+    if (uw_file_is_ours(fd, spec, why, whylen) != 0) { close(fd); return -1; }
+    return fd;
+}
+
 
 static int uw_lookup_identity(char *err, size_t errlen) {
     drop_privileges = 0;
@@ -1707,8 +1741,8 @@ static int uw_write_pid_file(void) {
     if (!cfg.pid_file) return 0;
     int fd = open(cfg.pid_file, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NOCTTY, 0644);
     if (fd < 0) { uw_log(UW_LOG_ERROR, "cannot open the pid file %s: %s", cfg.pid_file, strerror(errno)); return -1; }
-    struct stat st;
-    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) { uw_log(UW_LOG_ERROR, "the pid file %s is not a regular file", cfg.pid_file); close(fd); return -1; }
+    char why[512];
+    if (uw_file_is_ours(fd, cfg.pid_file, why, sizeof why) != 0) { uw_log(UW_LOG_ERROR, "the pid file: %s", why); close(fd); return -1; }
     if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
         char old[32] = "";
         ssize_t n = pread(fd, old, sizeof old - 1, 0);
@@ -1895,8 +1929,9 @@ static int uw_check_resources(int starting) {
         const char *logs[2] = { cfg.access_log, cfg.error_log };
         for (int i = 0; i < 2; i++) {
             if (!strcmp(logs[i], "-") || !strcmp(logs[i], "off")) continue;
-            int fd = uw_open_log(logs[i], -1);
-            if (fd < 0) { uw_log(UW_LOG_ERROR, "cannot open the log %s: %s", logs[i], strerror(errno)); return -1; }
+            char why[512];
+            int fd = uw_open_log(logs[i], -1, why, sizeof why);
+            if (fd < 0) { uw_log(UW_LOG_ERROR, "%s", why); return -1; }
             close(fd);
         }
         if (cfg.pid_file) {
@@ -1918,6 +1953,7 @@ static void uw_validate(void) {
     if ((cfg.cert != NULL) != (cfg.key != NULL)) uw_usage_error("%s", cfg.cert ? "--cert needs --key" : "--key needs --cert");
     if ((cfg.tls_port_given || cfg.tls_listen.n) && !cfg.cert) uw_usage_error("%s needs --cert and --key", cfg.tls_listen.n ? "--tls-listen" : "--tls-port");
     if (cfg.chain && !cfg.cert) uw_usage_error("--chain needs --cert and --key");
+    if (cfg.chroot_dir && !cfg.user) uw_usage_error("--chroot needs --user: a change of root directory does not hold a process that is still root");
     if (cfg.max_uri > cfg.max_header) uw_usage_error("--max-uri-length (%lld) is more than --max-header-size (%lld)", cfg.max_uri, cfg.max_header);
     if (!cfg.root && (cfg.dirlist || cfg.gzip_static || cfg.mime_types))
         uw_usage_error("%s needs --root", cfg.dirlist ? "--directory-listing" : cfg.gzip_static ? "--gzip-static" : "--mime-types");
@@ -2011,16 +2047,19 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    int efd = uw_open_log(cfg.error_log, 2);
-    if (efd < 0) { fprintf(stderr, "%s: cannot open the error log %s: %s\n", uw_progname, cfg.error_log, strerror(errno)); return 1; }
+    char why[512];
+    /* Who it will run as decides which log files it may write (uw_file_is_ours). */
+    if (uw_lookup_identity(why, sizeof why) != 0) { fprintf(stderr, "%s: %s\n", uw_progname, why); return 1; }
+    int efd = uw_open_log(cfg.error_log, 2, why, sizeof why);
+    if (efd < 0) { fprintf(stderr, "%s: the error log: %s\n", uw_progname, why); return 1; }
     uw_errlog_fd = efd;
     conns_cap = uw_raise_nofile();
     conns = (Conn **)calloc((size_t)conns_cap, sizeof(Conn *));
     if (!conns) { uw_log(UW_LOG_ERROR, "out of memory"); return 1; }
     if (uw_check_resources(1) != 0) return 1;
     if (strcmp(cfg.access_log, "off") != 0) {
-        access_fd = uw_open_log(cfg.access_log, 1);
-        if (access_fd < 0) { uw_log(UW_LOG_ERROR, "cannot open the access log %s: %s", cfg.access_log, strerror(errno)); return 1; }
+        access_fd = uw_open_log(cfg.access_log, 1, why, sizeof why);
+        if (access_fd < 0) { uw_log(UW_LOG_ERROR, "the access log: %s", why); return 1; }
     }
     signal(SIGPIPE, SIG_IGN);
     struct sigaction sa; memset(&sa, 0, sizeof sa);

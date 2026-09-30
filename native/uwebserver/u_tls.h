@@ -62,7 +62,10 @@ static SSL_CTX *uw_tls_ctx_new(const char *cert, const char *key, const char *ch
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
     if (!ctx) { snprintf(err, errlen, "TLS: %s", uw_tls_error()); return NULL; }
     SSL_CTX_set_min_proto_version(ctx, (min_version && strcmp(min_version, "1.3") == 0) ? TLS1_3_VERSION : TLS1_2_VERSION);
-    SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION | SSL_OP_NO_RENEGOTIATION);
+    /* No compression (CRIME), no renegotiation, and no session tickets: their
+     * key would live, unchanged, as long as the process (and be shared by every
+     * worker); sessions resume from the server's cache instead. */
+    SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION | SSL_OP_NO_RENEGOTIATION | SSL_OP_NO_TICKET);
 #ifdef SSL_OP_ALLOW_CLIENT_RENEGOTIATION
     SSL_CTX_clear_options(ctx, SSL_OP_ALLOW_CLIENT_RENEGOTIATION);   /* OpenSSL 3 refuses it by default; keep it so */
 #endif
