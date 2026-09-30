@@ -10,7 +10,7 @@
  * the client blocked forever. Symptom: 1 of 3 responses.
  *
  * Build and run:
- *   gcc -O2 -o uweb native/uwebserver/uwebserver.c -lssl -lcrypto -lpthread
+ *   gcc -O2 -o uweb native/uwebserver/uwebserver.c -lssl -lcrypto
  *   ./uweb --port=21010 &
  *   php tests/pipelining.php 21010
  */

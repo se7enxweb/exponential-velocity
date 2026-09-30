@@ -1276,73 +1276,116 @@ static void do_read(int fd) {
 #define UWEB_BUILD "source"
 #endif
 
-/* --version, -v, -V, --about, --copyright ...: what this program is, the way
- * the PHP programs of the server say it (Q_WebServer_About), GNU style. */
-static int uweb_about(int argc, char **argv) {
-    static const char *flags[] = { "--version", "-version", "-v", "-V", "--about", "-about", "--copyright", "-copyright" };
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--") == 0) return 0;
-        for (size_t f = 0; f < sizeof(flags) / sizeof(flags[0]); f++) {
-            if (strcmp(argv[i], flags[f]) != 0) continue;
-            printf("uwebserver (Exponential Velocity) %s\n"
-                   "A small web server in C for benchmarks and tests beside Exponential Velocity:\n"
-                   "static files over HTTP and HTTPS with keep-alive and pipelining.\n\n"
-                   "  Program:      uwebserver -- a minimal static web server, compiled\n"
-                   "  Version:      %s+%s\n"
-                   "  Built:        %s %s, %s\n"
-                   "  Options:      [--port N] [--tls-port N --cert FILE --key FILE]\n"
-                   "  Home page:    https://github.com/se7enxweb/exponential-velocity\n\n"
-                   "Copyright (C) 2026 7x (se7enx.com) -- Exponential Velocity\n"
-                   "Copyright (C) 2024-2026 Qbix, Inc.\n"
-                   "License MIT: <https://opensource.org/license/mit>; the full text is in\n"
-                   "the LICENSE file that comes with the program.\n"
-                   "This is free software: you are free to change and redistribute it.\n"
-                   "There is NO WARRANTY, to the extent permitted by law.\n\n"
-                   "Written by 7x (se7enx.com), on the Qbix Server by Qbix, Inc. and contributors.\n",
-                   UWEB_VERSION, UWEB_VERSION, UWEB_BUILD, __DATE__, __TIME__,
-#ifdef __VERSION__
-                   "compiler " __VERSION__
-#else
-                   "unknown compiler"
-#endif
-                   );
-            return 1;
-        }
+#include "u_options.h"
+
+enum { OPT_HELP = 1, OPT_VERSION, OPT_ABOUT, OPT_PORT, OPT_TLS_PORT, OPT_CERT, OPT_KEY };
+
+static const UwOpt uw_options[] = {
+    { "port",      'p', UWO_VALUE, OPT_PORT,     "PORT", "serve HTTP on PORT (default 8080)" },
+    { "tls-port",  0,   UWO_VALUE, OPT_TLS_PORT, "PORT", "serve HTTPS on PORT (default 8443 with --cert)" },
+    { "cert",      0,   UWO_VALUE, OPT_CERT,     "FILE", "the certificate (PEM, with its chain) for HTTPS" },
+    { "key",       0,   UWO_VALUE, OPT_KEY,      "FILE", "the private key (PEM) of --cert" },
+    { "help",      'h', UWO_CLI_ONLY, OPT_HELP,    NULL, "print this help and exit" },
+    { "version",   'V', UWO_CLI_ONLY, OPT_VERSION, NULL, "print the version and exit" },
+    { "about",     0,   UWO_CLI_ONLY, OPT_ABOUT,   NULL, "print the version with build details and exit" },
+    { "copyright", 0,   UWO_CLI_ONLY | UWO_HIDDEN, OPT_ABOUT, NULL, NULL },
+    { "",          'v', UWO_CLI_ONLY | UWO_HIDDEN, OPT_VERSION, NULL, NULL },
+    { NULL, 0, 0, 0, NULL, NULL }
+};
+
+static void uw_print_help(void) {
+    printf("Usage: %s [OPTION]...\n"
+           "A small web server in C for benchmarks and tests beside Exponential Velocity.\n\n",
+           uw_progname);
+    for (const UwOpt *o = uw_options; o->name; o++) {
+        if (o->flags & UWO_HIDDEN) continue;
+        char left[64];
+        if (o->shortc) snprintf(left, sizeof left, "-%c, --%s%s%s", o->shortc, o->name, o->argname ? "=" : "", o->argname ? o->argname : "");
+        else snprintf(left, sizeof left, "    --%s%s%s", o->name, o->argname ? "=" : "", o->argname ? o->argname : "");
+        printf("  %-26s %s\n", left, o->help);
     }
-    return 0;
+    printf("\nExit status: 0 on success, 1 when the server cannot start, 2 on a usage error.\n\n"
+           "Report bugs to: https://github.com/se7enxweb/exponential-velocity/issues\n"
+           "Home page: <https://github.com/se7enxweb/exponential-velocity>\n");
+}
+
+/* --version, -V, -v, --about, --copyright (and -version, -about, -copyright):
+ * what this program is, the way the PHP programs of the server say it
+ * (Q_WebServer_About), GNU style. */
+static void uw_print_about(void) {
+    printf("uwebserver (Exponential Velocity) %s\n"
+           "A small web server in C for benchmarks and tests beside Exponential Velocity:\n"
+           "HTTP and HTTPS with keep-alive and pipelining.\n\n"
+           "  Program:      uwebserver -- a minimal web server, compiled\n"
+           "  Version:      %s+%s\n"
+           "  Built:        %s %s, %s\n"
+           "  Options:      uwebserver --help\n"
+           "  Home page:    https://github.com/se7enxweb/exponential-velocity\n\n"
+           "Copyright (C) 2026 7x (se7enx.com) -- Exponential Velocity\n"
+           "Copyright (C) 2024-2026 Qbix, Inc.\n"
+           "License MIT: <https://opensource.org/license/mit>; the full text is in\n"
+           "the LICENSE file that comes with the program.\n"
+           "This is free software: you are free to change and redistribute it.\n"
+           "There is NO WARRANTY, to the extent permitted by law.\n\n"
+           "Written by 7x (se7enx.com), on the Qbix Server by Qbix, Inc. and contributors.\n",
+           UWEB_VERSION, UWEB_VERSION, UWEB_BUILD, __DATE__, __TIME__,
+#ifdef __VERSION__
+           "compiler " __VERSION__
+#else
+           "unknown compiler"
+#endif
+           );
+}
+
+static int uw_port_value(const UwArg *a) {
+    long long v;
+    if (uw_parse_long(a->value, 1, 65535, &v) != 0)
+        uw_usage_error("invalid port '%s' for '%s' (1 to 65535)", a->value, a->spelled);
+    return (int)v;
 }
 
 int main(int argc, char** argv) {
-    if (uweb_about(argc, argv)) return 0;
-    signal(SIGINT, sighandler);
-    signal(SIGTERM, sighandler);
-    signal(SIGPIPE, SIG_IGN);
+    UwParsed parsed;
+    uw_parse_argv(uw_options, argc, argv, &parsed);   /* exits 2 on any error */
 
     int port = 8080, tls_port = 0;
     const char *cert = NULL, *key = NULL;
 
-    /* GNU and BSD spellings alike: --name=V, --name V, -name=V, -name V. */
-    for (int i = 1; i < argc; i++) {
-        const char *a = argv[i], *val = NULL;
-        static const char *names[] = { "port", "tls-port", "cert", "key" };
-        int which = -1;
-        if (a[0] != '-') { port = atoi(a); continue; }
-        a += (a[1] == '-') ? 2 : 1;
-        for (int n = 0; n < 4; n++) {
-            size_t len = strlen(names[n]);
-            if (strncmp(a, names[n], len) == 0 && (a[len] == '=' || a[len] == '\0')) {
-                which = n;
-                if (a[len] == '=') val = a + len + 1;
-                else if (i + 1 < argc && argv[i + 1][0] != '-') val = argv[++i];
-                break;
-            }
+    for (int i = 0; i < parsed.nargs; i++) {
+        const UwArg *a = &parsed.args[i];
+        switch (a->opt->id) {
+        case OPT_HELP:    uw_print_help();  return 0;
+        case OPT_VERSION:
+        case OPT_ABOUT:   uw_print_about(); return 0;
+        default: break;
         }
-        if (which < 0 || !val) continue;
-        if (which == 0) port = atoi(val);
-        else if (which == 1) tls_port = atoi(val);
-        else if (which == 2) cert = val;
-        else key = val;
     }
+    /* A bare number was once read as the port: still accepted, with a note. */
+    for (int i = 0; i < parsed.nwords; i++) {
+        long long v;
+        if (uw_parse_long(parsed.words[i], 1, 65535, &v) != 0)
+            uw_usage_error("unexpected argument '%s'", parsed.words[i]);
+        fprintf(stderr, "%s: a port given as a bare argument is deprecated; use --port=%s\n", uw_progname, parsed.words[i]);
+        port = (int)v;
+    }
+    for (int i = 0; i < parsed.nargs; i++) {
+        const UwArg *a = &parsed.args[i];
+        switch (a->opt->id) {
+        case OPT_PORT:     port = uw_port_value(a); break;
+        case OPT_TLS_PORT: tls_port = uw_port_value(a); break;
+        case OPT_CERT:     cert = a->value; break;
+        case OPT_KEY:      key = a->value; break;
+        default: break;
+        }
+    }
+    if ((cert != NULL) != (key != NULL))
+        uw_usage_error("%s", cert ? "--cert needs --key" : "--key needs --cert");
+    if (tls_port && !cert)
+        uw_usage_error("--tls-port needs --cert and --key");
+
+    signal(SIGINT, sighandler);
+    signal(SIGTERM, sighandler);
+    signal(SIGPIPE, SIG_IGN);
 
     /* TLS setup */
     if (cert && key) {

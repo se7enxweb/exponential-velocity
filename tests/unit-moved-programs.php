@@ -126,9 +126,15 @@ check('qshell.php --exec with a bad request: its own exit status (2)', $bad[0], 
 
 // uwebserver: the binary in sbin/, a forwarder at bin/.
 if (is_file("$root/sbin/uwebserver") && is_executable("$root/sbin/uwebserver")) {
-	// Only the flags it answers without starting: any other argument makes it
-	// serve (on :8080), so --help is never passed to it here.
-	foreach (array(array('--version'), array('-V'), array('--about')) as $args) {
+	// A binary built before 0.0.4.42 started serving (on 0.0.0.0:8080) on any
+	// argument but its about flags, --help and usage errors included, so those
+	// are passed only to a binary that has a --help (its usage text is in it).
+	$uwCalls = array(array('--version'), array('-V'), array('--about'));
+	if (strpos((string) file_get_contents("$root/sbin/uwebserver"), 'Usage: %s [OPTION]...') !== false) {
+		$uwCalls[] = array('--help');
+		$uwCalls[] = array('--no-such-option');
+	}
+	foreach ($uwCalls as $args) {
 		$a = run(array_merge(array("$root/bin/uwebserver"), $args), '', $env);
 		$b = run(array_merge(array("$root/sbin/uwebserver"), $args), '', $env);
 		check('bin/uwebserver ' . implode(' ', $args) . ' answers as sbin/uwebserver does', $a, $b);
