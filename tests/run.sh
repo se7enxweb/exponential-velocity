@@ -116,7 +116,7 @@ start_server() {
     pkill -f "qbixserver.php.*$PORT" 2>/dev/null || true
     sleep 1
     cd "$ROOT_DIR"
-    php qbixserver.php --root="$SCRIPT_DIR/web" --port=$PORT > /tmp/qbix_test.log 2>&1 &
+    php sbin/qbixserver.php --root="$SCRIPT_DIR/web" --port=$PORT > /tmp/qbix_test.log 2>&1 &
     SERVER_PID=$!
     sleep 2
     if ! kill -0 $SERVER_PID 2>/dev/null; then
@@ -399,7 +399,7 @@ run_http_advanced() {
     done
 
     bold "\n  Config test (-t)"
-    T_OUT=$(php "$ROOT_DIR/qbixserver.php" -t --root="$SCRIPT_DIR/web" 2>&1)
+    T_OUT=$(php "$ROOT_DIR/sbin/qbixserver.php" -t --root="$SCRIPT_DIR/web" 2>&1)
     if echo "$T_OUT" | grep -q "Config: OK"; then
         green "  ✓ Config test (-t) passes"
         PASS=$((PASS+1))

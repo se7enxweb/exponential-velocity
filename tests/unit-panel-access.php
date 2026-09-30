@@ -46,8 +46,8 @@ $http2 = function_exists('curl_init') && defined('CURL_HTTP_VERSION_2TLS')
 	&& (curl_version()['features'] & CURL_VERSION_HTTP2)
 	&& function_exists('openssl_pkey_new');
 
-$server = __DIR__ . '/../qbixserver.php';
-$ctl = __DIR__ . '/../qbixctl.php';
+$server = __DIR__ . '/../sbin/qbixserver.php';
+$ctl = __DIR__ . '/../sbin/qbixctl.php';
 $local = '127.0.0.1';
 $remote = '127.0.0.2';
 

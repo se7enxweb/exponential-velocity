@@ -239,7 +239,7 @@ $port = 0;
 for ($i = 0; $i < 40 and !$port; ++$i) { $pp = 21900 + random_int(0, 1500); $s = @stream_socket_server("tcp://127.0.0.1:$pp"); if ($s) { fclose($s); $port = $pp; } }
 file_put_contents("$srv/config.json", json_encode(array('Q' => array('panel' => array('aclDir' => "$srv/etc/acl", 'sessionsDir' => "$srv/var/sessions"),
 	'web' => array('cache' => array('enabled' => false))))));
-$proc = proc_open(array(PHP_BINARY, __DIR__ . '/../qbixserver.php', '--config=' . "$srv/config.json", '--root=' . "$srv/web",
+$proc = proc_open(array(PHP_BINARY, __DIR__ . '/../sbin/qbixserver.php', '--config=' . "$srv/config.json", '--root=' . "$srv/web",
 	'--port=' . $port, '--workers=4'), array(0 => array('file', '/dev/null', 'r'), 1 => array('file', "$srv/log", 'w'), 2 => array('file', "$srv/log", 'a')), $pipes);
 for ($i = 0; $i < 60; ++$i) { $s = @stream_socket_client("tcp://127.0.0.1:$port", $e, $es, 1); if ($s) { fclose($s); break; } usleep(250000); }
 check('the server says where the panel keeps its store', strpos((string) @file_get_contents("$srv/log"), "panel: credentials in $srv/etc/acl, sessions in $srv/var/sessions") !== false, true);
@@ -274,7 +274,7 @@ for ($i = 0; $i < 40; ++$i) { $s = @proc_get_status($proc); if (!$s or empty($s[
 // ── qbixctl panel:check ─────────────────────────────────────────────
 file_put_contents("$ok/config.json", json_encode(array('Q' => array('panel' => array('aclDir' => "$ok/acl", 'sessionsDir' => "$ok/sessions")))));
 mkdir("$ok/web", 0755);
-exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixctl.php') . ' panel:check --root=' . escapeshellarg("$ok/web")
+exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixctl.php') . ' panel:check --root=' . escapeshellarg("$ok/web")
 	. ' --config=' . escapeshellarg("$ok/config.json") . ' --json 2>&1', $out, $code);
 $rep = json_decode(implode("\n", $out), true);
 check('panel:check: a trusted store exits 0', $code, 0);
@@ -282,7 +282,7 @@ check('...and says so', $rep['ok'] ?? null, true);
 file_put_contents("$att/config.json", json_encode(array('Q' => array('panel' => array('aclDir' => "$att/doc/acl", 'sessionsDir' => "$att/doc/sessions")))));
 mkdir("$att/web", 0755);
 $out = array();
-exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixctl.php') . ' panel:check --root=' . escapeshellarg("$att/web")
+exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixctl.php') . ' panel:check --root=' . escapeshellarg("$att/web")
 	. ' --config=' . escapeshellarg("$att/config.json") . ' 2>&1', $out, $code);
 check('panel:check: a planted store exits 1', $code, 1);
 check('...saying LOCKED with the fix', strpos(implode("\n", $out), 'LOCKED') !== false and strpos(implode("\n", $out), 'chmod 700') !== false, true);

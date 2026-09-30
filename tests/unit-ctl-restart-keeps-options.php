@@ -100,7 +100,7 @@ function get($port, $https = false)
 	$ctx = stream_context_create(array('ssl' => array('verify_peer' => false, 'verify_peer_name' => false), 'http' => array('timeout' => 5)));
 	return @file_get_contents(($https ? 'https' : 'http') . "://127.0.0.1:$port/", false, $ctx);
 }
-$ctl = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(realpath(__DIR__ . '/../qbixctl.php'));
+$ctl = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(realpath(__DIR__ . '/../sbin/qbixctl.php'));
 $https = extension_loaded('openssl');
 
 // ── 1. Started with qbixctl start and every kind of option ──────────────
@@ -157,7 +157,7 @@ check('stop removes the pid file and the record with it', array($c5, is_file($pi
 // ── 4. Started by hand, without a pid file: from the process table ──────
 $port2 = free_port();
 $cmd = 'cd ' . escapeshellarg("$base/site") . ' && QBIX_RESTART_PROBE=byhand exec ' . escapeshellarg(PHP_BINARY) . ' -d precision=11 '
-	. escapeshellarg(realpath(__DIR__ . '/../qbixserver.php')) . " --root=web --host=127.0.0.1 --port=$port2 --workers=1 --distribution=none --conf-dir=none"
+	. escapeshellarg(realpath(__DIR__ . '/../sbin/qbixserver.php')) . " --root=web --host=127.0.0.1 --port=$port2 --workers=1 --distribution=none --conf-dir=none"
 	. ' --keep-globals=qbixByHand > ' . escapeshellarg("$base/log/byhand.log") . ' 2>&1 < /dev/null &';
 exec("($cmd)");
 for ($i = 0; $i < 80 and get($port2) === false; ++$i) usleep(250000);

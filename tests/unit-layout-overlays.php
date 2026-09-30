@@ -71,7 +71,7 @@ check('an overlay design file wins over upstream, file by file', Q_WebServer_Des
 // ── The server reports the stack ─────────────────────────────────────────
 // With no overlay registered, the server uses the tree asked for alone.
 $out = shell_exec('env -u QBIX_CONF_DIR -u EXAMPLE_CONF_DIR '
-	. escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixserver.php')
+	. escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixserver.php')
 	. ' --distribution=none --config=' . escapeshellarg("$vc/sites-enabled/site.conf") . ' --layout 2>&1');
 $report = json_decode((string) $out, true);
 check('--layout: with no overlay registered, only the tree asked for', $report['stack'] ?? $out, array($vc));

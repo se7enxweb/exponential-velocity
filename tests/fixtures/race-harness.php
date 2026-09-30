@@ -8,7 +8,7 @@
  * once:
  *
  *   - a private temporary directory per test process, removed on exit;
- *   - servers started from the source tree (qbixserver.php) on a free random
+ *   - servers started from the source tree (sbin/qbixserver.php) on a free random
  *     port, with proc_open descriptors rather than shell redirection so the
  *     pid we hold is the server's, and terminated on exit (TERM, wait, KILL);
  *   - a non-blocking HTTP/1.1 client that keeps N requests in flight at once
@@ -197,7 +197,7 @@ function rh_start($name, $config = array(), $workers = 3, $withPid = true)
 	if (!$port) { fwrite(STDERR, "  FAIL - no free port\n"); exit(1); }
 	// An empty config is still an object: "{}", not "[]".
 	file_put_contents("$base/$name.json", $config ? json_encode($config) : '{}');
-	$cmd = array(PHP_BINARY, __DIR__ . '/../../qbixserver.php',
+	$cmd = array(PHP_BINARY, __DIR__ . '/../../sbin/qbixserver.php',
 		'--config=' . "$base/$name.json", '--root=' . $root,
 		'--port=' . $port, '--workers=' . (int) $workers);
 	if ($withPid) $cmd[] = '--pid=' . "$base/$name.pid";

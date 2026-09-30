@@ -57,7 +57,7 @@ function sources()
 		}
 	}
 	sort($found);
-	$entry = __DIR__ . '/../qbixserver.php';
+	$entry = __DIR__ . '/../sbin/qbixserver.php';
 	if (is_file($entry)) $found[] = $entry;
 	return $found;
 }

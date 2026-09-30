@@ -75,7 +75,7 @@ $canRead = function ($name) {
 	$pid = pcntl_fork();
 	if ($pid === 0) {
 		@posix_setgid((int) $pw['gid']); @posix_setuid((int) $pw['uid']);
-		exit(is_readable(__DIR__ . '/../qshell.php') && is_readable(__DIR__ . '/../src/Q.php') ? 0 : 1);
+		exit(is_readable(__DIR__ . '/../bin/qshell.php') && is_readable(__DIR__ . '/../src/Q.php') ? 0 : 1);
 	}
 	pcntl_waitpid($pid, $st);
 	return pcntl_wifexited($st) && pcntl_wexitstatus($st) === 0;

@@ -92,7 +92,7 @@ mkdir("$base/b/web", 0755, true);
 mkdir("$base/b/var/log", 0755, true);
 file_put_contents("$base/b/web/index.php", '<?php echo "log ok";');
 $s = stream_socket_server('tcp://127.0.0.1:0'); $port = (int) substr(strrchr(stream_socket_get_name($s, false), ':'), 1); fclose($s);
-$ctl = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(realpath(__DIR__ . '/../qbixctl.php'));
+$ctl = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(realpath(__DIR__ . '/../sbin/qbixctl.php'));
 $srv = ' --distribution=none --conf-dir=none --root=' . escapeshellarg("$base/b/web") . " --host=127.0.0.1 --port=$port --workers=1 --pid=" . escapeshellarg("$base/b/server.pid");
 $before = is_file("$tmp/qbixserver.log") ? filemtime("$tmp/qbixserver.log") . ':' . filesize("$tmp/qbixserver.log") : null;
 exec("$ctl start$srv 2>&1", $o1, $c1);

@@ -36,7 +36,7 @@ function check($what, $got, $want)
 		var_export($got, true), var_export($want, true));
 }
 
-$phar = __DIR__ . '/../bin/qbixserver.phar';
+$phar = __DIR__ . '/../sbin/qbixserver.phar';
 if (!is_file($phar)) {
 	printf("  skip  no phar at %s\n", $phar);
 	exit(0);

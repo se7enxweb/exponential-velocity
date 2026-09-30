@@ -114,7 +114,7 @@ function startServer($tmp, $debug, &$procs)
 	$port = freePort();
 	if (!$port) return array(0, '');
 	$log = $tmp . '/' . ($debug ? 'debug' : 'plain') . '.log';
-	$cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixserver.php')
+	$cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixserver.php')
 		. ' --root=' . escapeshellarg($tmp . DS . 'web') . ' --host=127.0.0.1'
 		. ' --port=' . $port . ' --workers=2' . ($debug ? ' --debug' : '');
 	$proc = proc_open($cmd, array(0 => array('file', '/dev/null', 'r'),

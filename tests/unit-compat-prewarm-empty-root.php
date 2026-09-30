@@ -69,7 +69,7 @@ check('...and does not walk the filesystem', $n, 0);
 check('...and returns at once', microtime(true) - $started < 1.0, true);
 
 // The server picks the document root itself when nothing is above it.
-$src = file_get_contents(__DIR__ . '/../qbixserver.php');
+$src = file_get_contents(__DIR__ . '/../sbin/qbixserver.php');
 check('qbixserver.php prewarms --root itself when one level up is /',
 	strpos($src, "\$prewarmDir === DIRECTORY_SEPARATOR || !is_dir(\$prewarmDir)") !== false, true);
 

@@ -37,12 +37,12 @@ echo ""
 rm -f /tmp/qbix-panel.json tests/local/panel.json local/panel.json
 
 # Fork mode (1 worker, octane=off via env; actually use --workers=0 for fork-per-request)
-php qbixserver.php --root=tests/web --port=$PORT --workers=0 \
+php sbin/qbixserver.php --root=tests/web --port=$PORT --workers=0 \
     > /dev/null 2>&1 &
 FPID=$!
 
 # Octane mode (2 workers so we can test same-worker dispatch)
-php qbixserver.php --root=tests/web --port=$OPORT --workers=2 \
+php sbin/qbixserver.php --root=tests/web --port=$OPORT --workers=2 \
     > /dev/null 2>&1 &
 OPID=$!
 

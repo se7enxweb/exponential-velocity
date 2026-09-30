@@ -110,7 +110,7 @@ $h = $X::installHints(array('json'), 'apt', '8.3');
 check('a core extension is part of PHP', count($h['commands']) === 0 && strpos($h['notes'][0], 'part of PHP') !== false, true);
 
 // ── The CLI ────────────────────────────────────────────────
-$ctl = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixctl.php');
+$ctl = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixctl.php');
 $run = function ($args) use ($ctl) {
 	$out = array();
 	exec("$ctl $args 2>&1", $out, $code);

@@ -95,7 +95,7 @@ mkdir -p /tmp/test-logs-$$
 echo "{\"Q\":{\"webserver\":{\"log\":{\"dir\":\"/tmp/test-logs-$$\"}}}}" > /tmp/test-http-cfg-$$.json
 
 cd "$ROOT_DIR"
-setsid php qbixserver.php --root=tests/web --port=$PORT \
+setsid php sbin/qbixserver.php --root=tests/web --port=$PORT \
     --config=/tmp/test-http-cfg-$$.json \
     </dev/null >/dev/null 2>/dev/null &
 SERVER_PID=$!

@@ -2,14 +2,14 @@
 /**
  * The shell works from the phar, run as an ordinary user.
  *
- * The shell's runner (qshell.php) and the console tools are embedded in the
+ * The shell's runner (bin/qshell.php) and the console tools are embedded in the
  * phar, and the server starts them through it (--qshell, --qconsole): a script
  * inside a phar cannot be handed to PHP by path. Before, the phar carried
  * neither, and every command answered "the shell runner is missing" -- as a
  * 429 the console read as "too many jobs". The packages, the container image
  * and the static binaries all start this same phar.
  *
- * Starts bin/qbixserver.phar on 127.0.0.1 as a non-root user (nobody, when run
+ * Starts sbin/qbixserver.phar on 127.0.0.1 as a non-root user (nobody, when run
  * as root), sets the panel's password, signs in, and runs `help`, `server
  * status` (a console command the server runs for the runner) and `history`
  * through the shell's API.
@@ -34,13 +34,13 @@ function done()
 	exit($fails ? 1 : 0);
 }
 
-$phar = dirname(__DIR__) . '/bin/qbixserver.phar';
+$phar = dirname(__DIR__) . '/sbin/qbixserver.phar';
 if (!is_file($phar) || !class_exists('Phar')) { echo "  skip  no phar or no phar extension\n"; exit(0); }
 if (!function_exists('proc_open') || DS !== '/') { echo "  skip  needs proc_open on a Unix system\n"; exit(0); }
 
 // ── What the phar carries ────────────────────────────────────────────────
 $p = new Phar($phar);
-foreach (array('qshell.php', 'qbixconsole.php', 'qbixctl.php') as $f) check("the phar carries $f", isset($p[$f]), true);
+foreach (array('bin/qshell.php', 'sbin/qbixconsole.php', 'sbin/qbixctl.php', 'sbin/qbixserver.php', 'qshell.php', 'qbixconsole.php', 'qbixctl.php', 'qbixserver.php') as $f) check("the phar carries $f", isset($p[$f]), true);
 unset($p);
 
 // ── How each build starts the runner (Shell_Entry::packed) ───────────────

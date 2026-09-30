@@ -46,7 +46,7 @@ run_mode() {
 	local label=$1 port=$2 probe_app=$3; shift 3
 	echo ""
 	echo "──────── $label ────────"
-	php "$WS/qbixserver.php" "$@" --port="$port" > "/tmp/probe-$port.log" 2>&1 &
+	php "$WS/sbin/qbixserver.php" "$@" --port="$port" > "/tmp/probe-$port.log" 2>&1 &
 	PID=$!
 	if ! wait_up "$port"; then
 		echo "  FAIL server never accepted on port $port"

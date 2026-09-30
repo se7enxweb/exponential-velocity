@@ -12,13 +12,14 @@
 # sh and Solaris' /bin/sh as well as bash, so the moment it needs bash it
 # stops being able to answer the question it exists to ask.
 #
-#   sh tests/phar-serves.sh [path/to/qbixserver.phar]
+#   sh tests/phar-serves.sh [path/to/qbixserver.phar]   (default sbin/qbixserver.phar;
+#                                                     bin/qbixserver.phar is the same file)
 #
 # PHP=/path/to/php  overrides the interpreter.
 
 set -u
 
-PHAR="${1:-bin/qbixserver.phar}"
+PHAR="${1:-sbin/qbixserver.phar}"
 PHP="${PHP:-php}"
 PORT="${PORT:-19777}"
 
@@ -186,7 +187,8 @@ fi
 # it cannot provide extensions -- only report them. What the server itself
 # needs (the mini variant, or CHECK_VARIANT) must all be there; lite and
 # standard are shown, not required, with the host's own install command.
-CTL="$(dirname "$PHAR")/../qbixctl.php"
+CTL="$(dirname "$PHAR")/../sbin/qbixctl.php"
+[ -f "$CTL" ] || CTL="$(dirname "$PHAR")/../qbixctl.php"
 if [ -f "$CTL" ]; then
     CHECK_VARIANT="${CHECK_VARIANT:-mini}"
     if "$PHP" "$CTL" ext:check --variant="$CHECK_VARIANT" >"$TMP/check" 2>&1; then

@@ -28,7 +28,7 @@ port() { echo $(( 8800 + RANDOM % 800 )); }
 
 start() { # start <logfile> <args...>
     local log="$1"; shift
-    ( setsid "$PHP" "$WS/qbixserver.php" "$@" >"$log" 2>&1 </dev/null & )
+    ( setsid "$PHP" "$WS/sbin/qbixserver.php" "$@" >"$log" 2>&1 </dev/null & )
     for _ in $(seq 1 25); do
         sleep 0.4
         if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/" 2>/dev/null \
@@ -240,7 +240,7 @@ else
     echo "  SKIP: no Platform at $PLATFORM"
 fi
 
-for f in "$WS"/src/Q/*.php "$WS"/src/Q/WebServer/*.php "$WS"/qbixserver.php; do
+for f in "$WS"/src/Q/*.php "$WS"/src/Q/WebServer/*.php "$WS"/sbin/qbixserver.php; do
     "$PHP" -l "$f" >/dev/null 2>&1 || bad "syntax error in $(basename "$f")"
 done
 ok "all sources lint clean"

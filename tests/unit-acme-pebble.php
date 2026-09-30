@@ -48,7 +48,7 @@ try {
 	file_put_contents("$base/web/index.php", '<?php echo "ok";');
 	file_put_contents("$base/server.json", json_encode(array('Q' => array('web' => array('https' => array(
 		'acme' => array('challengeDir' => "$base/challenges")))))));
-	$server = proc_open(array(PHP_BINARY, __DIR__ . '/../qbixserver.php', '--config=' . "$base/server.json",
+	$server = proc_open(array(PHP_BINARY, __DIR__ . '/../sbin/qbixserver.php', '--config=' . "$base/server.json",
 		'--root=' . "$base/web", '--host=127.0.0.1', '--port=5002', '--workers=1', '--pid=' . "$base/server.pid"),
 		array(0 => array('file', '/dev/null', 'r'), 1 => array('file', "$base/server.log", 'w'), 2 => array('file', "$base/server.log", 'a')), $pipes);
 	for ($i = 0; $i < 60 and port_free(5002); $i++) usleep(250000);

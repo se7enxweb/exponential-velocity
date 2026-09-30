@@ -92,7 +92,7 @@ check('envvars: export and plain lines, quotes removed, nothing executed', $L::e
 	array('VC_RUN_USER' => 'www-data', 'VC_LOG' => '/var/log/vc', 'BAD' => '$(rm -rf /)'));
 
 // ── The server reports it ────────────────────────────────────────────────
-$out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixserver.php')
+$out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixserver.php')
 	. ' --config=' . escapeshellarg("$dir/sites-enabled/example.conf") . ' --layout 2>&1');
 $report = json_decode((string) $out, true);
 check('--layout names the directory the site file belongs to', $report['confDir'] ?? $out, $dir);

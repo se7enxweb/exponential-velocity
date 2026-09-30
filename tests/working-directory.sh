@@ -70,7 +70,7 @@ echo " Qbix Server — working directory per request"
 echo "=============================================="
 echo
 
-( setsid "$PHP" "$WS/qbixserver.php" --root="$ROOT" --port=$PORT --workers=1 \
+( setsid "$PHP" "$WS/sbin/qbixserver.php" --root="$ROOT" --port=$PORT --workers=1 \
     >"$TMP/server.log" 2>&1 </dev/null & )
 
 up=0

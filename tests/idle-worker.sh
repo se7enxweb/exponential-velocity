@@ -51,7 +51,7 @@ echo "=============================================="
 echo "  port=$PORT workers=$WORKERS default_socket_timeout=${SOCK_TIMEOUT}s idle=${IDLE}s"
 echo
 
-( setsid "$PHP" -d default_socket_timeout=$SOCK_TIMEOUT "$WS/qbixserver.php" \
+( setsid "$PHP" -d default_socket_timeout=$SOCK_TIMEOUT "$WS/sbin/qbixserver.php" \
     --root="$ROOT" --port=$PORT --workers=$WORKERS \
     >"$TMP/server.log" 2>&1 </dev/null & )
 

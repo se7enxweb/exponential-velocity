@@ -87,7 +87,7 @@ echo "=============================================="
 echo
 
 # One worker, so every request lands on the one that has already run.
-( setsid "$PHP" "$WS/qbixserver.php" --root="$ROOT" --port=$PORT --workers=1 \
+( setsid "$PHP" "$WS/sbin/qbixserver.php" --root="$ROOT" --port=$PORT --workers=1 \
     >"$TMP/server.log" 2>&1 </dev/null & )
 
 up=0

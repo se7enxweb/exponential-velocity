@@ -22,7 +22,10 @@ function check($what, $ok)
 	echo "  FAIL  $what\n";
 }
 
-$programs = array('qbixserver.php', 'qbixctl.php', 'qbixconsole.php', 'qshell.php',
+// The programs where they are (docs/layout.md, "Programs"), then the
+// forwarders at their former paths, which must answer exactly the same.
+$programs = array('sbin/qbixserver.php', 'sbin/qbixctl.php', 'sbin/qbixconsole.php', 'bin/qshell.php',
+	'qbixserver.php', 'qbixctl.php', 'qbixconsole.php', 'qshell.php',
 	'bin/qbix-appinfo.php', 'build-phar.php', 'build-app.php');
 foreach ($programs as $program) {
 	foreach (Q_WebServer_About::$flags as $flag) {

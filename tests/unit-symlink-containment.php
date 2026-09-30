@@ -36,7 +36,7 @@ function check($what, $got, $want)
 		var_export($got, true), var_export($want, true));
 }
 
-$phar = __DIR__ . '/../bin/qbixserver.phar';
+$phar = __DIR__ . '/../sbin/qbixserver.phar';
 if (!is_file($phar)) { printf("  skip  no phar built\n"); exit(0); }
 if (DIRECTORY_SEPARATOR !== '/') { printf("  skip  needs POSIX symlinks\n"); exit(0); }
 

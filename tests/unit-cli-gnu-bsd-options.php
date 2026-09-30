@@ -56,7 +56,7 @@ $base = sys_get_temp_dir() . '/qbix-cli-styles-' . getmypid();
 mkdir("$base/qbix/mods-available", 0755, true);
 mkdir("$base/qbix/mods-enabled", 0755, true);
 file_put_contents("$base/qbix/qbix.conf", '{}');
-$srv = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixserver.php');
+$srv = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixserver.php');
 $dir = escapeshellarg("$base/qbix");
 $stacks = array();
 foreach (array("--conf-dir=$dir", "--conf-dir $dir", "-conf-dir=$dir", "-conf-dir $dir") as $form) {

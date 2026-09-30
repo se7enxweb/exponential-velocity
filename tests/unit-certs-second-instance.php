@@ -72,7 +72,7 @@ $start = function ($name, $host, $tls, array $https) use ($base, $root) {
 	file_put_contents("$base/$name.json", json_encode(array('Q' => array(
 		'web' => array('cache' => array('enabled' => false), 'https' => $https),
 		'compat' => array('skipSourceCodeTransform' => false)))));
-	$cmd = array(PHP_BINARY, __DIR__ . '/../qbixserver.php', "--config=$base/$name.json", "--root=$root",
+	$cmd = array(PHP_BINARY, __DIR__ . '/../sbin/qbixserver.php', "--config=$base/$name.json", "--root=$root",
 		"--host=$host", "--port=$port", "--https-port=$tls", '--workers=1', "--pid=$base/$name.pid");
 	$proc = proc_open($cmd, array(0 => array('file', '/dev/null', 'r'),
 		1 => array('file', "$base/$name.log", 'w'), 2 => array('file', "$base/$name.log", 'a')), $pipes);

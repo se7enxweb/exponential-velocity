@@ -49,7 +49,7 @@ symlink('../sites-available/site.conf', "$vc/sites-enabled/site.conf");
 // scratch vc tree (VC_CONF_DIR); what the server reports is the stack.
 $run = function ($extra) use ($qbix, $vc) {
 	$out = shell_exec('env -u QBIX_DISTRIBUTION QBIX_CONF_DIR=' . escapeshellarg($qbix) . ' VC_CONF_DIR=' . escapeshellarg($vc)
-		. ' ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixserver.php')
+		. ' ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixserver.php')
 		. " $extra --config=" . escapeshellarg("$vc/sites-enabled/site.conf") . ' --layout 2>&1');
 	$r = json_decode((string) $out, true);
 	return $r['stack'] ?? $out;

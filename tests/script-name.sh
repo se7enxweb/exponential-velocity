@@ -60,7 +60,7 @@ echo " Qbix Server — SCRIPT_NAME below the root"
 echo "=============================================="
 echo
 
-( setsid "$PHP" "$WS/qbixserver.php" --root="$ROOT" --port=$PORT --workers=2 \
+( setsid "$PHP" "$WS/sbin/qbixserver.php" --root="$ROOT" --port=$PORT --workers=2 \
     >"$TMP/server.log" 2>&1 </dev/null & )
 
 up=0

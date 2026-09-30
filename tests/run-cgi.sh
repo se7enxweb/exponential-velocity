@@ -22,7 +22,7 @@ cat > "$CFG" <<JSON
 { "Q": { "webserver": { "cgi": { "patterns": ["native.php","cgi-status.php"] } } } }
 JSON
 
-php "$WS/qbixserver.php" --root="$WS/tests/web" --port="$PORT" --config="$CFG" >/tmp/cgi-$PORT.log 2>&1 &
+php "$WS/sbin/qbixserver.php" --root="$WS/tests/web" --port="$PORT" --config="$CFG" >/tmp/cgi-$PORT.log 2>&1 &
 PID=$!
 for _ in $(seq 1 50); do
   php -r '$f=@fsockopen("127.0.0.1",(int)$argv[1],$e,$s,1); exit($f?0:1);' "$PORT" 2>/dev/null && break

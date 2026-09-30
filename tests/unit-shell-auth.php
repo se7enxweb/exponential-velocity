@@ -30,8 +30,8 @@ function check($what, $got, $want)
 	printf("  FAIL  %s\n        got  %s\n        want %s\n", $what, var_export($got, true), var_export($want, true));
 }
 if (!function_exists('pcntl_fork')) { echo "  skip  needs pcntl\n"; exit(0); }
-$server = __DIR__ . '/../qbixserver.php';
-$ctl = __DIR__ . '/../qbixctl.php';
+$server = __DIR__ . '/../sbin/qbixserver.php';
+$ctl = __DIR__ . '/../sbin/qbixctl.php';
 $remote = '127.0.0.2';
 
 function freePort() { for ($i = 0; $i < 40; ++$i) { $p = 20600 + random_int(0, 1300); $s = @stream_socket_server("tcp://127.0.0.1:$p"); if ($s) { fclose($s); return $p; } } return 0; }

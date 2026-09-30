@@ -57,8 +57,8 @@ check('disable removes only the link', array(Q_WebServer_Ctl::toggle($tree, 'mod
 Q_WebServer_Ctl::toggle($tree, 'mod', 'cache', true);
 
 // ── cache:clear and -t through the real entry points ─────────────────────
-$ctl = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixctl.php');
-$con = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixconsole.php');
+$ctl = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixctl.php');
+$con = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixconsole.php');
 $conf = ' --conf-dir=' . escapeshellarg($tree) . ' --distribution=none';
 exec("$con cache:clear$conf 2>&1", $o, $code);
 check('cache:clear touches the marker in Q.web.cache.dir', array($code, is_file("$base/cache/.generation")), array(0, true));

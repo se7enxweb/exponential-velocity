@@ -153,7 +153,7 @@ Q_WebServer_Panel_LockoutObserver::$clock = null;
 $E::reset();
 
 // ── The command line ────────────────────────────────────────────
-$ctl = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixctl.php') . ' panel:password --root=' . escapeshellarg($base . DS . 'web');
+$ctl = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixctl.php') . ' panel:password --root=' . escapeshellarg($base . DS . 'web');
 @unlink($file);
 foreach (array('short1!A', 'Sunshine!!2024##', 'Vx7#abcdL2!Rt9@K') as $weak) {
 	$out = array();

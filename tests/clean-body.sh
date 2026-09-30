@@ -85,7 +85,7 @@ if [ -x "$QB" ]; then
     RUN=("$QB")
     VIA="binary: $QB"
 else
-    RUN=("$PHP" "$WS/qbixserver.php")
+    RUN=("$PHP" "$WS/sbin/qbixserver.php")
     VIA="sources — the phar path is not exercised, this run proves little"
 fi
 

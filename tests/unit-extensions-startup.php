@@ -24,7 +24,7 @@ function check($what, $got, $want)
 	printf("  FAIL  %s\n        got  %s\n        want %s\n", $what,
 		var_export($got, true), var_export($want, true));
 }
-$server = __DIR__ . '/../qbixserver.php';
+$server = __DIR__ . '/../sbin/qbixserver.php';
 $base = sys_get_temp_dir() . '/qbix-extstart-' . getmypid();
 @mkdir("$base/app/web", 0700, true);
 file_put_contents("$base/app/web/index.php", '<?php echo "ok";');
@@ -78,7 +78,7 @@ $out = (string) @file_get_contents($log);
 $missing = $x ? array_merge($x['missing_required'], $x['missing_recommended']) : array();
 check('the start-up warning appears exactly when something is missing',
 	strpos($out, 'extensions: this PHP provides') !== false, (bool) ($missing || ($x['incomplete'] ?? array())));
-exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../qbixctl.php') . ' ext:check --format=json 2>/dev/null', $lines);
+exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../sbin/qbixctl.php') . ' ext:check --format=json 2>/dev/null', $lines);
 $c = json_decode(implode("\n", $lines), true);
 check('/Q/health agrees with ext:check', array($x['variant_detected'] ?? null, $x['missing_required'] ?? null),
 	array($c['variant_detected'] ?? 'x', $c['missing_required'] ?? 'x'));

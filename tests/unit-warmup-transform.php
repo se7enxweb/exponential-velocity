@@ -38,7 +38,7 @@ function check($what, $got, $want)
 
 if (!function_exists('pcntl_fork')) { printf("  skip  needs pcntl for the worker pool\n"); exit(0); }
 
-$server = __DIR__ . '/../qbixserver.php';
+$server = __DIR__ . '/../sbin/qbixserver.php';
 $base = sys_get_temp_dir() . DS . 'qbix-warmup-' . getmypid();
 $root = $base . DS . 'web';
 $app = $base . DS . 'app';

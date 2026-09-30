@@ -53,10 +53,10 @@ trap 'cleanup; rm -rf "$TMP"' EXIT
 start() { # start <port> [config]
     local port="$1"; shift
     if [ $# -gt 0 ]; then
-        setsid "$PHP" "$WS/qbixserver.php" --root="$ROOT" --config="$1" \
+        setsid "$PHP" "$WS/sbin/qbixserver.php" --root="$ROOT" --config="$1" \
             --port="$port" --workers=2 >"$TMP/s$port.log" 2>&1 </dev/null &
     else
-        setsid "$PHP" "$WS/qbixserver.php" --root="$ROOT" \
+        setsid "$PHP" "$WS/sbin/qbixserver.php" --root="$ROOT" \
             --port="$port" --workers=2 >"$TMP/s$port.log" 2>&1 </dev/null &
     fi
     PIDS+=($!)
