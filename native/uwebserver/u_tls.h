@@ -1,10 +1,12 @@
-/* u_tls.h — TLS support for U runtime via OpenSSL 3.x
+/* u_tls.h -- the TLS side of uwebserver, through OpenSSL 3.
  *
- * Server-side: ctx_new → accept → read/write → close
- * Client-side: ctx_client → connect → read/write → close
- * Cert inspection, ALPN negotiation, hot reload, SNI.
+ * A server context built from the configuration (certificate chain, key,
+ * extra chain file, lowest protocol version, TLS 1.2 ciphers, TLS 1.3
+ * suites), ALPN that selects http/1.1 (the only protocol uwebserver
+ * speaks), and connections driven without blocking: the handshake, reads
+ * and writes each report when they need the socket readable or writable,
+ * so one slow client never holds up the event loop.
  */
-
 #ifndef U_TLS_H
 #define U_TLS_H
 
@@ -13,250 +15,190 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include <openssl/pem.h>
+#include <errno.h>
+#include <stdio.h>
 #include <string.h>
-#include <time.h>
+#include <sys/stat.h>
 
-typedef struct {
-    SSL_CTX* ctx;
-    char     cert_path[512];
-    char     key_path[512];
-    int      min_version;
-} UTlsCtx;
+/* The Mozilla "intermediate" TLS 1.2 ciphers: forward secrecy, AEAD only. */
+#define UW_TLS_DEFAULT_CIPHERS \
+    "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:" \
+    "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:" \
+    "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305"
 
-typedef struct {
-    SSL*    ssl;
-    int     fd;
-    int     handshake_done;
-} UTlsConn;
+#define UW_TLS_WANT_READ  (-2)
+#define UW_TLS_WANT_WRITE (-3)
 
-typedef struct {
-    char subject[256];
-    char issuer[256];
-    char not_before[64];
-    char not_after[64];
-    int  days_remaining;
-    int  is_expired;
-    char serial[128];
-    char san[512];
-} UTlsCertInfo;
+static char uw_tls_errbuf[256];
 
-static __thread char u_tls_errbuf[256];
-
-static const char* u_tls_last_error(void) {
+static const char *uw_tls_error(void) {
     unsigned long e = ERR_get_error();
-    if (e) ERR_error_string_n(e, u_tls_errbuf, sizeof(u_tls_errbuf));
-    return u_tls_errbuf;
+    if (e) ERR_error_string_n(e, uw_tls_errbuf, sizeof(uw_tls_errbuf));
+    else if (!uw_tls_errbuf[0]) snprintf(uw_tls_errbuf, sizeof uw_tls_errbuf, "unknown error");
+    ERR_clear_error();
+    return uw_tls_errbuf;
 }
 
-/* ── Init (call once) ───────────────────────────────────────────── */
+static int uw_alpn_select(SSL *ssl, const unsigned char **out, unsigned char *outlen,
+                          const unsigned char *in, unsigned int inlen, void *arg) {
+    (void)ssl; (void)arg;
+    for (unsigned int i = 0; i < inlen; ) {
+        unsigned int l = in[i];
+        if (i + 1 + l > inlen) break;
+        if (l == 8 && memcmp(in + i + 1, "http/1.1", 8) == 0) { *out = in + i + 1; *outlen = 8; return SSL_TLSEXT_ERR_OK; }
+        i += 1 + l;
+    }
+    return SSL_TLSEXT_ERR_NOACK;   /* no ALPN rather than a protocol we do not speak */
+}
 
-static int u_tls_initialized = 0;
-static void u_tls_init(void) {
-    if (u_tls_initialized) return;
+/*
+ * The server context. min_version is "1.2" or "1.3". Returns NULL with a
+ * message in err.
+ */
+static SSL_CTX *uw_tls_ctx_new(const char *cert, const char *key, const char *chain,
+                              const char *min_version, const char *ciphers, const char *suites,
+                              char *err, size_t errlen) {
     OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, NULL);
-    u_tls_initialized = 1;
-}
-
-/* ── Server context ─────────────────────────────────────────────── */
-
-static UTlsCtx* u_tls_ctx_new(const char* cert, const char* key, const char* min_ver) {
-    u_tls_init();
-    SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
-    if (!ctx) return NULL;
-
-    SSL_CTX_set_min_proto_version(ctx,
-        (min_ver && strcmp(min_ver, "1.3") == 0) ? TLS1_3_VERSION : TLS1_2_VERSION);
-
-    if (SSL_CTX_use_certificate_chain_file(ctx, cert) <= 0 ||
-        SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) <= 0 ||
-        !SSL_CTX_check_private_key(ctx)) {
+    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+    if (!ctx) { snprintf(err, errlen, "TLS: %s", uw_tls_error()); return NULL; }
+    SSL_CTX_set_min_proto_version(ctx, (min_version && strcmp(min_version, "1.3") == 0) ? TLS1_3_VERSION : TLS1_2_VERSION);
+    SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION | SSL_OP_NO_RENEGOTIATION);
+#ifdef SSL_OP_ALLOW_CLIENT_RENEGOTIATION
+    SSL_CTX_clear_options(ctx, SSL_OP_ALLOW_CLIENT_RENEGOTIATION);   /* OpenSSL 3 refuses it by default; keep it so */
+#endif
+    SSL_CTX_set_mode(ctx, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER | SSL_MODE_RELEASE_BUFFERS);
+    if (SSL_CTX_set_cipher_list(ctx, ciphers && *ciphers ? ciphers : UW_TLS_DEFAULT_CIPHERS) != 1) {
+        snprintf(err, errlen, "--tls-ciphers: no usable cipher in '%s'", ciphers ? ciphers : "");
         SSL_CTX_free(ctx); return NULL;
     }
-
+    if (suites && *suites && SSL_CTX_set_ciphersuites(ctx, suites) != 1) {
+        snprintf(err, errlen, "--tls-ciphersuites: no usable suite in '%s'", suites);
+        SSL_CTX_free(ctx); return NULL;
+    }
+    if (SSL_CTX_use_certificate_chain_file(ctx, cert) != 1) {
+        snprintf(err, errlen, "cannot load the certificate %s: %s", cert, uw_tls_error());
+        SSL_CTX_free(ctx); return NULL;
+    }
+    if (chain && *chain) {
+        FILE *f = fopen(chain, "re");
+        if (!f) { snprintf(err, errlen, "cannot read the chain %s: %s", chain, strerror(errno)); SSL_CTX_free(ctx); return NULL; }
+        X509 *x; int n = 0;
+        while ((x = PEM_read_X509(f, NULL, NULL, NULL)) != NULL) {
+            if (SSL_CTX_add0_chain_cert(ctx, x) != 1) { X509_free(x); fclose(f); snprintf(err, errlen, "cannot add a chain certificate from %s", chain); SSL_CTX_free(ctx); return NULL; }
+            n++;
+        }
+        fclose(f);
+        ERR_clear_error();
+        if (n == 0) { snprintf(err, errlen, "%s holds no certificate", chain); SSL_CTX_free(ctx); return NULL; }
+    }
+    if (SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) != 1) {
+        if (ERR_GET_REASON(ERR_peek_last_error()) == X509_R_KEY_VALUES_MISMATCH) { ERR_clear_error(); snprintf(err, errlen, "the private key %s does not belong to the certificate %s", key, cert); }
+        else snprintf(err, errlen, "cannot load the private key %s: %s", key, uw_tls_error());
+        SSL_CTX_free(ctx); return NULL;
+    }
+    if (SSL_CTX_check_private_key(ctx) != 1) {
+        snprintf(err, errlen, "the private key %s does not belong to the certificate %s", key, cert);
+        SSL_CTX_free(ctx); return NULL;
+    }
     SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_SERVER);
     SSL_CTX_sess_set_cache_size(ctx, 1024);
-
-    /* ALPN: prefer h2, fall back to http/1.1 */
-    static const unsigned char alpn[] = { 2,'h','2', 8,'h','t','t','p','/','1','.','1' };
-    SSL_CTX_set_alpn_protos(ctx, alpn, sizeof(alpn));
-
-    UTlsCtx* t = (UTlsCtx*)malloc(sizeof(UTlsCtx));
-    t->ctx = ctx;
-    t->min_version = SSL_CTX_get_min_proto_version(ctx);
-    strncpy(t->cert_path, cert, 511); t->cert_path[511] = 0;
-    strncpy(t->key_path, key, 511);   t->key_path[511] = 0;
-    return t;
+    SSL_CTX_set_alpn_select_cb(ctx, uw_alpn_select, NULL);
+    return ctx;
 }
 
-/* ── Client context ─────────────────────────────────────────────── */
-
-static UTlsCtx* u_tls_ctx_client(const char* ca_path) {
-    u_tls_init();
-    SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
-    if (!ctx) return NULL;
-    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
-    if (ca_path && ca_path[0])
-        SSL_CTX_load_verify_locations(ctx, ca_path, NULL);
-    else
-        SSL_CTX_set_default_verify_paths(ctx);
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-    UTlsCtx* t = (UTlsCtx*)malloc(sizeof(UTlsCtx));
-    t->ctx = ctx; t->min_version = TLS1_2_VERSION;
-    t->cert_path[0] = 0; t->key_path[0] = 0;
-    return t;
-}
-
-/* ── Accept (server) ────────────────────────────────────────────── */
-
-static UTlsConn* u_tls_accept(UTlsCtx* t, int fd) {
-    SSL* ssl = SSL_new(t->ctx);
-    if (!ssl) return NULL;
-    SSL_set_fd(ssl, fd);
-    if (SSL_accept(ssl) <= 0) { SSL_free(ssl); return NULL; }
-    UTlsConn* c = (UTlsConn*)malloc(sizeof(UTlsConn));
-    c->ssl = ssl; c->fd = fd; c->handshake_done = 1;
-    return c;
-}
-
-/* ── Connect (client) ───────────────────────────────────────────── */
-
-static UTlsConn* u_tls_connect(UTlsCtx* t, int fd, const char* hostname) {
-    SSL* ssl = SSL_new(t->ctx);
-    if (!ssl) return NULL;
-    SSL_set_fd(ssl, fd);
-    if (hostname && hostname[0]) SSL_set_tlsext_host_name(ssl, hostname);
-    if (SSL_connect(ssl) <= 0) { SSL_free(ssl); return NULL; }
-    if (hostname && hostname[0]) {
-        X509* cert = SSL_get_peer_certificate(ssl);
-        if (!cert) { SSL_free(ssl); return NULL; }
-        int ok = X509_check_host(cert, hostname, strlen(hostname), 0, NULL);
-        X509_free(cert);
-        if (ok != 1) { SSL_free(ssl); return NULL; }
+/*
+ * Whether a private key file may be used: refused (-1) when users other
+ * than its owner may change it or anyone may read it; a warning (1) when
+ * its group may read it; 0 when fine. The reason is in msg.
+ */
+static int uw_tls_key_mode_check(const char *key, char *msg, size_t msglen) {
+    struct stat st;
+    if (stat(key, &st) != 0) { snprintf(msg, msglen, "cannot read the private key %s: %s", key, strerror(errno)); return -1; }
+    if (!S_ISREG(st.st_mode)) { snprintf(msg, msglen, "the private key %s is not a regular file", key); return -1; }
+    if (st.st_mode & (S_IROTH | S_IWOTH)) {
+        snprintf(msg, msglen, "the private key %s may be read or changed by any user (mode %04o); chmod 600 it", key, (unsigned)(st.st_mode & 07777));
+        return -1;
     }
-    UTlsConn* c = (UTlsConn*)malloc(sizeof(UTlsConn));
-    c->ssl = ssl; c->fd = fd; c->handshake_done = 1;
-    return c;
-}
-
-/* ── Read / Write ───────────────────────────────────────────────── */
-
-static int u_tls_read(UTlsConn* c, void* buf, int len) {
-    int n = SSL_read(c->ssl, buf, len);
-    if (n <= 0) {
-        int err = SSL_get_error(c->ssl, n);
-        return (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) ? 0 : -1;
+    if (st.st_mode & S_IWGRP) {
+        snprintf(msg, msglen, "the private key %s may be changed by its group (mode %04o); chmod 640 or 600 it", key, (unsigned)(st.st_mode & 07777));
+        return -1;
     }
-    return n;
-}
-
-static int u_tls_write(UTlsConn* c, const void* buf, int len) {
-    int n = SSL_write(c->ssl, buf, len);
-    if (n <= 0) {
-        int err = SSL_get_error(c->ssl, n);
-        return (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) ? 0 : -1;
+    if (st.st_mode & S_IRGRP) {
+        snprintf(msg, msglen, "the private key %s may be read by its group (mode %04o)", key, (unsigned)(st.st_mode & 07777));
+        return 1;
     }
-    return n;
+    return 0;
 }
 
-/* ── Close / Free ───────────────────────────────────────────────── */
-
-static void u_tls_close(UTlsConn* c) {
-    if (!c) return;
-    SSL_shutdown(c->ssl);
-    SSL_free(c->ssl);
-    free(c);
+/* One step of the handshake: 1 done, UW_TLS_WANT_*, or -1 failed. */
+static int uw_tls_handshake(SSL *ssl) {
+    ERR_clear_error();
+    int r = SSL_do_handshake(ssl);
+    if (r == 1) return 1;
+    int e = SSL_get_error(ssl, r);
+    if (e == SSL_ERROR_WANT_READ) return UW_TLS_WANT_READ;
+    if (e == SSL_ERROR_WANT_WRITE) return UW_TLS_WANT_WRITE;
+    ERR_clear_error();
+    return -1;
 }
 
-static void u_tls_ctx_free(UTlsCtx* t) {
-    if (!t) return;
-    SSL_CTX_free(t->ctx);
-    free(t);
+/* > 0 bytes, 0 the peer closed, UW_TLS_WANT_*, -1 error. */
+static int uw_tls_read(SSL *ssl, void *buf, int len) {
+    ERR_clear_error();
+    int n = SSL_read(ssl, buf, len);
+    if (n > 0) return n;
+    int e = SSL_get_error(ssl, n);
+    if (e == SSL_ERROR_WANT_READ) return UW_TLS_WANT_READ;
+    if (e == SSL_ERROR_WANT_WRITE) return UW_TLS_WANT_WRITE;
+    if (e == SSL_ERROR_ZERO_RETURN) return 0;
+    ERR_clear_error();
+    return -1;
 }
 
-/* ── Hot reload certs ───────────────────────────────────────────── */
-
-static int u_tls_ctx_reload(UTlsCtx* t) {
-    if (SSL_CTX_use_certificate_chain_file(t->ctx, t->cert_path) <= 0) return -1;
-    if (SSL_CTX_use_PrivateKey_file(t->ctx, t->key_path, SSL_FILETYPE_PEM) <= 0) return -1;
-    return SSL_CTX_check_private_key(t->ctx) ? 0 : -1;
+/* > 0 bytes written, UW_TLS_WANT_*, -1 error. */
+static int uw_tls_write(SSL *ssl, const void *buf, int len) {
+    ERR_clear_error();
+    int n = SSL_write(ssl, buf, len);
+    if (n > 0) return n;
+    int e = SSL_get_error(ssl, n);
+    if (e == SSL_ERROR_WANT_READ) return UW_TLS_WANT_READ;
+    if (e == SSL_ERROR_WANT_WRITE) return UW_TLS_WANT_WRITE;
+    ERR_clear_error();
+    return -1;
 }
 
-/* ── Certificate inspection ─────────────────────────────────────── */
-
-static UTlsCertInfo u_tls_cert_info(const char* path) {
-    UTlsCertInfo info = {0};
-    FILE* fp = fopen(path, "r");
-    if (!fp) return info;
-    X509* cert = PEM_read_X509(fp, NULL, NULL, NULL);
+/* Subject, days left and DNS names of a certificate file, for the start-up line. */
+static void uw_tls_describe(const char *path, char *out, size_t outlen) {
+    snprintf(out, outlen, "%s", path);
+    FILE *fp = fopen(path, "re");
+    if (!fp) return;
+    X509 *cert = PEM_read_X509(fp, NULL, NULL, NULL);
     fclose(fp);
-    if (!cert) return info;
-
-    X509_NAME_oneline(X509_get_subject_name(cert), info.subject, sizeof(info.subject));
-    X509_NAME_oneline(X509_get_issuer_name(cert), info.issuer, sizeof(info.issuer));
-
-    BIO* bio = BIO_new(BIO_s_mem());
-    if (bio) {
-        ASN1_TIME_print(bio, X509_get0_notBefore(cert));
-        int n = BIO_read(bio, info.not_before, 63); if (n > 0) info.not_before[n] = 0;
-        BIO_reset(bio);
-        ASN1_TIME_print(bio, X509_get0_notAfter(cert));
-        n = BIO_read(bio, info.not_after, 63); if (n > 0) info.not_after[n] = 0;
-        BIO_free(bio);
-    }
-
-    int day, sec;
-    if (ASN1_TIME_diff(&day, &sec, NULL, X509_get0_notAfter(cert))) {
-        info.days_remaining = day;
-        info.is_expired = (day < 0);
-    }
-
-    /* Serial number */
-    ASN1_INTEGER* serial = X509_get_serialNumber(cert);
-    if (serial) {
-        BIGNUM* bn = ASN1_INTEGER_to_BN(serial, NULL);
-        if (bn) {
-            char* hex = BN_bn2hex(bn);
-            if (hex) { strncpy(info.serial, hex, 127); OPENSSL_free(hex); }
-            BN_free(bn);
-        }
-    }
-
-    /* SAN (Subject Alternative Names) */
-    GENERAL_NAMES* sans = X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
+    if (!cert) { ERR_clear_error(); return; }
+    char subject[256] = "", san[256] = "";
+    X509_NAME_oneline(X509_get_subject_name(cert), subject, sizeof subject);
+    int day = 0, sec = 0;
+    ASN1_TIME_diff(&day, &sec, NULL, X509_get0_notAfter(cert));
+    GENERAL_NAMES *sans = X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
     if (sans) {
-        int pos = 0;
-        for (int i = 0; i < sk_GENERAL_NAME_num(sans) && pos < 500; i++) {
-            GENERAL_NAME* gen = sk_GENERAL_NAME_value(sans, i);
-            if (gen->type == GEN_DNS) {
-                const char* dns = (const char*)ASN1_STRING_get0_data(gen->d.dNSName);
-                if (pos > 0) { info.san[pos++] = ','; info.san[pos++] = ' '; }
-                int len = strlen(dns);
-                if (pos + len < 510) { memcpy(info.san + pos, dns, len); pos += len; }
-            }
+        size_t pos = 0;
+        for (int i = 0; i < sk_GENERAL_NAME_num(sans); i++) {
+            GENERAL_NAME *g = sk_GENERAL_NAME_value(sans, i);
+            if (g->type != GEN_DNS) continue;
+            /* An ASN.1 string has a length and need not end in NUL. */
+            const unsigned char *d = ASN1_STRING_get0_data(g->d.dNSName);
+            int dl = ASN1_STRING_length(g->d.dNSName);
+            if (dl <= 0) continue;
+            if (pos + (size_t)dl + 3 >= sizeof san) break;
+            if (pos) { san[pos++] = ','; san[pos++] = ' '; }
+            for (int k = 0; k < dl; k++) san[pos++] = (d[k] >= 0x20 && d[k] < 0x7f) ? (char)d[k] : '?';
+            san[pos] = '\0';
         }
-        info.san[pos] = 0;
         GENERAL_NAMES_free(sans);
     }
-
     X509_free(cert);
-    return info;
+    for (char *c = subject; *c; c++) if ((unsigned char)*c < 0x20 || *c == 0x7f) *c = '?';
+    snprintf(out, outlen, "%s (%s %d days, names: %s)", subject, day < 0 ? "expired" : "expires in", day < 0 ? -day : day, san[0] ? san : "none");
 }
-
-/* ── ALPN / version / cipher queries ────────────────────────────── */
-
-static const char* u_tls_alpn_selected(UTlsConn* c) {
-    const unsigned char* proto = NULL; unsigned int len = 0;
-    SSL_get0_alpn_selected(c->ssl, &proto, &len);
-    if (proto && len > 0) {
-        static __thread char buf[32];
-        int n = len < 31 ? len : 31;
-        memcpy(buf, proto, n); buf[n] = 0;
-        return buf;
-    }
-    return "http/1.1";
-}
-
-static const char* u_tls_version(UTlsConn* c) { return SSL_get_version(c->ssl); }
-static const char* u_tls_cipher(UTlsConn* c) { return SSL_get_cipher_name(c->ssl); }
 
 #endif /* U_TLS_H */

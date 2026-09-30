@@ -131,6 +131,26 @@ function uw_free_port()
 	throw new RuntimeException('no free port');
 }
 
+/** --allow-root when the test runs as root: uwebserver refuses to serve as root otherwise. */
+function uw_root_args()
+{
+	return function_exists('posix_geteuid') && posix_geteuid() === 0 ? array('--allow-root') : array();
+}
+
+/** The address a TCP port on this host is listening on, from ss(8), or null. */
+function uw_bound_address($port)
+{
+	$out = (string) shell_exec('ss -ltnH 2>/dev/null');
+	foreach (explode("\n", $out) as $line) {
+		$f = preg_split('/\s+/', trim($line));
+		if (count($f) < 4) continue;
+		$local = $f[3];
+		$p = strrpos($local, ':');
+		if ($p !== false && (int) substr($local, $p + 1) === (int) $port) return substr($local, 0, $p);
+	}
+	return null;
+}
+
 /** True when something accepts connections on 127.0.0.1:$port. */
 function uw_listening($port, $host = '127.0.0.1')
 {
@@ -148,6 +168,7 @@ function uw_listening($port, $host = '127.0.0.1')
 function uw_start($bin, array $args, $port, $wait = 5, array $env = null)
 {
 	global $uw_servers;
+	if ($port < 10000 || in_array((int) $port, array(8070, 8080, 8088, 8089, 8443), true)) throw new RuntimeException("refusing to start a test server on port $port");
 	foreach ($args as $i => $a) {
 		if (preg_match('/^--?(listen|tls-listen|bind)(=(.*))?$/', $a, $m)) {
 			$v = isset($m[3]) && $m[2] !== '' ? $m[3] : ($args[$i + 1] ?? '');
@@ -171,17 +192,26 @@ function uw_start($bin, array $args, $port, $wait = 5, array $env = null)
 	return null;
 }
 
+/** Stops a server (SIGTERM, then SIGKILL after 5 s) and returns its exit status (-1 if killed). */
 function uw_stop($h, $sig = 15)
 {
-	if (!$h) return;
+	global $uw_servers;
+	if (!$h) return null;
+	foreach ($uw_servers as $i => $s) if ($s['pid'] === $h['pid']) unset($uw_servers[$i]);
 	$st = proc_get_status($h['proc']);
+	$code = $st['running'] ? null : $st['exitcode'];
 	if ($st['running']) {
 		posix_kill($h['pid'], $sig);
 		$t = microtime(true);
-		while (microtime(true) - $t < 5) { $st = proc_get_status($h['proc']); if (!$st['running']) break; usleep(20000); }
-		if ($st['running']) posix_kill($h['pid'], 9);
+		while (microtime(true) - $t < 5) {
+			$st = proc_get_status($h['proc']);
+			if (!$st['running']) { $code = $st['exitcode']; break; }
+			usleep(20000);
+		}
+		if ($st['running']) { posix_kill($h['pid'], 9); $code = -1; }
 	}
 	@proc_close($h['proc']);
+	return $code;
 }
 
 function uw_stop_all()
