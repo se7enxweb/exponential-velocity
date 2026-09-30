@@ -29,9 +29,11 @@ function check($what, $got, $want)
 }
 
 Q_WebServer_Distribution_Vc::register();
-check('registering vc adds one overlay, /etc/vc moved by VC_CONF_DIR, with /var/lib/vc as its state directory',
-	Q_WebServer_Layout::$overlays, array(array('/etc/vc', 'VC_CONF_DIR', '/var/lib/vc')));
+check('registering vc adds one overlay, /etc/vc moved by VC_CONF_DIR, with /var/lib/vc as its state directory and /var/log/vc as its log directory',
+	Q_WebServer_Layout::$overlays, array(array('/etc/vc', 'VC_CONF_DIR', '/var/lib/vc', '/var/log/vc')));
 check('...so the panel\'s sessions go to /var/lib/vc/sessions', Q_WebServer_Layout::stateDir('/etc/vc'), '/var/lib/vc');
+putenv('QBIX_LOG_DIR');
+check('...and qbixctl\'s default server log, failing any closer one, to /var/log/vc', Q_WebServer_Layout::logDir('/etc/vc'), '/var/log/vc');
 Q_WebServer_Distribution_Vc::register();
 check('...once, however often it is called', count(Q_WebServer_Layout::$overlays), 1);
 
