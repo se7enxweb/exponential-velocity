@@ -21,7 +21,7 @@
  */
 class Q_WebServer_Ctl
 {
-	/** @var string the engine's source tree (where qbixserver.php lives) */
+	/** @var string the engine's source tree: the directory above sbin/ and bin/ (a caller naming sbin/ itself is read as the directory above, see engineDir()) */
 	public static $sourceDir = '';
 
 	/** Options every command that reads the configuration accepts. */
@@ -42,7 +42,7 @@ class Q_WebServer_Ctl
 	 */
 	static function context(array $opts)
 	{
-		Q_WebServer_Layout::loadDistribution(isset($opts['distribution']) ? (string) $opts['distribution'] : null, self::$sourceDir);
+		Q_WebServer_Layout::loadDistribution(isset($opts['distribution']) ? (string) $opts['distribution'] : null, self::engineDir());
 		$config = isset($opts['config']) && is_string($opts['config']) ? $opts['config'] : null;
 		$confDir = Q_WebServer_Layout::resolve(isset($opts['conf-dir']) ? (string) $opts['conf-dir'] : null, $config);
 		$stack = Q_WebServer_Layout::stack($confDir);
@@ -121,7 +121,7 @@ class Q_WebServer_Ctl
 	/** The composer project root, when the source tree is inside vendor/<vendor>/<package>. */
 	static function projectRoot()
 	{
-		$dir = self::$sourceDir;
+		$dir = self::engineDir();
 		if (!preg_match('#/vendor/[^/]+/[^/]+$#', $dir)) return null;
 		$root = @realpath($dir . '/../../..') ?: dirname($dir, 3);
 		return is_dir($root) ? $root : null;
@@ -135,14 +135,20 @@ class Q_WebServer_Ctl
 	static function discoverServer(array $opts, $lenient = false)
 	{
 		if (!is_dir('/proc')) return null;
-		$serverScript = self::serverScript();
-		$realServer = @realpath($serverScript) ?: $serverScript;
+		// Every path this engine's server is started by: sbin/qbixserver.php
+		// and the forwarder at the former path, qbixserver.php, so a server
+		// started either way is found (docs/layout.md, "Programs").
+		$scripts = self::serverScripts();
 		// From the phar (or a binary) the server's command line names the
-		// phar file, not qbixserver.php inside it.
+		// phar file, not qbixserver.php inside it: that file, and its copy at
+		// the other path (sbin/qbixserver.phar and bin/qbixserver.phar).
 		$cmdPrefix = self::serverCommand();
-		if (strncmp($serverScript, 'phar://', 7) === 0) {
-			$serverScript = end($cmdPrefix);
-			$realServer = @realpath($serverScript) ?: $serverScript;
+		if (strncmp(self::serverScript(), 'phar://', 7) === 0) $scripts = self::pharCopies(end($cmdPrefix));
+		$realServers = array();
+		$names = array('qbixserver.php' => true);
+		foreach ($scripts as $s) {
+			$realServers[@realpath($s) ?: $s] = true;
+			$names[basename($s)] = true;
 		}
 		$projectRoot = self::projectRoot();
 		$candidates = array();
@@ -156,15 +162,15 @@ class Q_WebServer_Ctl
 			$found = null;
 			foreach ($args as $i => $arg) {
 				if ($arg === '') continue;
-				if ($arg === $serverScript) { $found = $i; break; }
-				if (substr($arg, -14) === 'qbixserver.php' or ($serverScript !== self::serverScript() and basename($arg) === basename($serverScript))) {
+				if (in_array($arg, $scripts, true)) { $found = $i; break; }
+				if (isset($names[basename($arg)])) {
 					$real = $arg;
 					if ($arg[0] !== '/') {
 						$cwd = @readlink("$pdir/cwd");
 						if ($cwd !== false) $real = $cwd . '/' . $arg;
 					}
 					$real = @realpath($real) ?: $real;
-					if ($real === $realServer) { $found = $i; break; }
+					if (isset($realServers[$real])) { $found = $i; break; }
 				}
 			}
 			if ($found === null) continue;
@@ -352,17 +358,83 @@ class Q_WebServer_Ctl
 
 	// ── Server processes ─────────────────────────────────────────────────
 
-	/** The server script: qbixserver.php in the source tree. */
+	/**
+	 * The server script, relative to the engine's directory: this layout's
+	 * (sbin/, docs/layout.md "Programs"), then the former path, which is a
+	 * forwarder to it in this layout and the script itself in a tree from
+	 * before it.
+	 */
+	static $serverFiles = array('sbin/qbixserver.php', 'qbixserver.php');
+
+	/**
+	 * The engine's directory: $sourceDir, or the directory above it when a
+	 * caller named the engine's sbin/ or bin/ (the directory of the script it
+	 * runs, say).
+	 * @method engineDir
+	 * @static
+	 * @return {string}
+	 */
+	static function engineDir()
+	{
+		$dir = rtrim(self::$sourceDir, '/');
+		if (in_array(basename($dir), array('sbin', 'bin'), true) and is_file(dirname($dir) . '/src/Q.php')) return dirname($dir);
+		return $dir;
+	}
+
+	/** The server script: sbin/qbixserver.php in the engine's tree (qbixserver.php in a tree of the former layout). */
 	static function serverScript()
 	{
-		return self::$sourceDir . '/qbixserver.php';
+		$dir = self::engineDir();
+		foreach (self::$serverFiles as $f) {
+			if (is_file("$dir/$f")) return "$dir/$f";
+		}
+		return $dir . '/' . self::$serverFiles[0];
 	}
 
 	/**
-	 * The argv that starts the server: PHP and qbixserver.php from source.
-	 * Run from the phar or a static binary, the script is inside it, and PHP
-	 * cannot be handed a phar:// path: the phar (or the binary) itself is
-	 * started, and its stub runs qbixserver.php.
+	 * Every script that starts this engine's server: sbin/qbixserver.php and
+	 * the forwarder at the former path. A server started by either is this
+	 * engine's (discoverServer()).
+	 * @method serverScripts
+	 * @static
+	 * @return {array}
+	 */
+	static function serverScripts()
+	{
+		$dir = self::engineDir();
+		$out = array();
+		foreach (self::$serverFiles as $f) {
+			if (is_file("$dir/$f")) $out[] = "$dir/$f";
+		}
+		return $out ? $out : array(self::serverScript());
+	}
+
+	/**
+	 * A phar and its copy at the other of sbin/ and bin/ (sbin/qbixserver.phar
+	 * is the server's archive; bin/qbixserver.phar, its former path, is the
+	 * same file), for telling a server started from either.
+	 * @method pharCopies
+	 * @static
+	 * @param {string} $phar
+	 * @return {array}
+	 */
+	static function pharCopies($phar)
+	{
+		$out = array($phar);
+		$dir = dirname($phar);
+		$other = array('sbin' => 'bin', 'bin' => 'sbin');
+		if (isset($other[basename($dir)])) {
+			$copy = dirname($dir) . '/' . $other[basename($dir)] . '/' . basename($phar);
+			if (is_file($copy)) $out[] = $copy;
+		}
+		return $out;
+	}
+
+	/**
+	 * The argv that starts the server: PHP and sbin/qbixserver.php from
+	 * source. Run from the phar or a static binary, the script is inside it,
+	 * and PHP cannot be handed a phar:// path: the phar (or the binary) itself
+	 * is started, and its stub runs sbin/qbixserver.php.
 	 * @method serverCommand
 	 * @static
 	 * @return {array}
@@ -370,7 +442,7 @@ class Q_WebServer_Ctl
 	static function serverCommand()
 	{
 		if (!class_exists('Q_WebServer_Shell_Entry', false)) require_once __DIR__ . '/Shell/Entry.php';
-		$packed = Q_WebServer_Shell_Entry::packed(self::$sourceDir);
+		$packed = Q_WebServer_Shell_Entry::packed(self::engineDir());
 		return $packed !== null ? $packed : array(PHP_BINARY, self::serverScript());
 	}
 

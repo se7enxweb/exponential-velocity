@@ -48,7 +48,8 @@ $files = array_merge(
 	// Named explicitly, because it does not follow the naming convention and
 	// would otherwise be picked up by nothing that runs before a commit.
 	//
-	// It checks that bin/qbixserver.phar was built from the sources beside it.
+	// It checks that sbin/qbixserver.phar was built from the sources beside it
+	// (and that bin/qbixserver.phar, its former path, is the same file).
 	// The archive is committed and is what a Composer install runs, so a stale
 	// one ships working source and broken behaviour to anyone who runs from the
 	// archive rather than from src/. That happened: a release was cut whose

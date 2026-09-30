@@ -216,7 +216,7 @@ class Q_WebServer_ExtensionsCtl
 		} else {
 			$cmds[] = rtrim($mkdir, ' &');
 		}
-		$cmds[] = $q($spc) . ' micro:combine ' . $q($root . '/bin/qbixserver.phar') . ' -O ' . $q($out);
+		$cmds[] = $q($spc) . ' micro:combine ' . $q($root . '/sbin/qbixserver.phar') . ' -O ' . $q($out);
 		return $cmds;
 	}
 
@@ -230,14 +230,14 @@ class Q_WebServer_ExtensionsCtl
 		$root = dirname(__DIR__, 3);
 		$out = rtrim((string) ($o['out'] ?? 'dist'), '/\\');
 		$name = 'qbixserver-source-kit';
-		$files = array('bin/qbixserver.phar', 'build/extensions.json', 'build/extensions.schema.json',
-			'qbixconsole.php', 'qbixctl.php', 'docs/requirements.md', 'docs/extensions.md', 'LICENSE');
+		$files = array('sbin/qbixserver.phar', 'build/extensions.json', 'build/extensions.schema.json',
+			'sbin/qbixconsole.php', 'sbin/qbixctl.php', 'qbixconsole.php', 'qbixctl.php', 'docs/requirements.md', 'docs/extensions.md', 'LICENSE');
 		$m = Q_WebServer_Extensions::manifest();
 		$recipe = "# Building the server from this kit\n\n"
 			. "Requires PHP " . $m['php']['minimum'] . "+ and static-php-cli " . ($m['spc']['version'] ?? '') . " (https://static-php.dev).\n"
 			. "Each variant is built on the machine it is for. List, plan and build with the console:\n\n"
-			. "    php qbixctl.php ext:list --variant=standard\n    php qbixctl.php ext:plan --variant=full\n"
-			. "    php qbixctl.php ext:build --variant=standard --php=" . $m['php']['default'] . " --spc=/path/to/spc\n\n"
+			. "    php sbin/qbixctl.php ext:list --variant=standard\n    php sbin/qbixctl.php ext:plan --variant=full\n"
+			. "    php sbin/qbixctl.php ext:build --variant=standard --php=" . $m['php']['default'] . " --spc=/path/to/spc\n\n"
 			. "Variants:\n\n";
 		foreach ($m['variants'] as $v => $d) $recipe .= "- **$v**: {$d['description']}\n";
 		$recipe .= "\nPHP versions: " . implode(', ', $m['php']['versions']) . ". See docs/requirements.md for every extension and docs/extensions.md for the commands.\n";

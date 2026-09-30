@@ -24,5 +24,5 @@
     "autoload": {
         "classmap": ["src/"]
     },
-    "bin": ["qbixserver.php"]
+    "bin": ["sbin/qbixserver.php", "sbin/qbixctl.php", "sbin/qbixconsole.php", "bin/qshell.php"]
 }

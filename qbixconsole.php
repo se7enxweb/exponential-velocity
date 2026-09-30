@@ -1,36 +1,17 @@
 #!/usr/bin/env php
 <?php
 /**
- * qbixconsole -- the server's command console.
+ * qbixconsole.php has moved to sbin/qbixconsole.php (docs/layout.md, "Programs").
  *
- *   php qbixconsole.php list
- *   php qbixconsole.php help server:start
- *   php qbixconsole.php server:status --config=/etc/qbix/sites-enabled/example.conf
- *   php qbixconsole.php ser:stat          (unique abbreviations work)
+ * This file keeps the former path working for everything that names it:
+ * scripts, cron jobs and the programs that drive the server with it.
  *
- * Commands in the manner of Symfony's console, with no library behind it
- * (Q_Console). The control commands are Q_WebServer_Ctl's; a distribution of
- * the engine can add its own from its register() (see --distribution).
+ * It runs the new file in this same process, so the command line (argv), the
+ * process id, standard input and output and the exit status are exactly the
+ * new file's. The only difference is one line on standard error, written only
+ * when standard error is a terminal; QBIX_MOVED_QUIET=1 turns it off.
  */
-
-if (PHP_SAPI !== 'cli' && PHP_SAPI !== 'micro') { exit("qbixconsole runs from the command line\n"); }
-if (!defined('DS')) define('DS', DIRECTORY_SEPARATOR);
-require_once __DIR__ . '/src/Q.php';
-require_once __DIR__ . '/src/Q/Console.php';
-require_once __DIR__ . '/src/Q/WebServer/Layout.php';
-require_once __DIR__ . '/src/Q/WebServer/Ctl.php';
-
-
-// --version, --about, --copyright and the rest: GNU-style, before anything else.
-require_once __DIR__ . '/src/Q/WebServer/About.php';
-Q_WebServer_About::handle(array_slice($argv, 1), basename($argv[0] ?? 'qbixconsole'), 'the command console: runs the server commands (server, cache, certificates, sites, panel ...)', __DIR__);
-Q_Console::$program = basename($argv[0] ?? 'qbixconsole');
-Q_Console::$title = 'Qbix server console' . (function_exists('qbix_version_label') ? ' ' . qbix_version_label(true) : '');
-Q_WebServer_Ctl::register(__DIR__);
-
-// The distribution, if any, may add commands: registered now, before the
-// command runs, so they appear in `list` too.
-list(, $__opts) = Q_Console::parse(array_slice($argv, 1));
-Q_WebServer_Layout::loadDistribution(isset($__opts['distribution']) ? (string) $__opts['distribution'] : null, __DIR__);
-
-exit(Q_Console::run($argv));
+if (getenv('QBIX_MOVED_QUIET') === false && defined('STDERR') && function_exists('stream_isatty') && @stream_isatty(STDERR)) {
+	fwrite(STDERR, "qbixconsole.php: moved to sbin/qbixconsole.php; this path keeps working (QBIX_MOVED_QUIET=1 hides this line)\n");
+}
+require __DIR__ . '/sbin/qbixconsole.php';

@@ -11,13 +11,14 @@
 #   - Docker (for cross-compilation) or local build tools
 #   - ~2GB disk space for the build
 #
-# Output: bin/qbixserver (or bin/qbixserver-$OS-$ARCH)
+# Output: sbin/qbixserver (or sbin/qbixserver-$OS-$ARCH), beside the phar it
+# is made from, sbin/qbixserver.phar (docs/layout.md, "Programs")
 #
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BIN_DIR="$SCRIPT_DIR/bin"
+BIN_DIR="$SCRIPT_DIR/sbin"
 SRC_DIR="$SCRIPT_DIR/src"
 
 ARCH="${ARCH:-$(uname -m)}"
@@ -114,8 +115,13 @@ build_with_docker() {
     TMPDIR=$(mktemp -d)
     cp -r "$SRC_DIR" "$TMPDIR/src"
     cp "$SCRIPT_DIR/build-phar.php" "$TMPDIR/"
-    # build-phar.php requires these too
-    cp "$SCRIPT_DIR/qbixserver.php" "$TMPDIR/"
+    # build-phar.php requires these too: the programs in sbin/ and bin/ and
+    # the forwarders at their former paths (build_phar_programs())
+    mkdir -p "$TMPDIR/sbin" "$TMPDIR/bin"
+    for f in qbixserver.php qbixctl.php qbixconsole.php qshell.php \
+             sbin/qbixserver.php sbin/qbixctl.php sbin/qbixconsole.php bin/qshell.php; do
+        cp "$SCRIPT_DIR/$f" "$TMPDIR/$f"
+    done
     [ -d "$SCRIPT_DIR/web" ] && cp -r "$SCRIPT_DIR/web" "$TMPDIR/web"
 
     # EXTS and LIBS: the baseline for this variant, resolved above.
@@ -150,21 +156,23 @@ RUN spc build "$EXTS" --build-micro ${LIBS:+--with-libs=$LIBS}
 
 COPY src/ src/
 COPY web/ web/
-COPY build-phar.php qbixserver.php ./
+COPY build-phar.php qbixserver.php qbixctl.php qbixconsole.php qshell.php ./
+COPY sbin/ sbin/
+COPY bin/ bin/
 
 # Parse every file before packaging it. build-phar.php only copies files
 # in, so a syntax error travels into the binary and surfaces as a runtime
 # fatal from a phar:// path -- after a full build, and with the build
 # itself reporting success.
-RUN find src qbixserver.php -name '*.php' -print0 \
+RUN find src sbin bin qbixserver.php qbixctl.php qbixconsole.php qshell.php -name '*.php' -print0 \
     | xargs -0 -n1 php -l > /dev/null
 
-RUN mkdir -p bin && php -d phar.readonly=0 build-phar.php
+RUN php -d phar.readonly=0 build-phar.php
 
 # Combine. micro:combine appends the phar as an ELF overlay that phpmicro
 # locates by reading its own file at runtime -- never UPX-pack the result.
-RUN spc micro:combine bin/qbixserver.phar -O bin/qbixserver && \
-    chmod +x bin/qbixserver
+RUN spc micro:combine sbin/qbixserver.phar -O sbin/qbixserver && \
+    chmod +x sbin/qbixserver
 DOCKERFILE
 
     # One builder image per PHP version: a single tag would make every
@@ -173,7 +181,7 @@ DOCKERFILE
     docker rm -f qbix-extract >/dev/null 2>&1 || true
     docker build -t "$IMAGE" "$TMPDIR"
     docker create --name qbix-extract "$IMAGE"
-    docker cp qbix-extract:/build/bin/qbixserver "$BIN_DIR/qbixserver"
+    docker cp qbix-extract:/build/sbin/qbixserver "$BIN_DIR/qbixserver"
     docker rm qbix-extract
     # The builder image is deliberately kept. Deleting it drops its layers,
     # and with them the cached PHP build -- which is the whole point of
@@ -198,7 +206,7 @@ build_manual() {
     echo "  Method A: curl -sL https://github.com/crazywhalecc/static-php-cli/... | tar xz"
     echo "  Method B: $0 --docker"
     echo ""
-    echo "The PHAR works identically: php bin/qbixserver.phar --port=8080"
+    echo "The PHAR works identically: php sbin/qbixserver.phar --port=8080"
 }
 
 # ── Choose build method ──────────────────────────

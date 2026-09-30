@@ -4,24 +4,36 @@
  * Build qbixserver.phar — single-file distributable.
  *
  * Usage: php -d phar.readonly=0 build-phar.php
- * Output: bin/qbixserver.phar
+ * Output: sbin/qbixserver.phar, and the same file at its former path,
+ *         bin/qbixserver.phar (docs/layout.md, "Programs")
+ *
+ * Inside, the archive has the tree's own layout: sbin/qbixserver.php (which
+ * the stub runs), sbin/qbixctl.php and sbin/qbixconsole.php, bin/qshell.php,
+ * and the forwarders at the former paths (qbixserver.php, qbixctl.php,
+ * qbixconsole.php, qshell.php), so phar://.../qbixserver.php still runs the
+ * server for anything that names it.
  */
 
 
 // --version, --about, --copyright and the rest: GNU-style, before anything else.
 require_once __DIR__ . '/src/Q/WebServer/About.php';
-Q_WebServer_About::handle(array_slice($argv, 1), basename($argv[0] ?? 'build-phar'), 'builds bin/qbixserver.phar, the server as one archive, from the sources', __DIR__);
+Q_WebServer_About::handle(array_slice($argv, 1), basename($argv[0] ?? 'build-phar'), 'builds sbin/qbixserver.phar, the server as one archive, from the sources', __DIR__);
 if (ini_get('phar.readonly')) {
 	echo "Error: phar.readonly is enabled.\n";
 	echo "Run with: php -d phar.readonly=0 build-phar.php\n";
 	exit(1);
 }
 
-$pharFile = __DIR__ . '/bin/qbixserver.phar';
+$pharFile = __DIR__ . '/sbin/qbixserver.phar';
+// The former path: the same bytes, written after the build (below). A copy,
+// not a link, so it works wherever the tree was unpacked -- a Composer zip
+// extracted without symbolic links, a checkout on a file system without them.
+$pharCopy = __DIR__ . '/bin/qbixserver.phar';
 if (file_exists($pharFile)) {
 	unlink($pharFile);
 }
 
+@mkdir(__DIR__ . '/sbin', 0755, true);
 @mkdir(__DIR__ . '/bin', 0755, true);
 
 echo "Building qbixserver.phar...\n";
@@ -40,11 +52,11 @@ foreach ($it as $file) {
 	$phar->addFile($file->getPathname(), $rel);
 }
 
-// Add the main server file at root
-$phar->addFile(__DIR__ . '/qbixserver.php', 'qbixserver.php');
-// The helpers the server starts from the phar with --qshell / --qconsole:
-// the shell's runner and the console tools (and qbixctl, which loads them).
-foreach (array('qshell.php', 'qbixconsole.php', 'qbixctl.php') as $__f) {
+// The programs, where the tree has them: the server (which the stub runs) and
+// the helpers it starts from the phar with --qshell / --qconsole -- the
+// shell's runner and the console tools (and qbixctl, which loads them) --
+// then the forwarders at the former paths.
+foreach (build_phar_programs() as $__f) {
 	$phar->addFile(__DIR__ . '/' . $__f, $__f);
 }
 // The PHP extension manifest: Q_WebServer_Extensions reads it from build/ beside src/.
@@ -105,7 +117,7 @@ foreach (explode("\n", $dirtyOut) as $__l) {
 	// The build outputs change every build by design; they are not
 	// uncommitted source work, so they do not make the tree "dirty".
 	$__path = preg_replace('/^\S+\s+/', '', $__l);
-	if ($__path === 'bin/qbixserver.phar' || $__path === 'qbix-build.php') continue;
+	if (in_array($__path, array('sbin/qbixserver.phar', 'bin/qbixserver.phar', 'qbix-build.php'), true)) continue;
 	$dirty = $__l; break;
 }
 if ($sha === '') $sha = 'unknown';
@@ -127,10 +139,10 @@ $buildPhp = "<?php\n"
 	. "if (!defined('QBIX_SERVER_BUILD_DATE')) define('QBIX_SERVER_BUILD_DATE', " . var_export($buildDate, true) . ");\n"
 	. ($shipVer !== '' ? "if (!defined('QBIX_SHIP_VERSION')) define('QBIX_SHIP_VERSION', " . var_export($shipVer, true) . ");\n" : '');
 $phar->addFromString('qbix-build.php', $buildPhp);
-// Also on disk beside qbixserver.php: the server is often run as a plain
-// file (a Composer vendor copy), not through the phar stub, and then the
-// bundled copy is never reached. Written both places, read whichever
-// applies.
+// Also on disk at the top of the tree, which sbin/qbixserver.php reads: the
+// server is often run as a plain file (a Composer vendor copy), not through
+// the phar stub, and then the bundled copy is never reached. Written both
+// places, read whichever applies.
 file_put_contents(__DIR__ . '/qbix-build.php', $buildPhp);
 echo "Stamped build: $sha ($buildDate)\n";
 
@@ -142,7 +154,7 @@ $stub = <<<'STUB'
 <?php
 Phar::mapPhar('qbixserver.phar');
 @include 'phar://qbixserver.phar/qbix-build.php';
-require 'phar://qbixserver.phar/qbixserver.php';
+require 'phar://qbixserver.phar/sbin/qbixserver.php';
 __HALT_COMPILER();
 STUB;
 
@@ -151,6 +163,26 @@ $phar->stopBuffering();
 
 chmod($pharFile, 0755);
 
+// The former path, byte for byte: written beside and renamed over, so a
+// server running from it never reads half a file.
+$__tmp = $pharCopy . '.' . getmypid() . '.tmp';
+if (!copy($pharFile, $__tmp) || !chmod($__tmp, 0755) || !rename($__tmp, $pharCopy)) {
+	@unlink($__tmp);
+	fwrite(STDERR, "could not write $pharCopy\n");
+	exit(1);
+}
+
 $size = filesize($pharFile);
-echo "Built: bin/qbixserver.phar (" . round($size / 1024) . " KB, $fileCount files)\n";
-echo "Run:   php bin/qbixserver.phar --root=./web --port=8080\n";
+echo "Built: sbin/qbixserver.phar (" . round($size / 1024) . " KB, $fileCount files), and the same file at bin/qbixserver.phar\n";
+echo "Run:   php sbin/qbixserver.phar --root=./web --port=8080\n";
+
+/**
+ * The programs the archive carries, relative to the tree: in sbin/ and bin/,
+ * then the forwarders at their former paths (docs/layout.md, "Programs").
+ * tests/phar-is-current.php makes the same selection.
+ */
+function build_phar_programs()
+{
+	return array('sbin/qbixserver.php', 'sbin/qbixctl.php', 'sbin/qbixconsole.php', 'bin/qshell.php',
+		'qbixserver.php', 'qbixctl.php', 'qbixconsole.php', 'qshell.php');
+}

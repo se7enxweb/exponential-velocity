@@ -888,7 +888,7 @@ class Q_WebServer_Shell_Server
 	}
 
 	/** What a job is told when this installation has no runner. */
-	const MISSING = 'the shell runner (qshell.php) is missing from this installation, so the shell cannot run commands here; reinstall the server (a source checkout, the phar and the binaries all carry it)';
+	const MISSING = 'the shell runner (bin/qshell.php) is missing from this installation, so the shell cannot run commands here; reinstall the server (a source checkout, the phar and the binaries all carry it)';
 
 	/**
 	 * The argv that starts the runner, from source, the phar or a binary

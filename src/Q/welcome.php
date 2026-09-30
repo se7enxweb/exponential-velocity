@@ -85,7 +85,7 @@ p code{background:var(--code-bg);padding:1px 5px;border-radius:3px;color:var(--c
 <h2>Project structure</h2>
 
 <pre class="tree"><b>your-project/</b>
-├── qbixserver.php
+├── sbin/qbixserver.php     <span class="cmt">← the server</span>
 ├── config/
 │   └── server.json        <span class="cmt">← optional config</span>
 ├── <b>web/</b>                    <span class="cmt">← document root</span>

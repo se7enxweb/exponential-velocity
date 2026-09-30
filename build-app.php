@@ -7,7 +7,8 @@
  *   php build-app.php [--output=myapp.phar] [--root=./web]
  *
  * The resulting phar contains:
- *   - The Qbix Server engine (src/, handlers/, qbixserver.php)
+ *   - The Qbix Server engine (src/, handlers/, sbin/qbixserver.php and the
+ *     programs beside it, with the forwarders at their former paths)
  *   - Your app's web/ directory (static files + PHP scripts)
  *   - Your app's config/ directory (if present)
  *   - Your app's classes/ and handlers/ directories (if present)
@@ -49,7 +50,7 @@ $appRoot = rtrim(realpath($appRoot) ?: $appRoot, '/');
 
 // Find the server directory
 $serverDir = __DIR__;
-if (!file_exists($serverDir . '/qbixserver.php')) {
+if (!file_exists($serverDir . '/sbin/qbixserver.php')) {
     fwrite(STDERR, "Error: run this script from the webserver directory\n");
     exit(1);
 }
@@ -77,7 +78,10 @@ $phar->startBuffering();
 // Add server files
 echo "  Adding server engine...\n";
 $serverFiles = [
-    'qbixserver.php',
+    // The programs where the tree has them (docs/layout.md, "Programs"), and
+    // the forwarders at the former paths.
+    'sbin/qbixserver.php', 'sbin/qbixctl.php', 'sbin/qbixconsole.php', 'bin/qshell.php',
+    'qbixserver.php', 'qbixctl.php', 'qbixconsole.php', 'qshell.php',
     'src/',
     'handlers/',
     'web/',  // server's default web/ (welcome page, logo, etc.)
@@ -130,7 +134,7 @@ $stub = <<<'STUB'
 <?php
 // Self-contained Qbix Server — app bundled inside this phar
 Phar::mapPhar('qbixserver.phar');
-require 'phar://qbixserver.phar/qbixserver.php';
+require 'phar://qbixserver.phar/sbin/qbixserver.php';
 __HALT_COMPILER();
 STUB;
 
