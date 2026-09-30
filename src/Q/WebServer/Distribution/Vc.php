@@ -37,6 +37,9 @@ class Q_WebServer_Distribution_Vc
 	/** Its state directory, the /var/lib counterpart of /etc/vc (the panel's sessions live here). */
 	const STATE = '/var/lib/vc';
 
+	/** Its log directory, the /var/log counterpart of /etc/vc (qbixctl's default server log goes here). */
+	const LOG = '/var/log/vc';
+
 	/**
 	 * This distribution's name, description and copyright for --version,
 	 * --about and --copyright (Q_WebServer_About), above the engine's own.
@@ -63,7 +66,7 @@ class Q_WebServer_Distribution_Vc
 	 */
 	static function register()
 	{
-		Q_WebServer_Layout::addOverlay(self::ETC, self::ENV, self::STATE);
+		Q_WebServer_Layout::addOverlay(self::ETC, self::ENV, self::STATE, self::LOG);
 		// VC_RUN_USER / VC_RUN_GROUP (envvars) ahead of QBIX_RUN_*.
 		if (class_exists('Q_WebServer_RunAs', false)) Q_WebServer_RunAs::addEnvPrefix('VC');
 		// Exponential installations, any release, in the panel's Apps and

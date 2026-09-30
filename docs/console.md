@@ -66,7 +66,7 @@ qbixconsole ser:stat                 # a unique abbreviation works
 | `server:start` | `start` | Start the server detached, and wait until its ports listen. Anything after `--` goes to `qbixserver.php`. |
 | `server:stop` | `stop` | Stop the server and wait for it to exit. |
 | `server:reload` | `graceful`, `reload` | Re-exec the server without dropping its listening sockets. |
-| `server:restart` | `restart` | Stop, then start. |
+| `server:restart` | `restart` | Stop, then start again exactly as it was started (see below). |
 | `server:status` | `status` | Whether the server runs, its pid file, and which configured ports listen. `--json` for a program. |
 | `server:configtest` | `configtest` | Check that every configuration file parses. |
 | `layout:show` | `layout` | The configuration trees, their files and what is enabled. |
@@ -82,8 +82,36 @@ from "failed". Output is coloured only when it goes to a terminal.
 
 The server commands find the running server by its pid file: `--pid`, else
 `Q.webserver.pidFile`, else `/run/qbix/qbixserver.pid` when that directory is
-writable, else the temporary directory. `server:start` writes the server's output
-to `--log` and waits up to `--wait` seconds (`20`) for it to listen.
+writable, else the temporary directory. `server:start` passes on every server
+option it is given (`--root`, `--app`, `--host`, `--port`, `--https-port`,
+`--socket`, `--socket-mode`, `--workers`, `--config`, `--conf-dir`,
+`--distribution`, `--preset`, `--keep-globals`, `--user`, `--group`, and the
+flags `--debug`, `--quiet`, `--verbose`, `--hotreload`, `--watchdog`,
+`--allow-root-workers`; anything else after `--`) and waits up to `--wait`
+seconds (`20`) for it to listen.
+
+The server's output goes to `--log`. Without it, it goes to the server's own
+log directory, never the temporary directory: `Q.webserver.log.dir`; else
+`var/log`, `files/log` or `logs` in the document root or the directory above
+it, the first that exists; else the configuration tree's log directory
+(`/var/log/qbix` for `/etc/qbix`, a distribution's overlay its own,
+`QBIX_LOG_DIR` when set); else `var/log` beside the document root, made for
+it. The file is `qbixserver.log`.
+
+A server started with a pid file writes how it was started beside it, in
+`<pid file>.json`: the whole command line (every option, and the PHP
+interpreter's own `-d` settings), the directory it was started in, the
+`QBIX_*`, `*_CONF_DIR`, `*_STATE_DIR`, `*_DISTRIBUTION`, `*_RUN_USER` and
+`*_RUN_GROUP` variables of its environment (which the restarted server gets
+again, and no others of those), and the
+file its output goes to. `server:restart` stops the server and starts it again
+from that record, so it comes back with the same root, ports and options
+whatever `restart` itself was given, from whatever directory it is run. For a
+server that wrote none (started without `--pid`, or by an older version) the
+same is read from the process table. Server options given to `restart`
+replace the recorded ones (`qbixctl restart --workers=16`), anything after
+`--` is added, and a server that was started without a pid file is given the
+default one. When nothing is running, `restart` is a plain `start`.
 
 When the pid file is missing or stale, `status`, `stop` and `graceful` look for
 the server in the process table instead (on systems with `/proc`), and

@@ -74,13 +74,42 @@ class Q_WebServer_Layout
 	 * @param {string} $dir its standard place, e.g. /etc/example
 	 * @param {string|null} $env a variable that, when set, moves it
 	 * @param {string|null} $stateDir its state directory, e.g. /var/lib/example
+	 * @param {string|null} $logDir its log directory, e.g. /var/log/example
 	 */
-	static function addOverlay($dir, $env = null, $stateDir = null)
+	static function addOverlay($dir, $env = null, $stateDir = null, $logDir = null)
 	{
 		foreach (self::$overlays as $o) {
 			if ($o[0] === $dir) return;
 		}
-		self::$overlays[] = array(rtrim($dir, '/'), $env, $stateDir === null ? null : rtrim($stateDir, '/'));
+		self::$overlays[] = array(rtrim($dir, '/'), $env, $stateDir === null ? null : rtrim($stateDir, '/'),
+			$logDir === null ? null : rtrim($logDir, '/'));
+	}
+
+	/** The base tree's log directory (/var/log counterpart of /etc/qbix), and its variable. */
+	const LOG_DIR = '/var/log/qbix';
+	const LOG_ENV = 'QBIX_LOG_DIR';
+
+	/**
+	 * The log directory that goes with a configuration directory, as /var/log
+	 * is to /etc: QBIX_LOG_DIR when set; otherwise the top overlay's own, when
+	 * it names one, else /var/log/qbix for the base tree. Null for a directory
+	 * that is not the base or an overlay, and for none.
+	 * @method logDir
+	 * @static
+	 * @param {string|null} $confDir the directory in use (the top of the stack)
+	 * @return {string|null}
+	 */
+	static function logDir($confDir)
+	{
+		$env = getenv(self::LOG_ENV);
+		if (is_string($env) and $env !== '') return rtrim($env, '/');
+		if ($confDir === null or $confDir === '') return null;
+		$confDir = rtrim($confDir, '/');
+		foreach (array_reverse(self::$overlays) as $o) {
+			if (self::place($o[1], $o[0]) === $confDir) return $o[3] ?? null;
+		}
+		if (self::place(self::ENV, self::$standardDirs[0] ?? null) === $confDir) return self::LOG_DIR;
+		return null;
 	}
 
 	/**

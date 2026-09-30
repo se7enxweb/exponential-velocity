@@ -177,6 +177,7 @@ class Q_WebServer_Ctl
 				'ppid' => $ppid,
 				'opts' => $procOpts,
 				'pidFile' => isset($procOpts['pid']) ? (string) $procOpts['pid'] : null,
+				'scriptIndex' => $found,
 			);
 		}
 		if (!$candidates) return null;
@@ -384,29 +385,255 @@ class Q_WebServer_Ctl
 		if (self::isAlive(self::readPid($pidFile))) return array(false, 'already running (pid ' . self::readPid($pidFile) . ')');
 		$found = self::discoverServer($opts);
 		if ($found) return array(false, 'already running (pid ' . $found['pid'] . ')' . ($found['pidFile'] ? ', pid file ' . $found['pidFile'] : ''));
-		$args = array_merge(self::serverCommand(), array('--pid=' . $pidFile));
-		foreach (array('conf-dir', 'config', 'root', 'host', 'port', 'https-port', 'workers', 'distribution') as $o) {
-			if (isset($opts[$o]) and is_string($opts[$o]) and $opts[$o] !== '') $args[] = "--$o=" . $opts[$o];
+		$args = array('--pid=' . $pidFile);
+		foreach (self::serverArgs($opts) as $o => $v) {
+			if ($v !== false) $args[] = $v === true ? "--$o" : "--$o=$v";
 		}
 		$args = array_merge($args, $extra);
-		$log = (isset($opts['log']) and is_string($opts['log'])) ? $opts['log'] : sys_get_temp_dir() . '/qbixserver.log';
+		$log = self::logOption($opts) ?? self::defaultLog($opts);
+		$r = self::launch(self::serverCommand(), $args, null, null, $log, $pidFile, self::configuredPorts($opts), (float) ($opts['wait'] ?? 20), 0, false);
+		return array($r[0], $r[0] ? "started (pid {$r[1]})" : $r[2]);
+	}
+
+	/** qbixserver.php's options that start passes on, and restart replaces, when they are given. */
+	static $serverValueOptions = array('conf-dir', 'config', 'root', 'app', 'host', 'port', 'https-port', 'socket',
+		'socket-mode', 'workers', 'distribution', 'preset', 'keep-globals', 'user', 'group');
+	static $serverFlags = array('debug', 'quiet', 'verbose', 'hotreload', 'watchdog', 'allow-root-workers');
+
+	/**
+	 * The server options among a command's options, name => value (a flag is
+	 * true, or false for --no-flag).
+	 * @method serverArgs
+	 * @static
+	 * @param {array} $opts
+	 * @return {array}
+	 */
+	static function serverArgs(array $opts)
+	{
+		$out = array();
+		foreach (self::$serverValueOptions as $o) {
+			if (isset($opts[$o]) and is_string($opts[$o]) and $opts[$o] !== '') $out[$o] = $opts[$o];
+		}
+		foreach (self::$serverFlags as $o) {
+			if (array_key_exists($o, $opts) and is_bool($opts[$o])) $out[$o] = $opts[$o];
+		}
+		return $out;
+	}
+
+	/** --log, when given. */
+	private static function logOption(array $opts)
+	{
+		return (isset($opts['log']) and is_string($opts['log']) and $opts['log'] !== '') ? $opts['log'] : null;
+	}
+
+	/**
+	 * Where the server's output goes when --log does not say: the server's
+	 * own log directory, never the machine's temporary directory. In order:
+	 * Q.webserver.log.dir; var/log, files/log or logs in the document root or
+	 * the directory above it (an installation's own log directory: the
+	 * document root is often the installation, and ./web's parent is where
+	 * the server keeps logs/ by default); the log directory of the
+	 * configuration tree in use (/var/log/qbix for /etc/qbix, an overlay's
+	 * own); else var/log beside the document root, made for it.
+	 * @method defaultLog
+	 * @static
+	 * @param {array} $opts the server's options (root, app, conf-dir, config)
+	 * @return {string}
+	 */
+	static function defaultLog(array $opts)
+	{
+		$name = 'qbixserver.log';
+		$usable = function ($dir, $create) {
+			if (is_dir($dir)) return is_writable($dir);
+			if (!$create) return false;
+			$parent = dirname($dir);
+			while (!is_dir($parent) and $parent !== dirname($parent)) $parent = dirname($parent);
+			return is_writable($parent) and @mkdir($dir, 0755, true);
+		};
+		$conf = class_exists('Q_Config', false) ? Q_Config::get('Q', 'webserver', 'log', 'dir', null) : null;
+		if (is_string($conf) and $conf !== '' and $usable($conf, true)) return rtrim($conf, '/') . "/$name";
+		if (isset($opts['root']) and is_string($opts['root']) and $opts['root'] !== '') $root = $opts['root'];
+		elseif (isset($opts['app']) and is_string($opts['app']) and $opts['app'] !== '') $root = rtrim($opts['app'], '/') . '/web';
+		else $root = getcwd() . '/web';
+		$root = @realpath($root) ?: rtrim($root, '/');
+		foreach (array($root, dirname($root)) as $base) {
+			foreach (array('var/log', 'files/log', 'logs') as $sub) {
+				if ($usable("$base/$sub", false)) return "$base/$sub/$name";
+			}
+		}
+		$confDir = class_exists('Q_Config', false) ? Q_Config::get('Q', 'webserver', 'confDir', null) : null;
+		$logDir = is_string($confDir) ? Q_WebServer_Layout::logDir($confDir) : null;
+		if ($logDir !== null and $usable($logDir, true)) return "$logDir/$name";
+		$dir = dirname($root) . '/var/log';
+		if (!is_dir($dir)) @mkdir($dir, 0755, true);
+		return "$dir/$name";
+	}
+
+	/**
+	 * Run the server detached and wait for it: its pid file names a live
+	 * process other than $oldPid, and the ports listen.
+	 * @method launch
+	 * @static
+	 * @param {array} $command the interpreter and script (or the phar, or the binary)
+	 * @param {array} $args the server's arguments
+	 * @param {string|null} $cwd the directory to start it in (null: this one)
+	 * @param {array|null} $env the variables it starts with, of those StartRecord carries (null: this environment)
+	 * @param {string} $log where its output goes
+	 * @param {string} $pidFile
+	 * @param {array} $ports
+	 * @param {float} $wait seconds
+	 * @param {int} $oldPid a pid the pid file may still name, which does not count
+	 * @param {bool} $allPorts whether every port must listen, not only one
+	 * @return {array} array(ok, pid, message)
+	 */
+	static function launch(array $command, array $args, $cwd, $env, $log, $pidFile, array $ports, $wait, $oldPid = 0, $allPorts = false)
+	{
+		if (!is_dir(dirname($log))) @mkdir(dirname($log), 0755, true);
 		$setsid = null;
 		foreach (array_merge(explode(PATH_SEPARATOR, (string) getenv('PATH')), array('/usr/bin', '/bin', '/usr/sbin', '/sbin')) as $d) {
 			if ($d !== '' and is_executable("$d/setsid")) { $setsid = "$d/setsid"; break; }
 		}
-		$cmd = ($setsid ? escapeshellarg($setsid) . ' ' : '') . implode(' ', array_map('escapeshellarg', $args))
+		$run = ($setsid ? escapeshellarg($setsid) . ' ' : '') . implode(' ', array_map('escapeshellarg', array_merge($command, $args)));
+		if (is_array($env)) {
+			if (!class_exists('Q_WebServer_StartRecord', false)) require_once __DIR__ . '/StartRecord.php';
+			$e = array();
+			foreach (Q_WebServer_StartRecord::environment(getenv()) as $k => $v) {
+				if (!array_key_exists($k, $env)) { $e[] = '-u'; $e[] = $k; }
+			}
+			foreach ($env as $k => $v) $e[] = "$k=$v";
+			if ($e) $run = 'env ' . implode(' ', array_map('escapeshellarg', $e)) . ' ' . $run;
+		}
+		// The whole group is redirected, so no shell between us and the
+		// server keeps this process's output open.
+		$cmd = '(' . ($cwd !== null ? 'cd ' . escapeshellarg($cwd) . ' && ' : '') . "exec $run)"
 			. ' > ' . escapeshellarg($log) . ' 2>&1 < /dev/null &';
 		@exec($cmd);
-		$ports = self::configuredPorts($opts);
-		$deadline = microtime(true) + (float) ($opts['wait'] ?? 20);
+		$deadline = microtime(true) + $wait;
+		$pid = 0;
 		while (microtime(true) < $deadline) {
 			$pid = self::readPid($pidFile);
-			if ($pid and self::isAlive($pid) and (!$ports or self::listening($ports))) {
-				return array(true, "started (pid $pid)");
+			if ($pid and $pid !== (int) $oldPid and self::isAlive($pid)) {
+				$up = $ports ? self::listening($ports) : array();
+				if (!$ports or ($allPorts ? count($up) === count(array_unique($ports)) : $up)) return array(true, $pid, "started (pid $pid)");
 			}
 			usleep(250000);
 		}
-		return array(false, "did not start within the time allowed; see $log");
+		if ($pid and $pid !== (int) $oldPid and self::isAlive($pid) and $ports and ($up = self::listening($ports))) {
+			return array(true, $pid, "started (pid $pid), listening on " . implode(', ', $up) . ' but not ' . implode(', ', array_diff($ports, $up)));
+		}
+		return array(false, 0, "did not start within the time allowed; see $log");
+	}
+
+	/**
+	 * The TCP ports a process listens on, from its open sockets.
+	 * @method portsOf
+	 * @static
+	 * @param {int} $pid
+	 * @return {array}
+	 */
+	static function portsOf($pid)
+	{
+		$inodes = array();
+		foreach (glob('/proc/' . (int) $pid . '/fd/*') ?: array() as $fd) {
+			$l = @readlink($fd);
+			if (is_string($l) and preg_match('/^socket:\[(\d+)\]$/', $l, $m)) $inodes[$m[1]] = true;
+		}
+		$ports = array();
+		if (!$inodes) return $ports;
+		foreach (array_filter(array('/proc/net/tcp', '/proc/net/tcp6'), 'is_readable') as $f) {
+			foreach (array_slice(file($f, FILE_IGNORE_NEW_LINES) ?: array(), 1) as $row) {
+				$c = preg_split('/\s+/', trim($row));
+				if (isset($c[9]) and $c[3] === '0A' and isset($inodes[$c[9]])) {
+					$ports[] = (int) hexdec(substr($c[1], strrpos($c[1], ':') + 1));
+				}
+			}
+		}
+		$ports = array_values(array_unique($ports));
+		sort($ports);
+		return $ports;
+	}
+
+	/**
+	 * The running server these options name, and how it was started:
+	 * array(pid, pid file or null, record), or null when none runs. The
+	 * record is the one the server wrote beside its pid file, else what its
+	 * process table entry says (Q_WebServer_StartRecord).
+	 * @method running
+	 * @static
+	 * @param {array} $opts
+	 * @return {array|null}
+	 */
+	static function running(array $opts)
+	{
+		if (!class_exists('Q_WebServer_StartRecord', false)) require_once __DIR__ . '/StartRecord.php';
+		$pidFile = self::pidFile($opts);
+		$pid = self::readPid($pidFile);
+		$index = null;
+		if (!self::isAlive($pid)) {
+			$found = self::discoverServer($opts, true);
+			if (!$found) return null;
+			$pid = $found['pid'];
+			$index = $found['scriptIndex'] ?? null;
+			$pidFile = $found['pidFile'];
+			if ($pidFile !== null and $pidFile !== '' and $pidFile[0] !== '/') {
+				$cwd = @readlink("/proc/$pid/cwd");
+				if ($cwd !== false) $pidFile = "$cwd/$pidFile";
+			}
+		}
+		$record = $pidFile ? Q_WebServer_StartRecord::read($pidFile, $pid) : null;
+		if ($record === null) {
+			if ($index === null) $index = Q_WebServer_StartRecord::scriptIndex($pid);
+			if ($index !== null) $record = Q_WebServer_StartRecord::fromProcess($pid, $index);
+		}
+		return $record === null ? null : array($pid, $pidFile ?: null, $record);
+	}
+
+	/**
+	 * Stop the server and start it again exactly as it was started: the same
+	 * command line (every option, the interpreter's own settings), in the
+	 * same directory, with the same environment, writing to the same log.
+	 * Server options given to restart replace the recorded ones; anything
+	 * after `--` is added. When nothing runs, it is a plain start.
+	 * @method restart
+	 * @static
+	 * @param {array} $opts
+	 * @param {array} $extra
+	 * @return {array} array(ok, message)
+	 */
+	static function restart(array $opts, array $extra = array())
+	{
+		$running = self::running($opts);
+		if ($running === null) {
+			$s = self::stop($opts);
+			if (!$s[0]) return $s;
+			return self::start($opts, $extra);
+		}
+		list($pid, $pidFile, $record) = $running;
+		$cwd = isset($record['cwd']) && is_string($record['cwd']) && is_dir($record['cwd']) ? $record['cwd'] : null;
+		$args = Q_WebServer_StartRecord::override($record['args'], self::serverArgs($opts));
+		$given = Q_WebServer_StartRecord::options($args);
+		if (isset($given['pid']) and is_string($given['pid']) and $given['pid'] !== '') {
+			$pidFile = $given['pid'];
+		} else {
+			// Started without a pid file: give it one, or there is nothing to
+			// tell the new process by.
+			$pidFile = $pidFile ?: self::pidFile($opts);
+			$args = Q_WebServer_StartRecord::override($args, array('pid' => $pidFile));
+		}
+		if ($pidFile[0] !== '/' and $cwd !== null) $pidFile = "$cwd/$pidFile";
+		$args = array_merge($args, $extra);
+		$ports = array_values(array_unique(array_merge(self::portsOf($pid), self::configuredPorts(array_intersect_key($given, array('port' => 1, 'https-port' => 1))))));
+		$log = self::logOption($opts) ?? (isset($record['log']) && is_string($record['log']) ? $record['log'] : null);
+		if ($log === null) {
+			$abs = function ($p) use ($cwd) { return ($cwd !== null and is_string($p) and $p !== '' and $p[0] !== '/') ? "$cwd/$p" : $p; };
+			$log = self::defaultLog(array_map($abs, array_intersect_key($given, array('root' => 1, 'app' => 1))));
+		}
+		$s = self::stopProcess($pid, $pidFile, self::readPid($pidFile) !== (int) $pid, (float) ($opts['wait'] ?? 15));
+		if (!$s[0]) return $s;
+		$r = self::launch($record['command'], $args, $cwd, isset($record['env']) && is_array($record['env']) ? $record['env'] : null,
+			$log, $pidFile, $ports, (float) ($opts['wait'] ?? 20), $pid, true);
+		if (!$r[0]) return array(false, "stopped (pid $pid), but " . $r[2]);
+		return array(true, "restarted (pid {$r[1]}, was $pid) with the options it was started with" . ($r[2] !== "started (pid {$r[1]})" ? '; ' . $r[2] : ''));
 	}
 
 	/** Ask the server to stop (qbixserver.php --stop) and wait. */
@@ -423,13 +650,25 @@ class Q_WebServer_Ctl
 				if ($found['pidFile']) $pidFile = $found['pidFile']; else $direct = true;
 			}
 		}
+		return self::stopProcess($pid, $pidFile, $direct, (float) ($opts['wait'] ?? 15));
+	}
+
+	/**
+	 * Stop one server process and wait for it: through its pid file
+	 * (qbixserver.php --stop), or with SIGTERM when it has none.
+	 * @method stopProcess
+	 * @static
+	 * @return {array} array(ok, message)
+	 */
+	static function stopProcess($pid, $pidFile, $direct, $wait)
+	{
 		if (!self::isAlive($pid)) return array(true, 'not running');
-		if (($direct or $pidFile === '') and function_exists('posix_kill')) {
+		if (($direct or $pidFile === '' or $pidFile === null) and function_exists('posix_kill')) {
 			@posix_kill($pid, defined('SIGTERM') ? SIGTERM : 15);
 		} else {
 			@exec(implode(' ', array_map('escapeshellarg', array_merge(self::serverCommand(), array('--stop', '--pid=' . $pidFile)))) . ' > /dev/null 2>&1');
 		}
-		$deadline = microtime(true) + (float) ($opts['wait'] ?? 15);
+		$deadline = microtime(true) + (float) $wait;
 		while (microtime(true) < $deadline) {
 			if (!self::isAlive($pid)) return array(true, "stopped (pid $pid)");
 			usleep(250000);
@@ -553,12 +792,19 @@ class Q_WebServer_Ctl
 		$srvOpts = $ctxOpts + array('pid' => 'Pid file (default: Q.webserver.pidFile, /run/qbix, or the temp dir)');
 		$say = function ($r) { $r[0] ? Q_Console::out($r[1]) : Q_Console::err($r[1]); return $r[0] ? 0 : 1; };
 
+		// Every qbixserver.php option start passes on ($serverValueOptions, $serverFlags).
+		$startOpts = array('root' => 'Document root', 'app' => 'Qbix app directory', 'port' => 'HTTP port', 'https-port' => 'HTTPS port',
+			'workers' => 'Workers', 'host' => 'Bind address', 'socket' => 'Unix domain socket', 'socket-mode' => 'Permissions of the socket file',
+			'preset' => 'Framework preset', 'keep-globals' => 'Globals the app keeps between requests',
+			'user' => 'User the workers run as', 'group' => 'Group the workers run as',
+			'debug' => array('Verbose logging', false), 'quiet' => array('Report errors only', false),
+			'verbose' => array('Also report every certificate provider tried', false), 'hotreload' => array('Restart on file changes', false),
+			'watchdog' => array('Run under the watchdog', false), 'allow-root-workers' => array('Permit --user=root', false),
+			'log' => 'Where the server writes its output (default: Q.webserver.log.dir, else var/log, files/log or logs of the document root or the directory above it, else the configuration tree\'s log directory)');
 		$C::add('server:start', 'Start the server, detached', function ($a, $o) use ($say) {
 			self::context($o);
 			return $say(self::start($o, $a));
-		}, $srvOpts + array('root' => 'Document root', 'port' => 'HTTP port', 'https-port' => 'HTTPS port',
-			'workers' => 'Workers', 'host' => 'Bind address', 'log' => 'Where the server writes its output',
-			'wait' => 'Seconds to wait for it to listen (20)'), array('start'), '[-- extra qbixserver.php options]');
+		}, $srvOpts + $startOpts + array('wait' => 'Seconds to wait for it to listen (20)'), array('start'), '[-- extra qbixserver.php options]');
 		$C::add('server:stop', 'Stop the server and wait for it', function ($a, $o) use ($say) {
 			self::context($o);
 			return $say(self::stop($o));
@@ -567,12 +813,11 @@ class Q_WebServer_Ctl
 			self::context($o);
 			return $say(self::reload($o));
 		}, $srvOpts, array('graceful', 'reload'));
-		$C::add('server:restart', 'Stop, then start', function ($a, $o) use ($say) {
+		$C::add('server:restart', 'Stop, then start again with the options it was started with', function ($a, $o) use ($say) {
 			self::context($o);
-			$s = self::stop($o);
-			if (!$s[0]) return $say($s);
-			return $say(self::start($o, $a));
-		}, $srvOpts, array('restart'), '[-- extra qbixserver.php options]');
+			return $say(self::restart($o, $a));
+		}, $srvOpts + $startOpts + array('wait' => 'Seconds to wait for it to stop, and to listen again (15, 20)'),
+			array('restart'), '[given options replace the recorded ones] [-- extra qbixserver.php options]');
 		$C::add('server:status', 'Report whether the server runs, and what listens', function ($a, $o) {
 			self::context($o);
 			$s = self::status($o);

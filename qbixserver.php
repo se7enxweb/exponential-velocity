@@ -1240,6 +1240,10 @@ if ($opts['pid']) {
 	unset($__prev);
 	file_put_contents($opts['pid'], getmypid());
 	$pidOwner = getmypid();
+	// How this server was started, beside the pid file, so `qbixctl restart`
+	// starts it again with the same options, directory and environment.
+	require_once __DIR__ . '/src/Q/WebServer/StartRecord.php';
+	Q_WebServer_StartRecord::write($opts['pid'], Q_WebServer_StartRecord::capture((array) ($_SERVER['argv'] ?? $argv)));
 	register_shutdown_function(function () use ($opts, $pidOwner) {
 		// Only the process that wrote the file cleans up after itself.
 		// Workers are forked from this one and inherit this function, so
@@ -1256,6 +1260,7 @@ if ($opts['pid']) {
 		if ((int) trim((string) @file_get_contents($opts['pid'])) === $pidOwner) {
 			@unlink($opts['pid']);
 		}
+		Q_WebServer_StartRecord::remove($opts['pid'], $pidOwner);
 		// Kill the watchdog if it's running -- ours: the one this server
 		// forked (its child) or the one that restarted it (its parent).
 		// Another server stopping must not take away the supervisor of the
