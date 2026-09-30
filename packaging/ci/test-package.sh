@@ -86,6 +86,18 @@ docker run --rm -v "$PWD/$(dirname "$pkg"):/pkgs:ro" "${oldmount[@]}" "$image" s
     installed exponential-velocity
   fi
   echo '== installed'
+  # The daemon and its administration commands in /usr/sbin, links at their
+  # former paths in /usr/bin, the phar at sbin/ with a link at bin/
+  # (docs/layout.md, Programs).
+  for t in qbixserver qbixctl qbixconsole; do
+    [ -x /usr/sbin/\$t ] && [ ! -L /usr/sbin/\$t ] || { echo \"/usr/sbin/\$t is missing\"; exit 1; }
+    [ -L /usr/bin/\$t ] && [ \"\$(readlink -f /usr/bin/\$t)\" = \"\$(readlink -f /usr/sbin/\$t)\" ] || { echo \"/usr/bin/\$t does not lead to /usr/sbin/\$t\"; exit 1; }
+  done
+  [ -f /usr/share/exponential-velocity/sbin/qbixserver.phar ] && [ -L /usr/share/exponential-velocity/bin/qbixserver.phar ] \
+    || { echo 'the phar is not at sbin/ with a link at bin/'; exit 1; }
+  grep -qs '^ExecStart=/usr/sbin/qbixserver ' /usr/lib/systemd/system/exponential-velocity.service /lib/systemd/system/exponential-velocity.service \
+    || { echo 'the unit does not start /usr/sbin/qbixserver'; exit 1; }
+  echo 'programs in /usr/sbin, links in /usr/bin: yes'
   qbixctl ext:check --variant=lite
   echo '== serving as the service user'
   cd /var/lib/exponential-velocity

@@ -8,7 +8,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/php</string>
-        <string>/var/www/myapp/qbixserver.php</string>
+        <string>/var/www/myapp/sbin/qbixserver.php</string>
         <string>--root=./web</string>
         <string>--port=8080</string>
         <string>--pid=/tmp/qbixserver.pid</string>

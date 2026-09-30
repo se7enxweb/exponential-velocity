@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# qbixserver, as installed by the packages (/usr/sbin/qbixserver, with
+# /usr/bin/qbixserver a link to it) and the container image.
+# QBIX_HOME is where they put the server (default /usr/share/exponential-velocity);
+# PHP is the interpreter (default: php on PATH). The server's archive is
+# sbin/qbixserver.phar there (docs/layout.md, "Programs"); a tree from before
+# sbin/ has it at bin/qbixserver.phar.
+QBIX_HOME="${QBIX_HOME:-/usr/share/exponential-velocity}"
+phar="$QBIX_HOME/sbin/qbixserver.phar"
+[ -f "$phar" ] || phar="$QBIX_HOME/bin/qbixserver.phar"
+exec "${PHP:-php}" "$phar" "$@"

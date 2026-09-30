@@ -28,7 +28,7 @@ find "$src" -type f \( -name 'qbixserver-*' -o -name 'php-*' -o -name '*.deb' -o
 dll=$(find "$src" -type f -name qbix_fork.dll | head -1 || true)
 [ -n "$dll" ] && cp "$dll" "$dist/qbix_fork.dll"
 
-cp bin/qbixserver.phar "$dist/qbixserver.phar"
+cp sbin/qbixserver.phar "$dist/qbixserver.phar"
 
 for f in "$dist"/*-php"$LEGACY_PHP"-"$LEGACY_VARIANT"*; do
   [ -e "$f" ] || continue

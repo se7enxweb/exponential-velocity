@@ -39,14 +39,14 @@ For system-wide (not per-user), use `/Library/LaunchDaemons/` instead.
 
 ```bash
 # Start in background
-./qbixserver.php --root=./web --port=8080 --pid=./qbixserver.pid &
+./sbin/qbixserver.php --root=./web --port=8080 --pid=./qbixserver.pid &
 
 # Stop
-./qbixserver.php --stop --pid=./qbixserver.pid
+./sbin/qbixserver.php --stop --pid=./qbixserver.pid
 
 # Reload (graceful restart)
-./qbixserver.php --reload --pid=./qbixserver.pid
+./sbin/qbixserver.php --reload --pid=./qbixserver.pid
 
 # Test config
-./qbixserver.php -t
+./sbin/qbixserver.php -t
 ```

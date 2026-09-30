@@ -31,7 +31,7 @@ foreach ($m['include'] as $b) {
 		. ' --for-extensions=' . escapeshellarg($b['extensions']) . $forLibs . "\n"
 		. 'spc build ' . escapeshellarg($b['extensions']) . ' --build-cli --build-micro' . $libs . "\n"
 		. "QBIX_STATIC_BUILD=1 PHP=buildroot/bin/php$exe sh packaging/bin/qbix-ext check --variant=" . escapeshellarg($b['variant']) . "\n"
-		. "spc micro:combine bin/qbixserver.phar -O " . escapeshellarg($out) . "\n"
+		. "spc micro:combine sbin/qbixserver.phar -O " . escapeshellarg($out) . "\n"
 		. "echo \"built $out\"\n";
 	$file = $dir . '/' . $b['name'] . '.sh';
 	file_put_contents($file, $script);

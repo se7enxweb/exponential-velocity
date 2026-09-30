@@ -11,8 +11,8 @@ Group=qbix
 # QBIX_ROOT, QBIX_SITE and QBIX_OPTS: see the file for what each does.
 EnvironmentFile=-/etc/default/exponential-velocity
 WorkingDirectory=/var/lib/exponential-velocity
-ExecStart=/usr/bin/qbixserver --config=${QBIX_SITE} --root=${QBIX_ROOT} --pid=/run/exponential-velocity/qbixserver.pid $QBIX_OPTS
-ExecReload=/usr/bin/qbixserver --reload --pid=/run/exponential-velocity/qbixserver.pid
+ExecStart=/usr/sbin/qbixserver --config=${QBIX_SITE} --root=${QBIX_ROOT} --pid=/run/exponential-velocity/qbixserver.pid $QBIX_OPTS
+ExecReload=/usr/sbin/qbixserver --reload --pid=/run/exponential-velocity/qbixserver.pid
 PIDFile=/run/exponential-velocity/qbixserver.pid
 RuntimeDirectory=exponential-velocity
 StateDirectory=exponential-velocity

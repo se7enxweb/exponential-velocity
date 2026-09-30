@@ -37,11 +37,11 @@ and run it on a machine of that platform with static-php-cli (spc) on PATH:
 
 It downloads the sources, builds PHP with exactly the extensions that variant
 carries, checks the result against the baseline, and combines it with
-bin/qbixserver.phar into \`qbixserver-<platform>-php<ver>-<variant>\`.
+sbin/qbixserver.phar into \`qbixserver-<platform>-php<ver>-<variant>\`.
 
 To see or change what a variant carries, ask the baseline:
 
-    php qbixctl.php ext:list --variant=standard --platform=linux-x86_64 --php=8.3 --format=spc
+    php sbin/qbixctl.php ext:list --variant=standard --platform=linux-x86_64 --php=8.3 --format=spc
 
 build-binary.sh builds the same way with Docker. docs/binaries.md describes
 the variants; docs/requirements.md the baseline and its exceptions.

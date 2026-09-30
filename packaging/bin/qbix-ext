@@ -21,4 +21,6 @@ case "$sub" in
   list|check) shift ;;
   *) echo "usage: qbix-ext list|check [options]" >&2; exit 2 ;;
 esac
-exec "$PHP" "$ROOT/qbixctl.php" "ext:$sub" "$@"
+ctl="$ROOT/sbin/qbixctl.php"
+[ -f "$ctl" ] || ctl="$ROOT/qbixctl.php"   # a tree from before sbin/ (docs/layout.md, "Programs")
+exec "$PHP" "$ctl" "ext:$sub" "$@"

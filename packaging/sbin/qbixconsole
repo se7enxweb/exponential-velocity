@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# qbixconsole, as installed by the packages (/usr/sbin/qbixconsole, with /usr/bin/qbixconsole a
+# link to it) and the container image.
+# QBIX_HOME is where they put the server (default /usr/share/exponential-velocity);
+# PHP is the interpreter (default: php on PATH). The program is sbin/qbixconsole.php
+# there (docs/layout.md, "Programs"); a tree from before sbin/ has it at the top.
+QBIX_HOME="${QBIX_HOME:-/usr/share/exponential-velocity}"
+script="$QBIX_HOME/sbin/qbixconsole.php"
+[ -f "$script" ] || script="$QBIX_HOME/qbixconsole.php"
+exec "${PHP:-php}" "$script" "$@"

@@ -8,8 +8,14 @@
  *
  * The package installs the server under /usr/share/exponential-velocity (the phar,
  * the console tools, the baseline, the designs and docs), qbixserver /
- * qbixctl / qbixconsole in /usr/bin, a systemd unit, and the /etc/qbix tree
- * (docs/layout.md) as configuration that upgrades never overwrite.
+ * qbixctl / qbixconsole in /usr/sbin -- a daemon and its administration
+ * commands, as the Filesystem Hierarchy Standard places them -- with links at
+ * their former paths in /usr/bin, a systemd unit, and the /etc/qbix tree
+ * (docs/layout.md) as configuration that upgrades never overwrite. Inside
+ * /usr/share/exponential-velocity the tree keeps its own layout (sbin/, bin/
+ * and the forwarders at the former paths, docs/layout.md "Programs");
+ * bin/qbixserver.phar there is a link to sbin/qbixserver.phar rather than a
+ * second copy.
  *
  * Its dependencies are the baseline's, in each distribution's own package
  * names: the lite variant (everything the platform requires) as hard
@@ -81,7 +87,8 @@ $depends = array_values(array_unique($depends));
 $root = dirname(__DIR__, 2);
 $share = '/usr/share/exponential-velocity';
 $contents = array();
-exec('git -C ' . escapeshellarg($root) . ' ls-files -- bin/qbixserver.phar qbixserver.php qbixctl.php qbixconsole.php qshell.php src build designs docs web LICENSE', $files, $rc);
+exec('git -C ' . escapeshellarg($root) . ' ls-files -- sbin/qbixserver.phar sbin/qbixserver.php sbin/qbixctl.php sbin/qbixconsole.php bin/qshell.php'
+	. ' qbixserver.php qbixctl.php qbixconsole.php qshell.php src build designs docs web LICENSE', $files, $rc);
 if ($rc !== 0 || !$files) {
 	fwrite(STDERR, "git ls-files failed in $root\n");
 	exit(1);
@@ -89,8 +96,14 @@ if ($rc !== 0 || !$files) {
 foreach ($files as $f) {
 	$contents[] = array('src' => $f, 'dst' => "$share/$f", 'file_info' => array('mode' => is_executable("$root/$f") ? 0755 : 0644));
 }
+// The phar's former path, for settings and scripts that name it: a link, the
+// package has one copy.
+$contents[] = array('src' => '../sbin/qbixserver.phar', 'dst' => "$share/bin/qbixserver.phar", 'type' => 'symlink');
 foreach (array('qbixserver', 'qbixctl', 'qbixconsole') as $t) {
-	$contents[] = array('src' => "packaging/bin/$t", 'dst' => "/usr/bin/$t", 'file_info' => array('mode' => 0755));
+	$contents[] = array('src' => "packaging/sbin/$t", 'dst' => "/usr/sbin/$t", 'file_info' => array('mode' => 0755));
+	// The former path, /usr/bin/<tool>: units, cron jobs and scripts name it,
+	// and /usr/sbin is not on every user's PATH.
+	$contents[] = array('src' => "../sbin/$t", 'dst' => "/usr/bin/$t", 'type' => 'symlink');
 }
 $contents[] = array('src' => 'packaging/systemd/exponential-velocity.service', 'dst' => "$unitDir/exponential-velocity.service", 'file_info' => array('mode' => 0644));
 $contents[] = array('src' => 'packaging/systemd/exponential-velocity.default', 'dst' => '/etc/default/exponential-velocity', 'type' => 'config|noreplace', 'file_info' => array('mode' => 0644));

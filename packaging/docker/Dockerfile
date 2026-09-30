@@ -21,8 +21,12 @@ RUN set -eux; \
     addons="$WITH_ADDONS"; \
     if [ "$addons" = auto ]; then case "$VARIANT" in standard|full) addons=1 ;; *) addons=0 ;; esac; fi; \
     bash /usr/share/exponential-velocity/packaging/docker/install-extensions.sh "$VARIANT" "$addons"; \
+    # The daemon and its administration commands in sbin, as the packages
+    # place them, and a link at the former path, /usr/local/bin/<tool>
+    # (docs/layout.md, "Programs").
     for t in qbixserver qbixctl qbixconsole; do \
-      install -m 0755 "/usr/share/exponential-velocity/packaging/bin/$t" "/usr/local/bin/$t"; \
+      install -m 0755 "/usr/share/exponential-velocity/packaging/sbin/$t" "/usr/local/sbin/$t"; \
+      ln -s "../sbin/$t" "/usr/local/bin/$t"; \
     done; \
     mkdir -p /app /etc/qbix; \
     # The image's former install path, for mounts and scripts that name it.
