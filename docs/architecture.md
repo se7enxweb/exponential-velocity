@@ -22,7 +22,7 @@
 
 **PHP scripts** run in-process (single-threaded, suitable for lightweight APIs) or in a pre-fork worker pool (`--workers=N`) for concurrent PHP execution. Workers are forked after class preloading, so they share the base memory footprint via copy-on-write pages.
 
-**Static files** are served at ~20K req/s (pure PHP, in-memory cache, single `fwrite`). nginx is ~2.5× faster (50K req/s) because it uses `sendfile()` (kernel-space file→socket copy) and compiled C. For production, put nginx or a CDN in front for static files and let Qbix Server handle PHP execution, WebSocket, and access-controlled file serving.
+**Static files** are served at ~20K req/s (pure PHP, in-memory cache, single `fwrite`). nginx is ~2.5× faster (50K req/s) because it uses `sendfile()` (kernel-space file→socket copy) and compiled C. For production, put nginx or a CDN in front for static files and let Velocity handle PHP execution, WebSocket, and access-controlled file serving.
 
 ---
 
@@ -379,13 +379,13 @@ What to know before using it:
   they describe the one you ask.
 - Renders are not faster: they are bounded by the workers, not the listener.
 
-## Benchmarks — Qbix Server vs nginx+fpm vs Swoole vs FrankenPHP
+## Benchmarks — Velocity vs nginx+fpm vs Swoole vs FrankenPHP
 
 Full results in [BENCHMARKS.md](docs/BENCHMARKS.md). Key findings:
 
 **Head-to-head (4 workers each, same scripts, one server at a time):**
 
-| | Swoole | fpm | Qbix octane | FrankenPHP |
+| | Swoole | fpm | Velocity octane | FrankenPHP |
 |---|---|---|---|---|
 | CPU ~2ms (c=4) | **483**/s | 469/s | 439/s | 350/s |
 | 50ms I/O (c=40) | 78/s | 78/s | 77/s | 39/s |

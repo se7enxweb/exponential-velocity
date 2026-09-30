@@ -366,7 +366,7 @@ starting misconfigured.
 
 ### Running legacy PHP — WordPress, Laravel, Symfony
 
-You can run existing PHP applications on Qbix Server without modifying their code. The key: put the framework's public directory as `web/`, and use CGI carveout patterns to match all PHP files.
+You can run existing PHP applications on Velocity without modifying their code. The key: put the framework's public directory as `web/`, and use CGI carveout patterns to match all PHP files.
 
 **WordPress:**
 
@@ -419,7 +419,7 @@ All requests that don't match a static file go to `index.php`. Laravel's router 
 **Symfony:**
 
 ```
-symfony-app/ ├── sbin/qbixserver.php ├── src/ ├── config/ │   ├── server.json │   └── ...                 ← Symfony config files ├── web/                    ← symlink to Symfony's public/ │   └── index.php ├── src/                    ← Symfony source (separate from Qbix src/) ├── var/ └── vendor/
+symfony-app/ ├── sbin/qbixserver.php ├── src/ ├── config/ │   ├── server.json │   └── ...                 ← Symfony config files ├── web/                    ← symlink to Symfony's public/ │   └── index.php ├── src/                    ← Symfony source (separate from Velocity's src/) ├── var/ └── vendor/
 ```
 
 Same config pattern. Symfony's front controller (`public/index.php`) handles all routing internally.

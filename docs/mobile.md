@@ -1,6 +1,6 @@
 # iOS & Android
 
-Qbix Server runs on phones. The PHP server listens on `127.0.0.1` inside the app, a WebView (or any HTTP client in the app) talks to it, and a native TransportManager written in Swift or Kotlin finds nearby Qbix Servers and carries requests between them. The PHP side never sees Bluetooth or Wi-Fi: every request, local or from a peer, arrives as HTTP on localhost.
+Velocity runs on phones. The PHP server listens on `127.0.0.1` inside the app, a WebView (or any HTTP client in the app) talks to it, and a native TransportManager written in Swift or Kotlin finds nearby Velocity servers and carries requests between them. The PHP side never sees Bluetooth or Wi-Fi: every request, local or from a peer, arrives as HTTP on localhost.
 
 The native sources, GATT UUIDs and chunking format are documented alongside the code in [mobile/README.md](../mobile/README.md). This page covers what you need to know to ship an app.
 

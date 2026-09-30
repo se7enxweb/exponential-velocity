@@ -1,6 +1,6 @@
 # Static Files
 
-Qbix Server serves files from the document root directly, without running PHP. It handles conditional requests, compresses text on the way out, and hands image URLs with size parameters to the image pipeline.
+Velocity serves files from the document root directly, without running PHP. It handles conditional requests, compresses text on the way out, and hands image URLs with size parameters to the image pipeline.
 
 ## Serving
 

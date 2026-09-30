@@ -1,6 +1,6 @@
 ## 📂 For PHP Developers — The Micro-Framework
 
-Qbix Server isn't just a static file server with PHP bolted on. It's a micro-framework where you **drop files into conventional directories** and things just work — classes autoload, events fire handlers, views render templates. No configuration needed for the basics.
+Velocity isn't just a static file server with PHP bolted on. It's a micro-framework where you **drop files into conventional directories** and things just work — classes autoload, events fire handlers, views render templates. No configuration needed for the basics.
 
 ### Project layout
 
@@ -305,7 +305,7 @@ Each worker handles exactly **one request**, then exits. The parent immediately 
 - Memory leaks — **impossible** (OS reclaims everything)
 - Secrets in memory — **gone** (no persistence between requests)
 
-This is safer than php-fpm, which reuses workers across requests and relies on `pm.max_requests` to periodically recycle them. With Qbix Server, every request gets a clean process. The fork cost (~0.5ms) is negligible compared to the bootstrap savings (~10–50ms).
+This is safer than php-fpm, which reuses workers across requests and relies on `pm.max_requests` to periodically recycle them. With Velocity, every request gets a clean process. The fork cost (~0.5ms) is negligible compared to the bootstrap savings (~10–50ms).
 
 This is the default mode. Workers persist across requests, with all statics, globals, superglobals, and response headers reset between requests via a snapshot restore (about 0.5 ms for a small application, 4–5 ms for a large CMS). See [reset.md](docs/reset.md) for what resets, what doesn't, and how to write scripts that work in both modes.
 

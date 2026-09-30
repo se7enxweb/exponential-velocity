@@ -1,4 +1,4 @@
-# Qbix Server Mesh Protocol — Design Document
+# Velocity Mesh Protocol — Design Document
 
 > **Status: experimental, and OFF by default.** The mesh generates no identity,
 > opens no `/Q/sync/*` endpoints and makes no peer connections unless it is
@@ -13,7 +13,7 @@
 
 ## 1. Overview
 
-A peer-to-peer mesh layer that lets Qbix Server instances discover each other, establish encrypted connections, and exchange HTTP requests over Bluetooth (BLE GATT), MultipeerConnectivity (iOS), Wi-Fi Direct (Android), or TCP (LAN/internet). The PHP server always listens on localhost. The native bridge handles transport. The mesh layer handles routing, encryption, and identity.
+A peer-to-peer mesh layer that lets Velocity instances discover each other, establish encrypted connections, and exchange HTTP requests over Bluetooth (BLE GATT), MultipeerConnectivity (iOS), Wi-Fi Direct (Android), or TCP (LAN/internet). The PHP server always listens on localhost. The native bridge handles transport. The mesh layer handles routing, encryption, and identity.
 
 ## 2. Identity
 
@@ -204,7 +204,7 @@ encrypted_message = {
 
 ### 7.3 Application TLS (Optional)
 
-For `handleUsingRemote` calls between two Qbix Servers that want standard TLS semantics, they can establish a TLS connection over the encrypted session. This is double encryption but provides standard HTTP client/server semantics that existing PHP code expects. In practice, the session encryption (7.2) is sufficient and TLS is unnecessary overhead for BLE.
+For `handleUsingRemote` calls between two Velocity servers that want standard TLS semantics, they can establish a TLS connection over the encrypted session. This is double encryption but provides standard HTTP client/server semantics that existing PHP code expects. In practice, the session encryption (7.2) is sufficient and TLS is unnecessary overhead for BLE.
 
 ## 8. PHP Integration
 
@@ -384,7 +384,7 @@ A peer sends garbage data, huge payloads, or floods requests.
 
 ### 10.10 NAT Traversal (Internet Peers)
 
-Two Qbix Servers on different home networks want to connect over the internet.
+Two Velocity servers on different home networks want to connect over the internet.
 
 **Not in scope for v1.** Mesh is for nearby devices (BLE range + same LAN). Internet connectivity uses standard `handleUsingRemote` over HTTPS to a server with a public IP or domain. NAT traversal (STUN/TURN/ICE) is a future extension that would enable internet mesh — but it's a fundamentally different problem from local mesh.
 
@@ -420,7 +420,7 @@ Device A is reachable through both B (2 hops) and C (3 hops). B goes down, route
 
 ### 10.16 BLE Interference in Crowded RF Environment
 
-Conference with 500 BLE devices, many non-Qbix (AirPods, watches, beacons). The 2.4GHz band is saturated.
+Conference with 500 BLE devices, many non-Velocity (AirPods, watches, beacons). The 2.4GHz band is saturated.
 
 **Handling:** BLE 5.0 adaptive frequency hopping already mitigates this at the radio level. At the application level: increase connection interval when bandwidth isn't needed (saves radio time), prefer MultipeerConnectivity's P2P Wi-Fi (5GHz band, less crowded) on iOS, and fall back to LAN TCP if Wi-Fi infrastructure is available. The native bridge reports transport quality via `X-Transport-Bandwidth` headers so the PHP app can adapt (e.g., don't try to sync large files over congested BLE).
 
@@ -453,7 +453,7 @@ Someone steals a device and now has its mesh private key.
 
 **Test in container:** Two PHP processes on different ports simulate two peers. Process A calls Process B's `/Q/sync/handshake`, they exchange certs, verify peer_ids, derive session keys, and send an encrypted ping/pong. Verify: correct peer_id derivation, mutual authentication, session key agreement, encryption round-trip.
 
-**Deliverable:** A standalone PHP class that can establish an encrypted session between two Qbix Servers over HTTP. No BLE yet — just the cryptographic layer.
+**Deliverable:** A standalone PHP class that can establish an encrypted session between two Velocity servers over HTTP. No BLE yet — just the cryptographic layer.
 
 ### Turn 2: Peer Registry + Events + Panel Tab (~1 session)
 
@@ -517,7 +517,7 @@ Turn 7: Prolly Tree Sync              (depends on 5)
 
 Turns 1 and 2 can be done in parallel. Turns 5 and 4 can be done in parallel after Turn 3. Turn 7 is optional for v1.
 
-**Minimum viable mesh:** Turns 1-3 (3 sessions). Gives you encrypted peer-to-peer HTTP between Qbix Servers. No multi-hop, no sync, no BLE — but the cryptographic and transport foundations are solid and the protocol is designed so the rest layers on top cleanly.
+**Minimum viable mesh:** Turns 1-3 (3 sessions). Gives you encrypted peer-to-peer HTTP between Velocity servers. No multi-hop, no sync, no BLE — but the cryptographic and transport foundations are solid and the protocol is designed so the rest layers on top cleanly.
 
 **Full mesh without BLE:** Turns 1-5 (5 sessions). Gives you encrypted multi-hop mesh with automatic data sync. Works over TCP. BLE is just a transport swap.
 

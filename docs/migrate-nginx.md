@@ -1,6 +1,6 @@
 # Migrating from nginx
 
-If you have an existing nginx + php-fpm setup, Qbix Server replaces both nginx and php-fpm with a single binary. Here's how to migrate your configuration.
+If you have an existing nginx + php-fpm setup, Velocity replaces both nginx and php-fpm with a single binary. Here's how to migrate your configuration.
 
 ## Quick start
 
@@ -8,7 +8,7 @@ If you have an existing nginx + php-fpm setup, Qbix Server replaces both nginx a
 # Stop nginx + php-fpm
 sudo systemctl stop nginx php-fpm
 
-# Start Qbix Server on the same port
+# Start Velocity on the same port
 ./qbixserver --root=/var/www/myapp/public --port=80 --workers=auto
 ```
 

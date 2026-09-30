@@ -8,7 +8,7 @@ Qbix-native discovery. Returns the server's identity, fingerprint, installed plu
 
 ```json
 {
-    "server": "Qbix Server",
+    "server": "Exponential Velocity",
     "version": "1.0.0",
     "fingerprint": "4af468e461fc2022...",
     "endpoints": {
@@ -24,7 +24,7 @@ Qbix-native discovery. Returns the server's identity, fingerprint, installed plu
 }
 ```
 
-Other Qbix servers use this for federation — pin the fingerprint, discover endpoints, forward events.
+Other Velocity servers use this for federation — pin the fingerprint, discover endpoints, forward events.
 
 ### `/.well-known/openapi.json` — OpenAPI 3.1
 
@@ -51,7 +51,7 @@ Lets AI tools (Claude, GPT, Cursor, etc.) discover and call this server's APIs a
 }
 ```
 
-An AI assistant connected to your Qbix server can call your handlers directly — no glue code, no adapters.
+An AI assistant connected to your Velocity server can call your handlers directly — no glue code, no adapters.
 
 ### Compatibility matrix
 
@@ -69,7 +69,7 @@ All three endpoints are configurable. Set `Q.federation.advertise: false` to dis
 
 ### `/.well-known/openclaiming/{hostname}/server.json` — OpenClaiming
 
-Every Qbix server auto-generates a signed [OpenClaim](https://openclaiming.org) for its identity. The claim is signed with ES256 (P-256) and verifiable by anyone with the public key.
+Every Velocity server auto-generates a signed [OpenClaim](https://openclaiming.org) for its identity. The claim is signed with ES256 (P-256) and verifiable by anyone with the public key.
 
 ```json
 {
@@ -77,7 +77,7 @@ Every Qbix server auto-generates a signed [OpenClaim](https://openclaiming.org) 
     "iss": "myserver.com/server",
     "stm": {
         "type": "server",
-        "software": "Qbix Server",
+        "software": "Exponential Velocity",
         "version": "1.0.0",
         "fingerprint": "4af468e461fc2022...",
         "endpoints": {

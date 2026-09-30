@@ -29,12 +29,12 @@ Download the binary for your platform — no PHP installation required:
 
 | Platform | Download |
 |---|---|
-| **Linux x86_64** | [qbixserver-linux-x86_64](https://github.com/Qbix/webserver/releases/latest/download/qbixserver-linux-x86_64) |
-| **Linux ARM64** | [qbixserver-linux-aarch64](https://github.com/Qbix/webserver/releases/latest/download/qbixserver-linux-aarch64) |
-| **macOS ARM64** | [qbixserver-macos-arm64](https://github.com/Qbix/webserver/releases/latest/download/qbixserver-macos-arm64) |
+| **Linux x86_64** | [qbixserver-linux-x86_64](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-x86_64) |
+| **Linux ARM64** | [qbixserver-linux-aarch64](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-aarch64) |
+| **macOS ARM64** | [qbixserver-macos-arm64](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-macos-arm64) |
 
 ```bash
-curl -L https://github.com/Qbix/webserver/releases/latest/download/qbixserver-linux-x86_64 -o qbixserver chmod +x qbixserver ./qbixserver --port=80
+curl -L https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-x86_64 -o qbixserver chmod +x qbixserver ./qbixserver --port=80
 ```
 
 The binary bundles PHP 8.3 + SQLite + OpenSSL + curl into a single ~15MB executable. Copy it to any Linux or macOS machine and run. No dependencies.
@@ -91,7 +91,7 @@ GitHub Actions automatically builds binaries for **Linux x86_64**, **Linux ARM64
 
 ## 🔌 With Qbix Platform
 
-Qbix Server is extracted from the [Qbix Platform](https://github.com/Qbix/Platform) — a full-stack framework for building social apps with real-time streams, user management, and plugin architecture.
+Velocity's engine was extracted from the [Qbix Platform](https://github.com/Qbix/Platform) — a full-stack framework for building social apps with real-time streams, user management, and plugin architecture.
 
 When you have a Qbix app, the server uses the full framework:
 

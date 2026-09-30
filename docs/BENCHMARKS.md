@@ -59,7 +59,7 @@ Scaling is sublinear on one core because the parent process serializes IPC. On m
 |---|---|---|
 | nginx | 50,742 | C binary, sendfile() |
 | Swoole | 26,974 | C extension, sendfile() |
-| **Qbix** | **18,311** | pure PHP, in-memory cache |
+| **Velocity** | **18,311** | pure PHP, in-memory cache |
 | FrankenPHP | 10,038 | Go + Caddy overhead |
 
 Static files are served by the parent process directly — no fork, no worker dispatch. 18K req/s from pure PHP is competitive.

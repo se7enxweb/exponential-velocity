@@ -1,6 +1,6 @@
 ## 🔒 Server Headers — What Your PHP Can Send
 
-Qbix Server understands special response headers from your PHP scripts. These are the same headers nginx understands (like `X-Accel-Redirect`) plus new ones for component-level caching. Your PHP sends them with `Q_Response::header()`, the server acts on them.
+Velocity understands special response headers from your PHP scripts. These are the same headers nginx understands (like `X-Accel-Redirect`) plus new ones for component-level caching. Your PHP sends them with `Q_Response::header()`, the server acts on them.
 
 > **Use `Q_Response::header()`, not PHP's `header()`.** The server runs PHP in the CLI SAPI, where the built-in `header()` and `http_response_code()` are silently discarded. `Q_Response::header()`, `Q::header()`, and `Q_WebServer_State::header()` all work in both standalone and `--app` mode. See [Setting headers, status codes and cookies](#setting-headers-status-codes-and-cookies) for the full table.
 
@@ -104,7 +104,7 @@ echo renderAdminPanel();
 
 ### Component-level cache invalidation
 
-Most caching systems cache whole pages. When anything changes, you throw away the entire page and re-render everything. Qbix Server tracks which data each page depends on, so when data changes, only the affected pages are invalidated — not every page on the site.
+Most caching systems cache whole pages. When anything changes, you throw away the entire page and re-render everything. Velocity tracks which data each page depends on, so when data changes, only the affected pages are invalidated — not every page on the site.
 
 It is off by default. Switch it on, with the response cache it works through:
 

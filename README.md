@@ -1,16 +1,19 @@
-# ⚡ Exponential Velocity — A Qbix based webserver package
+# ⚡ Exponential Velocity — the PHP web server built for production
 
 ### Run your existing PHP codebase 10–100× faster than nginx + php-fpm
 
 A pure PHP web server. No nginx, no Apache, no php-fpm. One process serves static files, PHP scripts, WebSocket connections, and a live dashboard.
 
-## How is Exponential Velocity different from Qbix?
+## What Velocity is
 
-Exponential Velocity is a production-focused distribution built on the Qbix web
-server. It keeps everything Qbix does — the copy-on-write worker model,
-WebSockets, and the live dashboard — and your PHP still runs unmodified. On top
-of that, it adds the packaging, control plane, and site-operations tooling you
-need to actually run it in production:
+Velocity is a PHP web server for real production work. It began as a fork of the
+Qbix web server engine, and the two projects have since drifted far apart: Velocity
+keeps the engine's copy-on-write worker model, WebSockets and live dashboard —
+and your PHP still runs unmodified — and adds everything a production site needs:
+the packaging, the control plane, the security and the site-operations tooling.
+The program names (`qbixserver`, `qbixctl`, `qbixconsole`), the `QBIX_*`
+environment variables and the `/etc/qbix` tree keep the engine's names, so
+existing scripts and installations keep working.
 
 - **Install it however you like.** Static binaries for Linux (x86-64, ARM64),
   macOS (Apple Silicon) and Windows, `.deb` and `.rpm` packages that upgrade in
@@ -67,9 +70,9 @@ Whether opcache is enabled or not, the vast majority of production PHP code is I
 
 They try to solve this by making PHP evented, like Node.js. Swoole's coroutines can multiplex I/O within a single worker — but only if you rewrite your code to use `Swoole\Coroutine\MySQL`, `Swoole\Coroutine\Http\Client`, and so on. Every `PDO::query()`, every `file_get_contents()`, every `curl_exec()` in every WordPress plugin, Laravel package, and Drupal module uses blocking I/O. It doesn't yield. Swoole can't help with code that doesn't cooperate. RoadRunner and FrankenPHP don't even try coroutines — they use the same worker-count-limited model as fpm.
 
-### How Qbix solves it
+### How Velocity solves it
 
-Instead of making each worker do more, Qbix runs more workers. The server loads your entire framework into a parent process, then calls `pcntl_fork()`. The kernel marks every page copy-on-write. Each worker shares the parent's loaded classes and pays only for the pages it writes to after the fork. Measured as private memory (not RSS, which counts shared pages once per worker): about 1.3–1.9 MB per worker with nothing loaded, about 10 MB for a full CMS. So the same 4GB that gives fpm 80 workers gives Qbix a few hundred CMS workers, or around two thousand small ones -- within the event loop's ceiling of about 1,000 workers per pool ([what a worker costs](docs/workers.md#what-a-worker-costs)).
+Instead of making each worker do more, Velocity runs more workers. The server loads your entire framework into a parent process, then calls `pcntl_fork()`. The kernel marks every page copy-on-write. Each worker shares the parent's loaded classes and pays only for the pages it writes to after the fork. Measured as private memory (not RSS, which counts shared pages once per worker): about 1.3–1.9 MB per worker with nothing loaded, about 10 MB for a full CMS. So the same 4GB that gives fpm 80 workers gives Velocity a few hundred CMS workers, or around two thousand small ones -- within the event loop's ceiling of about 1,000 workers per pool ([what a worker costs](docs/workers.md#what-a-worker-costs)).
 
 Your code runs unmodified, in two modes:
 
@@ -79,7 +82,7 @@ Your code runs unmodified, in two modes:
 
 ### What it replaces
 
-| | nginx + php-fpm | Qbix Server |
+| | nginx + php-fpm | Velocity |
 |---|---|---|
 | 💾 **Memory per worker** | 30–60MB (duplicated) | **1.3–1.9 MB** bare, **~10 MB** full CMS (COW, private, measured) |
 | 👥 **Concurrent PHP** (1GB) | ~24 workers | **~530** bare, **~90** full CMS (under ~1,000 per pool with `stream_select`) |
@@ -96,7 +99,7 @@ See [BENCHMARKS.md](docs/BENCHMARKS.md) for full methodology and [reset.md](docs
 
 **nginx** for reverse proxy and static files. **php-fpm** to run PHP. **Node.js** for a Socket.IO server. **Redis** for pub/sub between fpm and Node. **supervisor** to keep it all running. **Docker** to make it deployable. Six processes, three languages, two runtimes.
 
-Qbix Server replaces all six with one process. HTTP, WebSocket (with Socket.IO protocol), SSE, sessions, uploads, static files, .htaccess — same port, same file. No Redis, no Node, no pub/sub glue. Download a 4.5MB binary, run it, done. Pure PHP.
+Velocity replaces all six with one process. HTTP, WebSocket (with Socket.IO protocol), SSE, sessions, uploads, static files, .htaccess — same port, same file. No Redis, no Node, no pub/sub glue. Download a 4.5MB binary, run it, done. Pure PHP.
 
 You can also package your entire app — code, assets, SQLite database — into that binary and distribute it as a single file. Double-click on Windows, `./myapp --open` on Mac or Linux, the browser opens and the app is there. No PHP to install, no web server to configure, no database to set up. 5 MB, not 200 — because we open the browser that's already there instead of shipping Chromium like Electron does. [How it works →](#single-binary-distribution)
 
@@ -149,8 +152,8 @@ You can also package your entire app — code, assets, SQLite database — into 
 ## Quick Start
 
 ```bash
-git clone https://github.com/Qbix/webserver
-cd webserver
+git clone https://github.com/se7enxweb/exponential-velocity
+cd exponential-velocity
 php sbin/qbixserver.php
 ```
 
@@ -785,8 +788,8 @@ high.
 ### Practically
 
 ```bash
-git clone https://github.com/Qbix/Server.git
-cd Server
+git clone https://github.com/se7enxweb/exponential-velocity
+cd exponential-velocity
 php tests/run-unit.php          # should be green before you start
 # ... make your change, with its test ...
 php -l src/Q/WebServer.php      # lint every file you touched
@@ -814,7 +817,8 @@ php tests/run-unit.php          # green again, with your test in it
 ## License
 
 **MIT** — see [LICENSE](LICENSE) for the full text.
-Copyright (c) 2024–2026 Qbix, Inc.
+Copyright (c) 2024–2026 Qbix, Inc. (the original web server engine)
+Copyright (c) 2025–2026 7x (Exponential Velocity)
 
 In plain terms: you may use, copy, modify, merge, publish, distribute,
 sublicense and sell this software, including in closed-source and commercial

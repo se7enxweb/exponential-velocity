@@ -1,4 +1,4 @@
-# Qbix Server — End-to-End Test Results
+# End-to-End Test Results of the upstream Qbix web server
 
 Tested: September 18, 2026
 Source: `git clone https://github.com/Qbix/webserver.git` (commit `8e69b26`)

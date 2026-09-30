@@ -2,7 +2,7 @@
 
 MIT — see [LICENSE](LICENSE).
 
-Part of the [Qbix Platform](https://github.com/Qbix/Platform).
+Exponential Velocity began as a fork of the web server engine of the [Qbix Platform](https://github.com/Qbix/Platform).
 
 ---
 

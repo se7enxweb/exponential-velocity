@@ -1,14 +1,14 @@
 # Building and Distributing Binaries
 
-Qbix Server can be packaged as a single executable file containing the PHP runtime, the web server, and your entire application. The binary runs on any machine — nothing to install.
+Velocity can be packaged as a single executable file containing the PHP runtime, the web server, and your entire application. The binary runs on any machine — nothing to install.
 
 ## Why is the binary 5 MB, not 200 MB?
 
 Electron ships an entire copy of Chromium and Node.js inside every app. That's a full browser engine duplicated for each application on the user's machine.
 
-Qbix Server opens the browser that's already there. `--open` calls the system browser — the one the user already has open, already has their passwords saved in, already has their extensions. We ship zero rendering code.
+Velocity opens the browser that's already there. `--open` calls the system browser — the one the user already has open, already has their passwords saved in, already has their extensions. We ship zero rendering code.
 
-| Component | Electron app | Qbix Server binary |
+| Component | Electron app | Velocity binary |
 |---|---|---|
 | Browser engine | ~120 MB (Chromium) | 0 — uses system browser |
 | Language runtime | ~30 MB (Node.js + V8) | ~4 MB (static PHP) |
@@ -19,7 +19,7 @@ Qbix Server opens the browser that's already there. `--open` calls the system br
 
 The static PHP binary from [static-php-cli](https://github.com/crazywhalecc/static-php-cli) includes pcntl, sockets, sqlite3, openssl, phar, and mbstring in about 4 MB. The phar with all server code adds ~1 MB. Your app code goes on top.
 
-The tradeoff: Electron gives a controlled rendering environment — same browser engine on every machine. Qbix Server gives whatever browser the user has. For a web app that already works in a browser — which is what PHP apps are — there's no reason to ship another one.
+The tradeoff: Electron gives a controlled rendering environment — same browser engine on every machine. Velocity gives whatever browser the user has. For a web app that already works in a browser — which is what PHP apps are — there's no reason to ship another one.
 
 ## Variants: Which Binary to Download
 

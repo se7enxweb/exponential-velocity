@@ -1,6 +1,6 @@
 # Image Processing
 
-Qbix Server resizes and converts images on request, picks the smallest format the browser accepts, and caches the results on disk. There is nothing to install beyond PHP's GD extension, and no application code is involved: add `?w=400` to an image URL and the server does the rest.
+Velocity resizes and converts images on request, picks the smallest format the browser accepts, and caches the results on disk. There is nothing to install beyond PHP's GD extension, and no application code is involved: add `?w=400` to an image URL and the server does the rest.
 
 This page describes exactly what happens to a request, where the results go, and the limits of the current implementation. For ordinary static file serving, see [static-files.md](static-files.md).
 
@@ -122,7 +122,7 @@ Check with `php -r 'print_r(gd_info());'`.
 
 ## Compared with nginx
 
-| nginx | Qbix Server |
+| nginx | Velocity |
 |---|---|
 | `image_filter resize 400 -;` (needs `ngx_http_image_filter_module`) | `?w=400` |
 | `map $http_accept $webp_suffix { ... }` plus `try_files $uri$webp_suffix $uri` and pre-generated `.webp` files | Automatic, from the `Accept` header, generated on first request |

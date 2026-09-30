@@ -5,7 +5,7 @@
 > on; while it is off the `/Q/sync/*` endpoints answer `404`. See
 > [Mesh.md](Mesh.md).
 
-When two Qbix Servers meet over the mesh, they can bring each other's tables up to date without a central database. The server provides the protocol: finding which records differ, moving them over the encrypted peer session, and resolving conflicts. Your app provides the storage, through three callbacks per table.
+When two Velocity servers meet over the mesh, they can bring each other's tables up to date without a central database. The server provides the protocol: finding which records differ, moving them over the encrypted peer session, and resolving conflicts. Your app provides the storage, through three callbacks per table.
 
 This page covers how to register a table, what happens during a sync, how conflicts are resolved, and what the current implementation does not yet do. The wire protocol, identity and routing are specified in [Mesh.md](Mesh.md).
 

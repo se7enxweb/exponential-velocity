@@ -1,6 +1,6 @@
 # Migrating from Apache
 
-If you have an existing Apache + mod_php or Apache + php-fpm setup, Qbix Server replaces both. Your `.htaccess` files work without changes.
+If you have an existing Apache + mod_php or Apache + php-fpm setup, Velocity replaces both. Your `.htaccess` files work without changes.
 
 ## Quick start
 
@@ -8,7 +8,7 @@ If you have an existing Apache + mod_php or Apache + php-fpm setup, Qbix Server 
 # Stop Apache
 sudo systemctl stop apache2  # or httpd
 
-# Start Qbix Server
+# Start Velocity
 ./qbixserver --root=/var/www/html --port=80
 ```
 

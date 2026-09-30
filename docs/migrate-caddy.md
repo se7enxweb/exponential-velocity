@@ -1,6 +1,6 @@
 # Migrating from Caddy
 
-Caddy's automatic HTTPS and zero-config design is the closest to Qbix Server's philosophy. The main difference: Qbix Server runs your PHP directly instead of proxying to php-fpm.
+Caddy's automatic HTTPS and zero-config design is the closest to Velocity's philosophy. The main difference: Velocity runs your PHP directly instead of proxying to php-fpm.
 
 ## Quick start
 
@@ -8,7 +8,7 @@ Caddy's automatic HTTPS and zero-config design is the closest to Qbix Server's p
 # Stop Caddy
 sudo systemctl stop caddy
 
-# Start Qbix Server (automatic HTTPS works the same way)
+# Start Velocity (automatic HTTPS works the same way)
 ./qbixserver --root=/var/www/myapp/public --port=443 --tls=auto --acme-email=admin@example.com
 ```
 
@@ -42,11 +42,11 @@ Becomes:
 
 ### Automatic HTTPS
 
-Both Caddy and Qbix Server provision Let's Encrypt certs automatically. The behavior is nearly identical — set a domain, get a cert. Qbix Server also supports Cloudflare Origin CA for CDN deployments.
+Both Caddy and Velocity provision Let's Encrypt certs automatically. The behavior is nearly identical — set a domain, get a cert. Velocity also supports Cloudflare Origin CA for CDN deployments.
 
 ### Autohost (on-demand TLS)
 
-Caddy's `on_demand_tls` maps directly to Qbix Server's autohost feature:
+Caddy's `on_demand_tls` maps directly to Velocity's autohost feature:
 
 ```json
 {
@@ -71,6 +71,6 @@ Caddy's `on_demand_tls` maps directly to Qbix Server's autohost feature:
 ### What's different
 
 - **No Caddyfile syntax** — all config is JSON (or CLI flags)
-- **No HTTP/3** — Caddy supports QUIC natively; Qbix Server uses HTTP/1.1
+- **No HTTP/3** — Caddy supports QUIC natively; Velocity uses HTTP/1.1
 - **PHP runs in-process** — no php-fpm socket, no CGI. PHP is part of the server
-- **COW workers** — instead of Caddy proxying to a fixed pool of fpm workers, Qbix Server forks thousands of lightweight workers that share memory
+- **COW workers** — instead of Caddy proxying to a fixed pool of fpm workers, Velocity forks thousands of lightweight workers that share memory

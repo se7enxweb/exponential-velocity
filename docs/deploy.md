@@ -22,7 +22,7 @@ Configure targets in `config/deploy.json`:
 }
 ```
 
-The command rsyncs each directory to the remote server. If the remote runs Qbix Server, it can be configured to hot-reload on deploy.
+The command rsyncs each directory to the remote server. If the remote runs Velocity, it can be configured to hot-reload on deploy.
 
 Servers can also be managed from the Panel's **Servers** tab — add, deploy, and remove remote servers through the browser.
 
@@ -30,7 +30,7 @@ Servers can also be managed from the Panel's **Servers** tab — add, deploy, an
 
 ## 🔗 Federation
 
-Qbix servers can forward events to each other. Any `Q::event()` call can be handled locally or routed to a remote server — same dispatch path, same handler signature, transparent to the app code.
+Velocity servers can forward events to each other. Any `Q::event()` call can be handled locally or routed to a remote server — same dispatch path, same handler signature, transparent to the app code.
 
 ### How it works
 
@@ -40,7 +40,7 @@ Qbix servers can forward events to each other. Any `Q::event()` call can be hand
 
 ```json
 {
-    "server": "Qbix Server",
+    "server": "Exponential Velocity",
     "version": "1.0.0",
     "fingerprint": "11cf953679b80d04...",
     "endpoints": {"event": "/Q/event", "health": "/Q/health"},
@@ -186,7 +186,7 @@ Errors also go to stderr, so `php sbin/qbixserver.php 2>err.log` works without c
 
 ### Full-stack microservices
 
-Each Qbix server is a complete, independent app server. Federation lets you split your app across multiple servers without changing your code:
+Each Velocity server is a complete, independent app server. Federation lets you split your app across multiple servers without changing your code:
 
 ```
 Server A (auth.example.com)     Server B (app.example.com) ├── Users plugin                ├── App handlers ├── handlers/Users/*            ├── handlers/MyApp/* └── handles Users/ events       └── forwards Users/ → Server A
@@ -207,7 +207,7 @@ Inter-server requests are signed two ways, both compatible with the Qbix Platfor
 - **Header signature** — `X-Q-HMAC` header over the raw JSON body. Same
   as the Platform's curl-based `handleUsingRemote`.
 
-The receiving server accepts either. A Platform server and a standalone Qbix Server can forward events to each other without configuration changes.
+The receiving server accepts either. A Platform server and a standalone Velocity server can forward events to each other without configuration changes.
 
 ---
 

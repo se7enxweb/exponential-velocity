@@ -1,6 +1,6 @@
 # Octane Mode: What Gets Reset Between Requests
 
-Qbix Server's persistent-worker mode ("octane mode") keeps workers alive across requests, like php-fpm and Laravel Octane. Unlike fork-per-request, no process creation happens per request — the worker loops, handling one request after another with a snapshot restore between them.
+Velocity's persistent-worker mode ("octane mode") keeps workers alive across requests, like php-fpm and Laravel Octane. Unlike fork-per-request, no process creation happens per request — the worker loops, handling one request after another with a snapshot restore between them.
 
 ## What gets reset (automatic)
 
@@ -61,7 +61,7 @@ Previously risky items **now handled automatically** by the compat layer:
 
 ### vs php-fpm
 
-| | php-fpm | Qbix octane mode |
+| | php-fpm | Velocity octane mode |
 |---|---|---|
 | Static properties | **Persist** — leak between requests | **Reset** via snapshot restore |
 | Globals | **Persist** — leak between requests | **Reset** via snapshot restore |
@@ -75,7 +75,7 @@ php-fpm's `pm.max_requests` exists because statics and globals leak. The snapsho
 
 ### vs Laravel Octane (Swoole/RoadRunner)
 
-| | Laravel Octane | Qbix octane mode |
+| | Laravel Octane | Velocity octane mode |
 |---|---|---|
 | Reset mechanism | App-level: `$app->flush()`, `Container::forgetInstances()` | Language-level: `ReflectionProperty::setValue` on all statics + 44 function shims |
 | Coverage | Only what Laravel's flusher knows about | **All user-defined classes**, automatically |
