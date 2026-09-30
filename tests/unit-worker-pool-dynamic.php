@@ -257,7 +257,10 @@ check('...and the pool returns to its spare count', waitFor(10, function () use 
 
 list($port2, $spid2) = startServer('fixed', 3, array('Q' => array('webserver' => array(
 	'idleWorkerTimeout' => 1))), $servers);
-check('a fixed pool starts all its workers', children($spid2)['all'], 3);
+// The port can answer before the pool has forked every worker (a loaded
+// machine): wait for them, as the checks above do.
+check('a fixed pool starts all its workers', waitFor(10, function () use ($spid2) {
+	$n = children($spid2)['all']; return $n === 3 ? true : $n; }), true);
 $res = concurrent($port2, 5, '/index.php?sleep=200');
 $ok = 0; foreach ($res as $r) if ($r[0] === 200) ++$ok;
 check('a fixed pool queues what it cannot serve at once and answers it', $ok, 5);
