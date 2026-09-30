@@ -6,10 +6,13 @@ tests/local/
 keys/
 
 # Build artifacts
-# bin/qbixserver.phar is NOT here: it is tracked, it is what a Composer install
-# runs, and listing it made local rebuilds look like noise instead of the change
-# they are. tests/phar-is-current.php checks it against its sources.
+# sbin/qbixserver.phar and its copy at the former path, bin/qbixserver.phar,
+# are NOT here: they are tracked, they are what a Composer install runs, and
+# listing them made local rebuilds look like noise instead of the change they
+# are. tests/phar-is-current.php checks them against their sources.
 qbixserver.phar
+!sbin/qbixserver.phar
+!bin/qbixserver.phar
 node_modules/
 
 # Editor / OS
@@ -17,8 +20,11 @@ node_modules/
 *.swp
 *~
 
-# Compiled binary only — bin/uwebserver.c and bin/u_*.h are SOURCE and tracked
-bin/uwebserver
+# Compiled binaries only — native/uwebserver/ holds the C sources of
+# sbin/uwebserver, and they are tracked. bin/uwebserver is the forwarder at
+# the binary's former path, a tracked script (docs/layout.md, "Programs").
+sbin/uwebserver
+sbin/qbixserver
 bin/qbixserver
 qbixserver-linux-*
 qbixserver-macos-*

@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 /**
- * HTTP pipelining regression tests for bin/uwebserver.c
+ * HTTP pipelining regression tests for native/uwebserver/uwebserver.c (sbin/uwebserver)
  *
  * A client may send several requests in a single write. The original do_read()
  * handled the first and returned; handle_request() sets buf_len = 0, so the
@@ -10,7 +10,7 @@
  * the client blocked forever. Symptom: 1 of 3 responses.
  *
  * Build and run:
- *   gcc -O2 -o uweb bin/uwebserver.c -lssl -lcrypto -lpthread
+ *   gcc -O2 -o uweb native/uwebserver/uwebserver.c -lssl -lcrypto -lpthread
  *   ./uweb --port=21010 &
  *   php tests/pipelining.php 21010
  */

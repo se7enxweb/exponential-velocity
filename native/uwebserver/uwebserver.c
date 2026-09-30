@@ -1267,7 +1267,7 @@ static void do_read(int fd) {
 
 /* The release and build, given when it is compiled:
  *   gcc -O2 -DUWEB_VERSION="\"$(git describe --tags --abbrev=0)\"" \
- *       -DUWEB_BUILD="\"$(git rev-parse --short HEAD)\"" -o bin/uwebserver bin/uwebserver.c ...
+ *       -DUWEB_BUILD="\"$(git rev-parse --short HEAD)\"" -o sbin/uwebserver native/uwebserver/uwebserver.c ...
  * so the source never states a version that has gone out of date. */
 #ifndef UWEB_VERSION
 #define UWEB_VERSION "(version not given at build time)"
