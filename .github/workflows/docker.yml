@@ -15,7 +15,9 @@ on:
     paths:
       - 'packaging/docker/**'
       - 'packaging/bin/**'
+      - 'packaging/sbin/**'
       - 'build/extensions.json'
+      - 'sbin/qbixserver.phar'
       - 'bin/qbixserver.phar'
       - '.github/workflows/docker.yml'
   pull_request:

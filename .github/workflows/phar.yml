@@ -1,6 +1,7 @@
 name: phar
 
-# bin/qbixserver.phar is committed, and it is what a Composer install runs --
+# sbin/qbixserver.phar (and its copy at the former path, bin/qbixserver.phar)
+# is committed, and it is what a Composer install runs --
 # the package ships it, `composer update` delivers it, and nothing rebuilds it.
 # It is also listed in .gitignore, which does nothing for a file already tracked
 # except keep it out of everyone's attention, so it drifted: v0.0.2.4 shipped a
@@ -22,7 +23,7 @@ permissions:
 
 jobs:
   rebuild:
-    name: rebuild bin/qbixserver.phar
+    name: rebuild sbin/qbixserver.phar
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +38,7 @@ jobs:
       - name: Parse every file that goes in
         run: |
           set -e
-          find src qbixserver.php -name '*.php' -print0 \
+          find src sbin bin qbixserver.php qbixctl.php qbixconsole.php qshell.php -name '*.php' -print0 \
             | xargs -0 -n1 php -l > /dev/null
           echo "all files parse"
 
@@ -59,6 +60,6 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bin/qbixserver.phar
-          git commit -m "Rebuild bin/qbixserver.phar from ${GITHUB_SHA::7}"
+          git add sbin/qbixserver.phar bin/qbixserver.phar
+          git commit -m "Rebuild sbin/qbixserver.phar from ${GITHUB_SHA::7}"
           git push

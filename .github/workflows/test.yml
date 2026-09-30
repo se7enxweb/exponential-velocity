@@ -12,7 +12,7 @@ jobs:
   # token, which starts no further runs, and its tree is exactly the one tested
   # here. Other branches and pull requests only test the rebuilt phar.
   phar:
-    name: rebuild bin/qbixserver.phar
+    name: rebuild sbin/qbixserver.phar
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -44,14 +44,18 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bin/qbixserver.phar
-          git commit -m "Rebuild bin/qbixserver.phar from ${GITHUB_SHA::7}"
+          git add sbin/qbixserver.phar bin/qbixserver.phar
+          git commit -m "Rebuild sbin/qbixserver.phar from ${GITHUB_SHA::7}"
           git push || { git pull --rebase && git push; }
 
       - uses: actions/upload-artifact@v4
         with:
           name: qbixserver-phar
-          path: bin/qbixserver.phar
+          # The phar and its copy at the former path (docs/layout.md,
+          # "Programs"), restored to the checkout's root by the jobs below.
+          path: |
+            sbin/qbixserver.phar
+            bin/qbixserver.phar
           retention-days: 3
 
   standalone:
@@ -65,7 +69,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: qbixserver-phar
-          path: bin
+          path: .
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -77,7 +81,7 @@ jobs:
       - name: Syntax check every source file
         run: |
           set -e
-          find src qbixserver.php -name '*.php' -print0 \
+          find src sbin bin qbixserver.php qbixctl.php qbixconsole.php qshell.php -name '*.php' -print0 \
             | xargs -0 -n1 php -l > /dev/null
           echo "all files parse"
 
@@ -135,7 +139,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: qbixserver-phar
-          path: bin
+          path: .
 
       - name: Set up PHP (with CGI binary)
         uses: shivammathur/setup-php@v2
@@ -161,7 +165,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: qbixserver-phar
-          path: bin
+          path: .
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2

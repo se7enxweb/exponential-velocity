@@ -34,7 +34,7 @@ permissions:
   contents: write
 
 jobs:
-  # bin/qbixserver.phar is committed and is what a Composer install runs, but
+  # sbin/qbixserver.phar is committed and is what a Composer install runs, but
   # nothing rebuilds it -- three releases in a row shipped a phar older than
   # the source beside it. The phar workflow keeps it current on the branch;
   # this refuses to cut a release if a tag was made before that landed.
@@ -498,7 +498,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           ./buildroot/bin/php -d phar.readonly=0 build-phar.php
-          ./spc micro:combine bin/qbixserver.phar -O "$ART"
+          ./spc micro:combine sbin/qbixserver.phar -O "$ART"
           chmod +x "$ART"
           ls -lh "$ART"
           cp buildroot/bin/php "$PHPART"
@@ -519,7 +519,7 @@ jobs:
           }
           .\buildroot\bin\php.exe -d phar.readonly=0 build-phar.php
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          php spc-src\bin\spc micro:combine bin\qbixserver.phar -O "$env:ART.exe"
+          php spc-src\bin\spc micro:combine sbin\qbixserver.phar -O "$env:ART.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-Item "$env:ART.exe" | Select-Object Name, Length
           Copy-Item buildroot\bin\php.exe "$env:PHPART.exe"

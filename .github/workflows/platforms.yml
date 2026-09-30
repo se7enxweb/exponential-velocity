@@ -19,11 +19,13 @@ on:
   push:
     branches: [main]
     paths:
+      - 'sbin/qbixserver.phar'
       - 'bin/qbixserver.phar'
       - 'tests/phar-serves.sh'
       - '.github/workflows/platforms.yml'
   pull_request:
     paths:
+      - 'sbin/qbixserver.phar'
       - 'bin/qbixserver.phar'
       - 'tests/phar-serves.sh'
       - '.github/workflows/platforms.yml'
@@ -146,7 +148,7 @@ jobs:
           shell: sh
           run: |
             ${{ matrix.install }}
-            sh tests/phar-serves.sh bin/qbixserver.phar
+            sh tests/phar-serves.sh sbin/qbixserver.phar
 
   # ── Linux architectures we ship no binary for ───────────────
   # The official PHP images carry neither pcntl nor php-cgi, so the server
@@ -193,7 +195,7 @@ jobs:
                    docker-php-ext-install pcntl sockets >/dev/null 2>&1; \
                    [ "$(uname -m)" = riscv64 ] \
                      && echo pcre.jit=0 > /usr/local/etc/php/conf.d/99-no-pcre-jit.ini; \
-                   sh tests/phar-serves.sh bin/qbixserver.phar'
+                   sh tests/phar-serves.sh sbin/qbixserver.phar'
 
   # ── musl, rather than glibc ─────────────────────────────────
   # Alpine is not an exotic platform, it is most of the Docker images in the
@@ -225,7 +227,7 @@ jobs:
             php:8.3-cli-alpine \
             sh -c 'apk add --no-cache curl linux-headers >/dev/null 2>&1; \
                    docker-php-ext-install pcntl sockets >/dev/null 2>&1; \
-                   sh tests/phar-serves.sh bin/qbixserver.phar'
+                   sh tests/phar-serves.sh sbin/qbixserver.phar'
 
   # ── The other Unixes ───────────────────────────────────────
   # DragonFly went its own way after FreeBSD 4 and schedules differently.
@@ -273,7 +275,7 @@ jobs:
             for e in phar tokenizer pcntl posix sockets session filter ctype mbstring sqlite3 pdo_sqlite; do
               pkg install -y php83-$e || true
             done
-          run: sh tests/phar-serves.sh bin/qbixserver.phar
+          run: sh tests/phar-serves.sh sbin/qbixserver.phar
 
       # omnios (illumos) runs on demand only, not on every push. The serve
       # check fails there today for a reason that is understood but not yet
@@ -290,7 +292,7 @@ jobs:
         with:
           usesh: true
           prepare: pkg install php-83 curl || pkg install curl
-          run: sh tests/phar-serves.sh bin/qbixserver.phar
+          run: sh tests/phar-serves.sh sbin/qbixserver.phar
 
   # ── Haiku ───────────────────────────────────────────────────
   # The successor to BeOS, and the one platform here with no ready-made action
