@@ -65,6 +65,85 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.38 — large uploads get a clean 413 or arrive whole, and compressed files open through the file layer
+
+2026-09-30
+
+### Fixed
+
+- **A body over `post_max_size` gets a 413 the client can read.** Over
+  HTTP/1.1 the 413 was written and the connection closed at once, with the
+  body still arriving; closing a socket that has unread data makes the
+  kernel reset the connection, and depending on timing the client saw the
+  reset instead of the 413. The refusal now carries `Connection: close`,
+  and what the client still sends is read and discarded until it stops
+  (`Q.webserver.timeout.linger`, 5 s of silence, and
+  `Q.webserver.timeout.lingerTotal`, 30 s in all) before the connection is
+  closed. The check is made from the request head, before any body is kept.
+- **HTTP/2 applies `post_max_size` too.** It never did: a body over the
+  limit was held whole and handed to a worker, and came back as a 502 for
+  every upload from 8 MB up. A `content-length` over the limit is now
+  answered 413 on its own stream before any DATA is kept, a body without one
+  is refused on the DATA frame that takes it over, the stream is then reset
+  with `NO_ERROR` so the client stops sending, and the connection and its
+  other streams carry on. Discarded DATA is credited back to the connection
+  window.
+- **Chunked request bodies.** A chunked body had no size check at all (it
+  reached a worker and came back 502), was taken as complete wherever the
+  text `\r\n0\r\n` first appeared inside its data, and on a kept-alive
+  connection its bytes were left in the buffer as if they were the next
+  request. Chunked bodies are now parsed chunk by chunk as they arrive:
+  refused with 413 on the chunk that passes the limit, complete exactly
+  where the last chunk and its trailers end, 400 for a malformed chunk
+  size.
+- **Binary uploads just under the limit.** A request travels to its worker
+  as JSON, with a binary body base64-encoded, and the worker refused any
+  request frame over a fixed 10 MB. An upload of about 7.5 MB or more --
+  inside the default `post_max_size` of 8 MB -- therefore made the worker
+  exit without a word, and the visitor got a 502. The frame limit now
+  follows `post_max_size`, and the parent's deadline for handing a large
+  frame to a worker grows with its size instead of a flat two seconds.
+- **Slow uploads are not cut off.** The read timeout ran from the
+  connection's accept, and a kept-alive connection's idle timer kept
+  running while its next request arrived, so an upload taking longer than
+  the timeout was closed part-way through. The head of a request has
+  `Q.webserver.timeout.read` seconds from its first byte; a body may take as
+  long as it keeps arriving, the timeout counting from its last read.
+- **Framing from the head only.** `Content-Length` and
+  `Transfer-Encoding` were looked for anywhere in the buffer, so a body
+  containing that text -- an uploaded log file -- could be read as framing.
+- **`post_max_size = 0`** means no limit, as in PHP; it used to refuse
+  every request with a body.
+- **Compressed files through the file layer.** The Compat file wrapper had
+  no `stream_cast()`, so PHP could not put a zlib stream on a file opened
+  through it: `gzopen()`, `copy()` into or out of a `.gz`, and every
+  `compress.zlib://` path -- an Exponential package is a `.tar.gz` -- failed
+  with "can not be opened for reading" under the server and worked under
+  PHP-FPM. `stream_select()` on such a file threw.
+- **Stream options on files.** The wrapper answered every stream option
+  with false, so `stream_set_blocking()` and `stream_set_timeout()` failed
+  and `stream_set_write_buffer()` returned -1 on every file. They now reach
+  the file.
+- **No stray warning from a quiet open.** A file opened with error
+  reporting off (PharData creating an archive, `@fopen()`) printed a
+  warning the plain file layer does not give.
+
+### Tests
+
+- `tests/unit-request-body-limit.php`: bodies at, under and over the limit,
+  sent whole before reading the answer; chunked bodies over the limit, at
+  it, with the terminator text inside the data, malformed, and two on one
+  connection; bodies trickled in over three times the read timeout, on a
+  new and on a kept-alive connection; framing text inside a body. 22 of its
+  39 cases fail against v0.0.4.37.
+- `tests/http2-request-body-limit.php`: 413 and `RST_STREAM(NO_ERROR)` for
+  an oversized `content-length` and for a body without one, discarded DATA
+  credited to the window, other streams served, a body at the limit whole.
+  5 of its 16 cases fail against v0.0.4.37.
+- `tests/unit-compat-wrapper-streams.php`: the same stream calls with and
+  without the wrapper, including a `.tar.gz` built, read and extracted with
+  PharData. 13 of its 31 cases fail against v0.0.4.37.
+
 ## v0.0.4.37 — multipart form fields with nested names reach $_POST as PHP builds them
 
 2026-09-29
