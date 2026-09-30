@@ -182,8 +182,12 @@ function rh_free_port()
 }
 
 /**
- * Start a server from the source tree. Returns its port. The config always
- * turns the reverse proxy cache off, so every request reaches a worker.
+ * Start a server from the source tree. Returns its port. The config is
+ * written as the test gives it, and nothing is added: a setting the test
+ * does not mention has the server's own default, so a test sees the defaults
+ * an installation gets. (It used to turn the response cache off whenever the
+ * test said nothing about it, which hid a wrong default for years.) A test
+ * that needs the cache off, or any other setting, says so in $config.
  */
 function rh_start($name, $config = array(), $workers = 3, $withPid = true)
 {
@@ -191,9 +195,8 @@ function rh_start($name, $config = array(), $workers = 3, $withPid = true)
 	$root = $GLOBALS['rh']['root'];
 	$port = rh_free_port();
 	if (!$port) { fwrite(STDERR, "  FAIL - no free port\n"); exit(1); }
-	if (!isset($config['Q']['web']['cache'])) $config['Q']['web']['cache'] = array('enabled' => false);
-	if (!isset($config['Q']['compat'])) $config['Q']['compat'] = array('skipSourceCodeTransform' => false);
-	file_put_contents("$base/$name.json", json_encode($config));
+	// An empty config is still an object: "{}", not "[]".
+	file_put_contents("$base/$name.json", $config ? json_encode($config) : '{}');
 	$cmd = array(PHP_BINARY, __DIR__ . '/../../qbixserver.php',
 		'--config=' . "$base/$name.json", '--root=' . $root,
 		'--port=' . $port, '--workers=' . (int) $workers);
