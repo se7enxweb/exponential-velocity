@@ -3412,7 +3412,12 @@ class Q_WebServer_CompatFileWrapper
 			self::rewrap();
 			return $ok;
 		}
-		$this->handle = fopen($realPath, $mode);
+		// Quiet unless the caller asked for errors: code that probes for a
+		// file with reporting off -- PharData and Phar creating an archive,
+		// @fopen() -- got a warning from this inner fopen() that the plain
+		// file layer never gives, and with display_errors on, in the page.
+		$this->handle = ($options & STREAM_REPORT_ERRORS)
+			? fopen($realPath, $mode) : @fopen($realPath, $mode);
 		self::rewrap();
 		return $this->handle !== false;
 	}
@@ -3503,9 +3508,47 @@ class Q_WebServer_CompatFileWrapper
 		if ($this->handle) fclose($this->handle);
 	}
 
+	/**
+	 * Passed to the underlying file, as the plain file layer does.
+	 *
+	 * Always false before, so stream_set_write_buffer() (set_file_buffer())
+	 * on any file opened through this wrapper returned -1 as if the call had
+	 * failed, stream_set_blocking() and stream_set_timeout() returned false,
+	 * and code that checks those results -- log writers, archive tools --
+	 * took the error path under the server and not under PHP-FPM. A
+	 * transformed file lives in memory: there is nothing to block on or
+	 * buffer, and the call is accepted as a no-op.
+	 *
+	 * @method stream_set_option
+	 * @param {integer} $option STREAM_OPTION_*
+	 * @param {integer} $arg1
+	 * @param {integer} $arg2
+	 * @return {boolean}
+	 */
 	public function stream_set_option($option, $arg1, $arg2)
 	{
-		return false;
+		if ($this->transformed) {
+			return in_array($option, array(STREAM_OPTION_BLOCKING,
+				STREAM_OPTION_READ_TIMEOUT, STREAM_OPTION_WRITE_BUFFER,
+				defined('STREAM_OPTION_READ_BUFFER') ? STREAM_OPTION_READ_BUFFER : -1), true);
+		}
+		if (!is_resource($this->handle)) return false;
+		switch ($option) {
+			case STREAM_OPTION_BLOCKING:
+				return stream_set_blocking($this->handle, (bool) $arg1);
+			case STREAM_OPTION_READ_TIMEOUT:
+				return stream_set_timeout($this->handle, (int) $arg1, (int) $arg2);
+			case STREAM_OPTION_WRITE_BUFFER:
+				// $arg1 is STREAM_BUFFER_NONE or STREAM_BUFFER_FULL, $arg2 the size.
+				return stream_set_write_buffer($this->handle,
+					$arg1 === STREAM_BUFFER_NONE ? 0 : (int) $arg2) === 0;
+			default:
+				if (defined('STREAM_OPTION_READ_BUFFER') and $option === STREAM_OPTION_READ_BUFFER) {
+					return stream_set_read_buffer($this->handle,
+						$arg1 === STREAM_BUFFER_NONE ? 0 : (int) $arg2) === 0;
+				}
+				return false;
+		}
 	}
 
 	public function stream_lock($operation)
