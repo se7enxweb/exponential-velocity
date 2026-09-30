@@ -65,6 +65,69 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.40 — qbixctl restart brings a server back as it was started, and its default log is the server's own
+
+2026-09-30
+
+### Fixed
+
+- **`qbixctl restart` restarts with the options the server was started
+  with.** It stopped the server and then started one with only the options
+  given to `restart` itself -- the pid file, the configuration -- so a
+  server started with `--root`, `--port`, `--https-port`, `--host`,
+  `--workers`, `--keep-globals` or any other option came back with the
+  default root and ports, and the start timed out waiting for it. A server
+  started with a pid file now writes how it was started beside it
+  (`<pid file>.json`): the whole command line, the PHP interpreter's own
+  `-d` settings, the directory it was started in, the `QBIX_*`,
+  `*_CONF_DIR`, `*_STATE_DIR`, `*_DISTRIBUTION`, `*_RUN_USER` and
+  `*_RUN_GROUP` variables of its environment, and the file its output goes
+  to. `restart` reads that record -- or, for a server that wrote none, the
+  process table -- stops the server, starts it again the same way from
+  whatever directory and environment `restart` runs in, and waits until
+  every port it listened on listens again. Server options given to
+  `restart` replace the recorded ones (`qbixctl restart --workers=16`);
+  anything after `--` is added.
+- **The default server log is never the temporary directory.** Without
+  `--log`, `qbixctl start` wrote every server's output to
+  `/tmp/qbixserver.log`: one file for all servers on the machine,
+  overwritten by each start. It now goes to `Q.webserver.log.dir`; else
+  `var/log`, `files/log` or `logs` of the document root or the directory
+  above it; else the configuration tree's log directory (`/var/log/qbix`
+  for `/etc/qbix`, `/var/log/vc` for Velocity's `/etc/vc`, `QBIX_LOG_DIR`
+  when set); else `var/log` beside the document root. A
+  `/tmp/qbixserver.log` left by an earlier version is not touched; it can
+  be removed by hand.
+
+### Updated
+
+- `qbixctl start` passes on every server option it is given: `--app`,
+  `--socket`, `--socket-mode`, `--preset`, `--keep-globals`, `--user`,
+  `--group`, `--debug`, `--quiet`, `--verbose`, `--hotreload`,
+  `--watchdog` and `--allow-root-workers` as well as the ones it took
+  before.
+- The test harness for server tests (`tests/fixtures/race-harness.php`) no
+  longer turns the response cache off, or sets the source transform, when
+  a test says nothing about them: every test now runs with the server's own
+  defaults, which is what an installation gets. This is how the wrong
+  cache default fixed in v0.0.4.39 stayed hidden.
+
+### Tests
+
+- `tests/unit-ctl-restart-keeps-options.php` starts real servers: one with
+  `qbixctl start` and a full set of options (HTTP and HTTPS ports, bind
+  address, workers, pid file, site file, configuration tree,
+  `--keep-globals`, a distribution, an option after `--`), restarted with
+  `restart --pid`, with a bare `restart` from another directory and
+  environment, and with `restart --workers=3`; and one started by hand
+  with a relative root, an interpreter `-d` setting and no pid file,
+  restarted from its process table entry. Each comes back with the same
+  command line, ports, directory, environment and log. 32 cases.
+- `tests/unit-ctl-default-log.php` checks the order of the default log
+  places and that a real `qbixctl start` without `--log` writes to the
+  installation's `var/log` and nothing to the temporary directory.
+  17 cases.
+
 ## v0.0.4.39 — the response cache is off unless a setting turns it on
 
 2026-09-30
