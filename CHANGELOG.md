@@ -65,6 +65,99 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.41 — the programs move to sbin/ and bin/, and every former path keeps working
+
+2026-09-30
+
+### Renamed
+
+- **The daemon and its administration commands are in `sbin/`, the user
+  commands in `bin/`,** the way the Filesystem Hierarchy Standard lays out a
+  system: `qbixserver.php`, `qbixctl.php` and `qbixconsole.php` are
+  `sbin/qbixserver.php`, `sbin/qbixctl.php` and `sbin/qbixconsole.php`;
+  `qshell.php` is `bin/qshell.php`; the committed phar is
+  `sbin/qbixserver.phar`; the uwebserver binary is `sbin/uwebserver` and its
+  C sources (`uwebserver.c`, `u_*.h`) are in `native/uwebserver/`, with the
+  sources rather than in either program directory. `bin/qbix-appinfo.php` stays
+  where it is. Each program reads the engine's files from the directory above
+  its own, from a checkout, a Composer vendor copy and the phar alike; the phar
+  carries the same layout and its stub runs `sbin/qbixserver.php`. The table
+  of what moved, and why, is in `docs/layout.md`, "Programs".
+- **The packages install `qbixserver`, `qbixctl` and `qbixconsole` in
+  `/usr/sbin`**, and the systemd unit starts `/usr/sbin/qbixserver`. The
+  wrappers are `packaging/sbin/`; the container image puts them in
+  `/usr/local/sbin`.
+
+### Compatibility
+
+- **Every former path still works, with nothing to change.** `qbixserver.php`,
+  `qbixctl.php`, `qbixconsole.php` and `qshell.php` at the top of the tree are
+  forwarders that run the new file in the same process: the command line, the
+  process id and title (`ps`, `pkill -f 'qbixserver.php.*--port=N'`), standard
+  input and output and the exit status are the new program's. A server
+  started by an old path shows the same command line as before and is found,
+  reloaded and restarted by `qbixctl` exactly as it was started; `qbixctl`
+  itself starts `sbin/qbixserver.php` and counts a server started by either
+  path as this engine's. `bin/qbixserver.phar` is the same file as
+  `sbin/qbixserver.phar`, byte for byte (a copy, so it is there however the
+  tree was unpacked); `bin/uwebserver` execs `sbin/uwebserver`;
+  `packaging/bin/qbixserver`, `qbixctl` and `qbixconsole` are links to
+  `packaging/sbin/`. The packages keep `/usr/bin/qbixserver`, `qbixctl` and
+  `qbixconsole` as links, for units, scripts and users without `/usr/sbin` on
+  their `PATH`, and `/usr/share/exponential-velocity/bin/qbixserver.phar` as a
+  link to the phar.
+- The one visible difference: a forwarder writes a line on standard error
+  saying where its program moved, only when standard error is a terminal.
+  `QBIX_MOVED_QUIET=1` silences it there too.
+- Composer's `bin` lists `sbin/qbixserver.php`, `sbin/qbixctl.php`,
+  `sbin/qbixconsole.php` and `bin/qshell.php`, so `vendor/bin/` carries all four.
+- A program that drives the server from its own code finds everything through
+  `Q_WebServer_Ctl` as before: `serverScript()` is `sbin/qbixserver.php` (or
+  `qbixserver.php` in a tree from before this release), the new
+  `serverScripts()` lists both paths, `engineDir()` reads a `$sourceDir` that
+  names `sbin/` as the directory above it, and `Q_WebServer_Shell_Entry` finds
+  `bin/qshell.php` and `sbin/qbixconsole.php`, or the former files in an older
+  tree.
+
+### Updated
+
+- `build-phar.php` writes `sbin/qbixserver.phar` and its copy at
+  `bin/qbixserver.phar`; `build-app.php`, `build-binary.sh` (its binary is
+  `sbin/qbixserver`), the release recipes, the source kit and the workflows use
+  the new paths. `tests/phar-is-current.php` also checks that the stub runs
+  `sbin/qbixserver.php` and that the two phar paths are the same file.
+- The service examples in `service/`, the README and every document name the
+  new paths.
+
+### Tests
+
+- `tests/unit-moved-programs.php`: every former path and its new path answer
+  `--help`, `--version`, `-V`, `--about` and usage errors with the same
+  standard output, standard error and exit status (qbixconsole `list` and
+  `help`, qbixctl without a command, qshell `-c` with a failing command, both
+  phar paths, both uwebserver paths); standard input reaches the program
+  through a forwarder (`qshell --exec`); the note appears only at a terminal
+  and not with `QBIX_MOVED_QUIET=1`; real servers started by the former path
+  and by `qbixctl` serve and are restarted with their exact command line by the
+  new and the former `qbixctl`, and one started without a pid file is restarted
+  from its process table entry; both phar paths serve and
+  `phar://.../qbixserver.php` still runs the server; the phar carries the new
+  layout and the forwarders; `Q_WebServer_Shell_Entry` and `Q_WebServer_Ctl`
+  find the programs from the engine's directory, from `sbin/` and in a tree of
+  the former layout. 147 cases.
+- `tests/unit-nfpm-render.php` checks that the packages put the programs in
+  `/usr/sbin`, links in `/usr/bin` and nothing else there, the tree under
+  `/usr/share/exponential-velocity` with the phar link, the unit's
+  `/usr/sbin/qbixserver`, and that every link points into the package.
+  `packaging/ci/test-package.sh` checks the same on an installed package.
+- `tests/unit-about.php` covers the programs at both paths. Every other test
+  runs the programs at their new paths; `tests/phar-serves.sh` defaults to
+  `sbin/qbixserver.phar` and is still run against `bin/qbixserver.phar`.
+- `tests/unit-worker-pool-dynamic.php` waits for a fixed pool's workers
+  instead of counting them the moment its port answers: the pool forks them
+  after it listens, so a loaded machine failed a pool that was starting
+  normally (got 0, want 3).
+
 ## v0.0.4.40 — qbixctl restart brings a server back as it was started, and its default log is the server's own
 
 2026-09-30
