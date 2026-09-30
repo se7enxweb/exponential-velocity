@@ -25,6 +25,7 @@ node_modules/
 # the binary's former path, a tracked script (docs/layout.md, "Programs").
 sbin/uwebserver
 native/uwebserver/uwebserver-sanitize
+native/uwebserver/uwebserver-fuzz
 sbin/qbixserver
 bin/qbixserver
 qbixserver-linux-*

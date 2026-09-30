@@ -42,7 +42,8 @@ man docs/uwebserver.1                      # the manual page
 | `native/uwebserver/u_log.h` | the error and access logs, and the escaping of what a client sent |
 | `native/uwebserver/u_tls.h` | TLS through OpenSSL 3, without blocking |
 | `native/uwebserver/u_sendfile.h` | one non-blocking step of `sendfile(2)` |
-| `native/uwebserver/Makefile` | the build, with the release and hardening flags; `install` |
+| `native/uwebserver/Makefile` | the build, with the release and hardening flags; `sanitize`, `fuzz`, `install` |
+| `native/uwebserver/fuzz_request.c` | the fuzz harness of the request parsing (libFuzzer, or its own fuzzer) |
 | `native/uwebserver/uwebserver.bash-completion` | bash completion |
 | `docs/uwebserver.1` | the manual page |
 | `native/uwebserver/u_runtime.h`, `u_merkle_cache.h` | no longer compiled (see [What it was](#what-it-was-in-00441)) |
@@ -63,14 +64,18 @@ compares `bin/uwebserver` with `sbin/uwebserver`.
 make -C native/uwebserver                         # sbin/uwebserver, the release flags
 make -C native/uwebserver install PREFIX=/usr/local
 make -C native/uwebserver UWEB_VERSION=v0.0.4.42  # a tree without git
+make -C native/uwebserver sanitize                # uwebserver-sanitize: ASan and UBSan, for tests
+make -C native/uwebserver fuzz                    # uwebserver-fuzz [seconds] [seed]: the parser fuzzer
 ```
 
 It is one translation unit and needs a C compiler and OpenSSL 3 (`libssl-dev`
 or `openssl-devel`). The one-line build still works for a quick try:
 `cc -O2 -o uweb native/uwebserver/uwebserver.c -lssl -lcrypto`. The release
 and build it reports in `--version` come from `git describe` and
-`git rev-parse` through `UWEB_VERSION` and `UWEB_BUILD`. The flags the
-Makefile adds for safety are listed under [Security](#security).
+`git rev-parse` through `UWEB_VERSION` and `UWEB_BUILD`. The release build is
+hardened (a PIE with full RELRO, a stack protector, fortified calls) and uses
+`-Werror`; `WERROR=`, `HARDEN=` and `LDHARDEN=` turn those off for a toolchain
+that objects. The flags are listed under [Security](#security).
 
 ### The command line
 
@@ -419,6 +424,25 @@ process and fails the test.
 | 3.11 | info | Compression and renegotiation are off | as it is | "no compression" |
 | 3.12 | medium, new | A private key others may read | refused; a warning when its group may read it; a key that does not match the certificate is refused | `unit-uwebserver-tls.php`, the key cases |
 | 3.13 | info | File modes: logs are created 0640, the pid file 0644, with `O_NOFOLLOW` and `O_CLOEXEC`; no descriptor reaches a child | as it is | `unit-uwebserver-process.php`, the modes |
+
+#### Wave 4: hardening and fuzzing
+
+| # | Severity | Finding | Fix | Test |
+|---|---|---|---|---|
+| 4.1 | medium, 0.0.4.41 | The binary was built with `gcc -O2` alone: a position-dependent executable, partial RELRO, lazy binding, no stack protector, no fortified calls | the Makefile builds with `-D_FORTIFY_SOURCE=2 -fstack-protector-strong -fstack-clash-protection -fcf-protection -fPIE` and links with `-pie -z relro -z now -z noexecstack` (`HARDEN=`/`LDHARDEN=` to leave them out) | `unit-uwebserver-hardening.php` reads the binary with `readelf` and `nm` |
+| 4.2 | info, new | The request parser had no fuzzing | `native/uwebserver/fuzz_request.c`: a libFuzzer entry point and a built-in deterministic fuzzer (seeds from real requests, 6 kinds of mutation, a xorshift generator), checking every promise the server relies on: the head's length and every string inside the input, the path normaliser's output (no `.`/`..` segment, no `//`, no control byte, no hidden name) and that it is stable when normalised again, ranges inside the file, the escapes without a control byte or a bare quote; `make fuzz` | a run in every test (`UWEB_FUZZ_SECONDS`, 10 s) and a ten-minute run under the sanitizers (below) |
+| 4.3 | info | Random and mutated requests over real connections | every answer a well-formed head, the server still serving | "random and mutated requests are answered" (400 per run) |
+| 4.4 | low, 0.0.4.41 | `Server: U/1.0`, and error bodies from nowhere in particular | `Server: uwebserver` with no version (`--server-name`, `--no-server-header`); errors say only their status; the ETag is the modification time and size (no inode number, as Apache's once was); no `X-Powered-By` | "a 404 says only 404 Not Found", "no header names the software" |
+| 4.5 | medium | Log injection: a request line or header with CR, LF or other control bytes | the access log escapes them (`\xHH`), the error log replaces any control byte with `?`, and malformed requests are logged without their bytes | "every line of the error log is one of its own", `unit-uwebserver-process.php` |
+| 4.6 | info | The final review, with nothing to change: signal handlers only set a flag; every descriptor is opened `O_CLOEXEC`; `SIGPIPE` is ignored; nothing is run through a shell; the environment is read for `UWEBSERVER_CONFIG` only; OpenSSL's error queue is cleared around every call; dates are read and written in the C locale | as it is | the whole suite |
+
+The ten-minute fuzz run of 0.0.4.42, under AddressSanitizer and
+UndefinedBehaviorSanitizer with GCC 14: FUZZ_RESULT. The first run stopped at
+once on a promise of the harness itself that was too strong: that a normalised
+path normalises to itself again. A file may be named `%2e%2e` (requested as
+`%252e%252e`), which is decoded once, rightly, and would decode to `..` a
+second time; the harness now encodes a literal `%` before the second pass, and
+the parser was left as it was.
 
 ### Changes from 0.0.4.41
 

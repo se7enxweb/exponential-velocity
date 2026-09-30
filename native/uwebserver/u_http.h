@@ -23,6 +23,8 @@
 #include <stddef.h>
 #include <string.h>
 #include <strings.h>
+#include <limits.h>
+#include <time.h>
 
 typedef struct { const char *p; size_t n; } UwStr;
 
@@ -260,6 +262,104 @@ static int uw_normalize_path(const char *p, size_t n, char *out, size_t outcap, 
     while (o > 0 && out[o - 1] == '/') o--;
     out[o] = '\0';
     return UW_PATH_OK;
+}
+
+/* ── Header values a file response reads: pure, and fuzzed with the rest ── */
+
+/* Does an If-None-Match list hold this entity tag (weak comparison)? */
+static int uw_etag_match(UwStr inm, const char *etag) {
+    size_t el = strlen(etag), i = 0;
+    while (i < inm.n) {
+        while (i < inm.n && (inm.p[i] == ' ' || inm.p[i] == '\t' || inm.p[i] == ',')) i++;
+        size_t s = i;
+        while (i < inm.n && inm.p[i] != ',') i++;
+        size_t e = i;
+        while (e > s && (inm.p[e - 1] == ' ' || inm.p[e - 1] == '\t')) e--;
+        if (e - s == 1 && inm.p[s] == '*') return 1;
+        if (e - s > 2 && inm.p[s] == 'W' && inm.p[s + 1] == '/') s += 2;
+        if (e - s == el && memcmp(inm.p + s, etag, el) == 0) return 1;
+    }
+    return 0;
+}
+
+static int uw_parse_http_date(UwStr s, time_t *out) {
+    char buf[64];
+    if (s.n == 0 || s.n >= sizeof buf) return -1;
+    memcpy(buf, s.p, s.n); buf[s.n] = '\0';
+    struct tm tm; memset(&tm, 0, sizeof tm);
+    const char *end = strptime(buf, "%a, %d %b %Y %H:%M:%S GMT", &tm);
+    if (!end || *end) return -1;
+    time_t t = timegm(&tm);
+    if (t == (time_t)-1) return -1;
+    *out = t;
+    return 0;
+}
+
+/*
+ * A single byte range "bytes=a-b", "bytes=a-" or "bytes=-n" of a file of
+ * `size` bytes. Returns 1 with [*from, *to] (inclusive), 0 to ignore the
+ * header (several ranges, another unit, malformed), -1 unsatisfiable.
+ */
+static int uw_parse_range(UwStr r, long long size, long long *from, long long *to) {
+    if (r.n < 7 || strncasecmp(r.p, "bytes=", 6) != 0) return 0;
+    const char *p = r.p + 6, *e = r.p + r.n;
+    while (p < e && (*p == ' ' || *p == '\t')) p++;
+    if (memchr(p, ',', (size_t)(e - p))) return 0;
+    long long a = -1, b = -1;
+    int digits = 0;
+    if (p < e && *p != '-') {
+        a = 0;
+        while (p < e && *p >= '0' && *p <= '9') { if (a > (LLONG_MAX - 9) / 10) return 0; a = a * 10 + (*p++ - '0'); digits++; }
+        if (!digits) return 0;
+    }
+    if (p >= e || *p != '-') return 0;
+    p++;
+    digits = 0;
+    if (p < e && *p >= '0' && *p <= '9') {
+        b = 0;
+        while (p < e && *p >= '0' && *p <= '9') { if (b > (LLONG_MAX - 9) / 10) return 0; b = b * 10 + (*p++ - '0'); digits++; }
+    }
+    while (p < e && (*p == ' ' || *p == '\t')) p++;
+    if (p != e) return 0;
+    if (a < 0 && b < 0) return 0;
+    if (a < 0) {                      /* the last b bytes */
+        if (b == 0 || size == 0) return -1;
+        *from = b >= size ? 0 : size - b;
+        *to = size - 1;
+        return 1;
+    }
+    if (b >= 0 && b < a) return 0;
+    if (a >= size) return -1;
+    *from = a;
+    *to = (b < 0 || b >= size) ? size - 1 : b;
+    return 1;
+}
+
+/* Does Accept-Encoding allow gzip (and not with q=0)? */
+static int uw_accepts_gzip(UwStr ae) {
+    size_t i = 0;
+    while (i < ae.n) {
+        while (i < ae.n && (ae.p[i] == ' ' || ae.p[i] == '\t' || ae.p[i] == ',')) i++;
+        size_t s = i;
+        while (i < ae.n && ae.p[i] != ',') i++;
+        size_t e = i, t = s;
+        while (t < e && ae.p[t] != ';' && ae.p[t] != ' ' && ae.p[t] != '\t') t++;
+        int is_gzip = (t - s == 4 && strncasecmp(ae.p + s, "gzip", 4) == 0);
+        if (!is_gzip) continue;
+        /* q=0, q=0.0, q=0.00 or q=0.000 refuses it */
+        for (size_t k = t; k + 1 < e; k++) {
+            if ((ae.p[k] == 'q' || ae.p[k] == 'Q') && ae.p[k + 1] == '=') {
+                size_t z = k + 2;
+                if (z >= e || ae.p[z] != '0') return 1;
+                z++;
+                if (z < e && ae.p[z] == '.') { z++; while (z < e && ae.p[z] == '0') z++; }
+                while (z < e && (ae.p[z] == ' ' || ae.p[z] == '\t')) z++;
+                return z < e && ae.p[z] != ';' ? 1 : 0;
+            }
+        }
+        return 1;
+    }
+    return 0;
 }
 
 #endif /* U_HTTP_H */
