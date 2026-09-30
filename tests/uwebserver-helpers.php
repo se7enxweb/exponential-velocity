@@ -79,6 +79,8 @@ function uw_build($extra = '', $name = 'uwebserver')
 {
 	static $built = array();
 	if (isset($built[$name])) return $built[$name];
+	// UWEB_TEST_BIN runs the tests against a program built elsewhere (an older one, to compare).
+	if (getenv('UWEB_TEST_BIN') && $extra === '') return $built[$name] = getenv('UWEB_TEST_BIN');
 	$root = dirname(__DIR__);
 	$cc = trim((string) shell_exec('command -v cc gcc 2>/dev/null | head -1'));
 	if ($cc === '' || !is_file('/usr/include/openssl/ssl.h')) return $built[$name] = null;

@@ -674,6 +674,7 @@ typedef struct {
     char *tbuf; size_t tbuf_len, tbuf_off;   /* TLS: file data read and not yet written */
     long long discard;       /* request body bytes still to skip */
     int keep_alive, requests, head_started;
+    size_t scanned;          /* bytes of the input already searched for the end of a head */
     time_t deadline;
     uint32_t events;
     size_t lingered;
@@ -689,6 +690,7 @@ static SSL_CTX *ssl_ctx = NULL;
 static Conn **conns = NULL;
 static int conns_cap = 0;
 static int nconns = 0;
+static int conns_top = 0;        /* one past the highest descriptor in the table */
 static int epfd = -1;
 static int rootfd = -1;
 static int access_fd = -1;
@@ -727,6 +729,7 @@ static void uw_conn_close(Conn *c) {
     if (c->file_fd >= 0) close(c->file_fd);
     close(c->fd);
     conns[c->fd] = NULL;
+    while (conns_top > 0 && !conns[conns_top - 1]) conns_top--;
     free(c->in); free(c->out); free(c->tbuf);
     free(c);
     nconns--;
@@ -1361,7 +1364,18 @@ static int uw_process_input(Conn *c) {
         uw_deadline(c, c->requests ? cfg.keepalive_timeout : cfg.header_timeout);
         return 0;
     }
-    if (!c->head_started) { c->head_started = 1; uw_deadline(c, cfg.header_timeout); }
+    if (!c->head_started) { c->head_started = 1; c->scanned = 0; uw_deadline(c, cfg.header_timeout); }
+    /* Parse only once the head can be complete: when an empty line has come
+     * after a line end ("\n\r\n"; also "\n\n", a bare LF answered 400 at once), or the buffer is full.
+     * Parsing the whole buffer again on every read would cost a client that
+     * sends a byte at a time the square of the head's length in CPU. */
+    if (c->in_len < c->in_cap) {
+        size_t from = c->scanned > 3 ? c->scanned - 3 : 0;
+        int end = memmem(c->in + from, c->in_len - from, "\n\r\n", 3) != NULL
+               || memmem(c->in + from, c->in_len - from, "\n\n", 2) != NULL;
+        c->scanned = c->in_len;
+        if (!end) return 0;
+    }
     UwRequest r;
     int n = uw_parse_request(c->in, c->in_len, (size_t)cfg.max_header, (size_t)cfg.max_uri, &r);
     if (n == UW_NEED_MORE && c->in_len >= c->in_cap) n = -431;
@@ -1543,6 +1557,7 @@ static void uw_accept(UwListener *l) {
         c->events = EPOLLIN;
         if (epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &e) != 0) { if (c->ssl) SSL_free(c->ssl); free(in); free(c); close(fd); continue; }
         conns[fd] = c;
+        if (fd >= conns_top) conns_top = fd + 1;
         nconns++;
     }
 }
@@ -1575,7 +1590,7 @@ static int uw_serve(void) {
                 listeners[i].fd = -1;
             }
             /* Idle connections go now; one in the middle of a request finishes it. */
-            for (int fd = 0; fd < conns_cap; fd++) {
+            for (int fd = 0; fd < conns_top; fd++) {
                 Conn *c = conns[fd];
                 if (c && c->state == ST_READ && c->in_len == 0 && c->discard == 0) uw_conn_close(c);
             }
@@ -1591,7 +1606,7 @@ static int uw_serve(void) {
         }
         if (now_s != last_sweep) {
             last_sweep = now_s;
-            for (int fd = 0; fd < conns_cap; fd++) {
+            for (int fd = 0; fd < conns_top; fd++) {
                 Conn *c = conns[fd];
                 if (c && c->deadline && now_s >= c->deadline) {
                     uw_log(UW_LOG_DEBUG, "%s: timed out (%s)", c->peer,
@@ -1610,7 +1625,7 @@ static int uw_serve(void) {
             }
         }
     }
-    for (int fd = 0; fd < conns_cap; fd++) if (conns[fd]) uw_conn_close(conns[fd]);
+    for (int fd = 0; fd < conns_top; fd++) if (conns[fd]) uw_conn_close(conns[fd]);
     close(epfd);
     return 0;
 }
@@ -1771,6 +1786,7 @@ static volatile sig_atomic_t child_died = 0;
 static void uw_on_child(int s) { (void)s; child_died = 1; }
 
 static int uw_supervise(void) {
+    int gave_up = 0;
     struct sigaction sa; memset(&sa, 0, sizeof sa);
     sa.sa_handler = uw_on_child;
     sigaction(SIGCHLD, &sa, NULL);
@@ -1812,6 +1828,7 @@ static int uw_supervise(void) {
                 if (++deaths > 2 * cfg.workers + 5) {     /* not a fork loop: give up */
                     uw_log(UW_LOG_ERROR, "workers keep ending; stopping");
                     stopping = 1;
+                    gave_up = 1;
                 }
             }
         }
@@ -1828,7 +1845,7 @@ static int uw_supervise(void) {
         if (alive) { struct timespec ts = { 0, 50 * 1000000L }; nanosleep(&ts, NULL); }
     }
     for (int i = 0; i < cfg.workers; i++) if (worker_pids[i]) { kill(worker_pids[i], SIGKILL); waitpid(worker_pids[i], NULL, 0); }
-    return 0;
+    return gave_up ? 1 : 0;
 }
 
 /* The descriptors the connection table can hold: as many as the limit allows. */

@@ -378,6 +378,26 @@ process and fails the test.
 | 1.14 | info, new | GCC 14 saw a possible NULL dereference (`-Wnull-dereference`): the option looked up for a bare port was used unchecked | checked | the Makefile build with GCC 14 under `-Werror` |
 | 1.15 | info | ASan, UBSan and LeakSanitizer over every uwebserver test (everything the process holds is freed at a clean exit, so a leak is visible) | no report | the sanitizer run above |
 
+#### Wave 2: resource exhaustion and denial of service
+
+| # | Severity | Finding | Fix | Test |
+|---|---|---|---|---|
+| 2.1 | high, 0.0.4.41 | The TLS handshake ran blocking inside the accept loop: one client that opened the TLS port and sent nothing stopped the whole server, both ports, for as long as it liked | handshakes without blocking, dropped after `--tls-handshake-timeout` | `unit-uwebserver-tls.php`, "a silent TLS client does not block others"; `unit-uwebserver-limits.php`, "half a TLS ClientHello" |
+| 2.2 | high, 0.0.4.41 | No timeout of any kind: an idle connection, a head sent a byte now and then, a body that never came or a response never read held its slot for ever, so a few thousand of them filled the table (slowloris) | `--header-timeout` (from the head's first byte, not renewed by trickling), `--keepalive-timeout`, `--read-timeout`, `--write-timeout` (without progress) | `unit-uwebserver-limits.php`, five timing cases |
+| 2.3 | medium, 0.0.4.41 | A response was written once; a short write or EAGAIN was ignored, so a slow reader got a truncated response on a connection still kept alive, out of step | a response buffer and a per-connection state machine that waits until the socket takes more; files by `sendfile(2)` a step at a time | `unit-uwebserver-static.php` (3 MiB), `unit-uwebserver-tls.php` (1 MiB over TLS), "a response never read" |
+| 2.4 | medium, 0.0.4.41 | With every descriptor in use, `accept` fails with EMFILE while the listening socket stays readable: the loop spun at full CPU | the listener is paused for a second and a warning logged | "with its descriptors used up, it pauses accepting" |
+| 2.5 | medium, 0.0.4.41 | The only bound on connections was the fixed table of 8 192 | `--max-connections` per worker (more are closed at once); the descriptor limit raised to what it needs | "--max-connections=6: a seventh connection is closed at once" |
+| 2.6 | medium, new | `--workers`: a worker that dies at once would be forked again without end | at most 2N+5 deaths in ten seconds, then the parent stops, exit status 1 | "workers killed again and again: the parent stops" |
+| 2.7 | low, new | The head was parsed again from its start on every read, which is quadratic in its size for a client that sends it in small pieces (measured small at 8 KiB, the default) | parsed only once an empty line has arrived or the buffer is full | "four 57 KiB heads sent 8 bytes at a time ... for little CPU" |
+| 2.8 | low, new | The timeout sweep walked the whole descriptor table, up to a million entries, every second | only up to the highest descriptor in use | the limits test's timing |
+| 2.9 | info | Memory per connection: the head buffer is `--max-header-size`; a generated answer (a listing) is at most 8 MiB; requests pipelined behind one being answered are not read until it is sent, so a client that never reads cannot make the server buffer its requests | as it is | "pipelined requests never read ... memory grew < 4 MiB" |
+| 2.10 | low | A body is skipped up to `--max-body-size`; a larger one is `413`, the connection closed after a bounded linger (2 s, 256 KiB), so the answer arrives before the reset | as it is | "a body of --max-body-size is skipped", "one byte more: 413" |
+| 2.11 | low, new | A file cut short while it is sent (`sendfile` returns 0 before the end) | the connection is closed: its Content-Length can no longer be kept, and it never waits for bytes that will not come | "a file cut short while it is sent" |
+| 2.12 | info | Files over 4 GiB: lengths and ranges are 64-bit | as it is | "a file of 5 GiB", "a range past 4 GiB" |
+| 2.13 | low | A directory listing is bounded: 20 000 names | as it is | "a directory of 20 050 names" |
+| 2.14 | info | `--max-requests` per connection (1000) | as it is | "--max-requests=3" |
+| 2.15 | info, 0.0.4.41 | `u_serve_file` (never called) spun on EAGAIN inside `sendfile` | replaced by one non-blocking step (`u_sendfile.h`) | the file tests above |
+
 ### Changes from 0.0.4.41
 
 Callers of the 0.0.4.41 command line keep working, with these differences:
