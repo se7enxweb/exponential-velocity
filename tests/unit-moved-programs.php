@@ -140,7 +140,7 @@ if (is_file("$root/sbin/uwebserver") && is_executable("$root/sbin/uwebserver")) 
 		check('bin/uwebserver ' . implode(' ', $args) . ' answers as sbin/uwebserver does', $a, $b);
 	}
 }
-check('the uwebserver sources are in native/uwebserver/', is_file("$root/native/uwebserver/uwebserver.c") && is_file("$root/native/uwebserver/u_runtime.h"), true);
+check('the uwebserver sources are in native/uwebserver/', is_file("$root/native/uwebserver/uwebserver.c") && is_file("$root/native/uwebserver/Makefile"), true);
 check('...and no longer in bin/', is_file("$root/bin/uwebserver.c"), false);
 
 // ── 2. The note at a terminal, and QBIX_MOVED_QUIET ─────────────────────
