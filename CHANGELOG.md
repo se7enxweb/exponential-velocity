@@ -65,12 +65,24 @@ edited down to what a reader actually needs.
 
 ---
 
-## v0.0.4.42 — uwebserver becomes a small static file server with a GNU command line, safe defaults and four security reviews, and the packages install the shell as vc-qshell
+## v0.0.4.42 — persistent workers report each request's own start time and read sessions without a warning; uwebserver becomes a small static file server with a GNU command line, safe defaults and four security reviews; the packages install the shell as vc-qshell
 
 2026-09-30
 
 ### Fixed
 
+- **A pool worker reports each request's own start time.** `$_SERVER['REQUEST_TIME_FLOAT']` and
+  `REQUEST_TIME` were inherited from the process that forked the worker and never set again, so in a
+  persistent worker every request claimed to have started when the server did. An application that keys a
+  per-request cache on `REQUEST_TIME_FLOAT` -- Exponential does -- kept that cache for the worker's whole
+  life and served one request's data to the next. `executeScript()` now sets both when the request starts,
+  as every SAPI does.
+- **The compat session handler reads each value from its own bytes.** It decoded every value from the whole
+  rest of the session string, which PHP 8.3 and later reports as `unserialize(): Extra data` for every key
+  but the last -- a warning per key on every request a persistent worker served -- and found the next key by
+  serializing the value again and skipping that many bytes, so wherever that is not the stored text (a
+  float, an object with `__serialize` or `__sleep`) the keys after it were misread. The end of each value is
+  now found by scanning the serialize format; anything else is decoded as before, without the warning.
 - **`uwebserver` never starts on an argument it does not know.** It took any
   argument other than its about flags as leave to serve, on every interface at
   port 8080, which is the port the application server uses: `uwebserver --help`,
@@ -156,6 +168,11 @@ edited down to what a reader actually needs.
 
 ### Tests
 
+- `tests/unit-pool-request-time-per-request.php`: two requests from one persistent worker each report their
+  own `REQUEST_TIME_FLOAT` (fails without the fix: both carried the same time).
+- `tests/unit-compat-session-decode.php`: sessions written by PHP's own encoder from awkward values (floats,
+  `|` and `;` in strings, nested arrays, objects with `__serialize` and `__sleep`, an enum) come back as
+  `session_decode()` reads them, with no warning.
 - Ten new tests, each building uwebserver from its sources and starting it only
   on 127.0.0.1 and a free high port: `unit-uwebserver-cli.php` (144 cases),
   `-static.php` (98), `-config.php` (98), `-tls.php` (23), `-process.php` (46),
