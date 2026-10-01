@@ -1186,6 +1186,14 @@ class Q_WebServer_Pool
 
 		$_SERVER['REQUEST_METHOD'] = $req['method'];
 		$_SERVER['REQUEST_URI'] = $req['uri'];
+		// When this request started, as every SAPI reports it. A worker kept
+		// the values of the process that forked it, so in a persistent worker
+		// every request claimed to have started when the server did -- and an
+		// application that keys a per-request cache on REQUEST_TIME_FLOAT
+		// kept that cache for the worker's whole life, serving one request's
+		// data to the next.
+		$_SERVER['REQUEST_TIME_FLOAT'] = microtime(true);
+		$_SERVER['REQUEST_TIME'] = (int) $_SERVER['REQUEST_TIME_FLOAT'];
 		$_SERVER['QUERY_STRING'] = $req['query'] ?? '';
 		$_SERVER['SCRIPT_FILENAME'] = $req['scriptFilename'];
 		$_SERVER['SCRIPT_NAME'] = $req['scriptName'] ?? '/index.php';
