@@ -1696,20 +1696,109 @@ class Q_WebServer_Compat
 	 */
 	private static function unserializeSession($data)
 	{
+		// Each value is decoded from exactly its own bytes. It used to be
+		// decoded from the whole rest of the string, which PHP 8.3 and later
+		// reports as "Extra data" on every key but the last -- a warning per
+		// key per request -- and the next key was then found by serializing
+		// the value again and skipping that many bytes. Whenever that is not
+		// the original text (a float, an object with __sleep or __serialize)
+		// the offset slipped and the rest of the session was misread.
 		$result = array();
 		$offset = 0;
-		while ($offset < strlen($data)) {
+		$length = strlen($data);
+		while ($offset < $length) {
 			$pipe = strpos($data, '|', $offset);
 			if ($pipe === false) break;
 			$key = substr($data, $offset, $pipe - $offset);
 			$offset = $pipe + 1;
-			$value = unserialize(substr($data, $offset), ['allowed_classes' => true]);
-			$result[$key] = $value;
-			// Find the end of the serialized value
-			$serialized = serialize($value);
-			$offset += strlen($serialized);
+			$end = self::serializedValueEnd($data, $offset);
+			if ($end === false) {
+				// Not something the scanner knows: decode the rest as before,
+				// without the trailing-data warning.
+				$value = @unserialize(substr($data, $offset), ['allowed_classes' => true]);
+				$result[$key] = $value;
+				$offset += strlen(serialize($value));
+				continue;
+			}
+			$result[$key] = unserialize(substr($data, $offset, $end - $offset), ['allowed_classes' => true]);
+			$offset = $end;
 		}
 		return $result;
+	}
+
+	/**
+	 * Where the serialized value starting at $pos ends (the offset just past
+	 * it), or false for anything this does not recognise.
+	 *
+	 * Covers what serialize() writes: N; b: i: d: r: R: s: E: a: O: C:.
+	 *
+	 * @method serializedValueEnd
+	 * @static
+	 * @private
+	 * @param {string} $data
+	 * @param {integer} $pos
+	 * @return {integer|false}
+	 */
+	private static function serializedValueEnd($data, $pos)
+	{
+		$length = strlen($data);
+		if ($pos >= $length) return false;
+		$type = $data[$pos];
+		switch ($type) {
+			case 'N':
+				return ($pos + 1 < $length and $data[$pos + 1] === ';') ? $pos + 2 : false;
+			case 'b': case 'i': case 'd': case 'r': case 'R':
+				if ($pos + 1 >= $length or $data[$pos + 1] !== ':') return false;
+				$semi = strpos($data, ';', $pos + 2);
+				return $semi === false ? false : $semi + 1;
+			case 's': case 'E':
+				// s:<bytes>:"<bytes>";
+				$colon = strpos($data, ':', $pos + 2);
+				if ($colon === false or $data[$pos + 1] !== ':') return false;
+				$n = substr($data, $pos + 2, $colon - $pos - 2);
+				if (!ctype_digit($n)) return false;
+				$close = $colon + 2 + (int) $n;
+				return ($close + 1 < $length and $data[$colon + 1] === '"'
+					and $data[$close] === '"' and $data[$close + 1] === ';') ? $close + 2 : false;
+			case 'a':
+				// a:<count>:{<key><value>...}
+				$colon = strpos($data, ':', $pos + 2);
+				if ($colon === false or $data[$pos + 1] !== ':') return false;
+				$n = substr($data, $pos + 2, $colon - $pos - 2);
+				if (!ctype_digit($n) or ($data[$colon + 1] ?? '') !== '{') return false;
+				return self::serializedMembersEnd($data, $colon + 2, 2 * (int) $n);
+			case 'O': case 'C':
+				// O:<len>:"<class>":<count>:{<key><value>...}
+				// C:<len>:"<class>":<bytes>:{<raw bytes>}
+				$colon = strpos($data, ':', $pos + 2);
+				if ($colon === false or $data[$pos + 1] !== ':') return false;
+				$n = substr($data, $pos + 2, $colon - $pos - 2);
+				if (!ctype_digit($n) or ($data[$colon + 1] ?? '') !== '"') return false;
+				$afterName = $colon + 2 + (int) $n;
+				if (substr($data, $afterName, 2) !== '":') return false;
+				$colon2 = strpos($data, ':', $afterName + 2);
+				if ($colon2 === false) return false;
+				$m = substr($data, $afterName + 2, $colon2 - $afterName - 2);
+				if (!ctype_digit($m) or ($data[$colon2 + 1] ?? '') !== '{') return false;
+				if ($type === 'C') {
+					$close = $colon2 + 2 + (int) $m;
+					return ($close < $length and $data[$close] === '}') ? $close + 1 : false;
+				}
+				return self::serializedMembersEnd($data, $colon2 + 2, 2 * (int) $m);
+		}
+		return false;
+	}
+
+	/**
+	 * Past $count serialized values from $pos and the closing brace.
+	 */
+	private static function serializedMembersEnd($data, $pos, $count)
+	{
+		for ($i = 0; $i < $count; ++$i) {
+			$pos = self::serializedValueEnd($data, $pos);
+			if ($pos === false) return false;
+		}
+		return (($data[$pos] ?? '') === '}') ? $pos + 1 : false;
 	}
 
 	/**
