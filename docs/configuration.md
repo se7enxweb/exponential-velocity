@@ -37,6 +37,9 @@ Create `config/server.json` next to your `web/` directory, or pass `--config=pat
 | `rateLimit.enabled` | false | Enable per-IP rate limiting |
 | `rateLimit.requests` | 100 | Requests per window |
 | `rateLimit.window` | 60 | Window in seconds |
+| `webserver.proxy.trusted` | `["127.0.0.1", "::1"]` | Addresses and CIDR ranges of the reverse proxies whose forwarded headers are believed. Only a connection from one of them sets the client address (`REMOTE_ADDR`) from the `ip` header, and `HTTPS` and `REQUEST_SCHEME` from the `proto` header, `CloudFront-Forwarded-Proto` or Cloudflare's `CF-Visitor`; from any other client those headers are ignored. A TLS connection is HTTPS whoever sent it. No CDN or load balancer is in the default: list Cloudflare's published ranges, your load balancer's or your private network's |
+| `webserver.proxy.headers.ip` | `X-Forwarded-For` | Header a trusted proxy gives the client address in; the rightmost address that is not itself trusted is the client |
+| `webserver.proxy.headers.proto` | `X-Forwarded-Proto` | Header a trusted proxy gives the visitor's protocol in, read before `CloudFront-Forwarded-Proto` and `CF-Visitor`; of a comma-separated value the first entry counts |
 | `webserver.requestTimeout` | 30 | Seconds a request may run before the client gets 504 and its worker is killed and replaced -- a pooled worker or a forked one alike; the request is not run again (0 = no limit) |
 | `webserver.workerMemoryCeiling` | 256, or ¾ of `memory_limit` if lower | Heap size in MB past which a persistent worker answers its current request and is then replaced, with the reason logged. `0` disables. See [reset.md](reset.md#a-worker-that-grows-is-replaced) |
 | `webserver.warmup` | (none) | Script run once in the parent, after the source transform and before forking, to warm the application copy-on-write. See [reset.md](reset.md) |
