@@ -3720,17 +3720,20 @@ class Q_WebServer
 
 		// 8. Configurable fallback (SPA routing, custom 404 page, etc.)
 		//    Q.webserver.fallback can be:
-		//    - string: path to a static file relative to web/ (e.g. "index.html")
+		//    - string: path to a file relative to web/ (e.g. "index.html"),
+		//      answered with 200 (SPA catch-all); a .php file is run
 		//    - object with "handler": event name to dispatch via Q::event()
-		//    - object with "file": static file + auto-detect Content-Type
+		//    - object with "file": a page answered with 404 and the
+		//      Content-Type of its extension (custom 404 page)
 		static $fallback = null;
 		if ($fallback === null) $fallback = Q_Config::get('Q', 'webserver', 'fallback', null);
 		if ($fallback !== null) {
 			if (is_string($fallback)) {
 				// Static file (SPA catch-all: serve index.html for all routes)
-				$fbPath = self::$rootDir . str_replace('/', DS, $fallback);
+				$fbPath = self::$rootDir . ltrim(str_replace('/', DS, $fallback), DS);
 				if (is_file($fbPath)) {
-					return self::serveFile($client, $parsed, $fbPath);
+					$served = self::serveFallback($client, $parsed, $fbPath, 200);
+					if ($served !== null) return $served;
 				}
 			} elseif (is_array($fallback)) {
 				if (!empty($fallback['handler'])) {
@@ -3744,9 +3747,10 @@ class Q_WebServer
 						return self::handleRoute($client, $parsed, $uri);
 					}
 				} elseif (!empty($fallback['file'])) {
-					$fbPath = self::$rootDir . str_replace('/', DS, $fallback['file']);
+					$fbPath = self::$rootDir . ltrim(str_replace('/', DS, $fallback['file']), DS);
 					if (is_file($fbPath)) {
-						return self::serveFile($client, $parsed, $fbPath);
+						$served = self::serveFallback($client, $parsed, $fbPath, 404);
+						if ($served !== null) return $served;
 					}
 				}
 			}
@@ -3754,6 +3758,45 @@ class Q_WebServer
 
 		// 9. Not found
 		self::sendResponse($client, 404, self::render404($path), 'text/html; charset=utf-8');
+		return false;
+	}
+
+	/**
+	 * Answer with the file Q.webserver.fallback names.
+	 *
+	 * A .php file is run, like any script, when Q.webserver.scripts lets it
+	 * be. Any other file is sent as it is: with $status 200 through the
+	 * static file path (its cache, compression and conditional requests),
+	 * with $status 404 as the body of a 404 answer. A file outside the root,
+	 * or with an extension the server does not serve, is not sent.
+	 *
+	 * @method serveFallback
+	 * @static
+	 * @private
+	 * @param {resource} $client
+	 * @param {array} $parsed The parsed request
+	 * @param {string} $fbPath The file, already known to exist
+	 * @param {integer} $status 200 or 404
+	 * @return {boolean|null} what the request handler returns, or null when
+	 *  the file cannot be used and the request goes on to the plain 404
+	 */
+	private static function serveFallback($client, $parsed, $fbPath, $status)
+	{
+		$method = strtoupper((string) ($parsed['method'] ?? 'GET'));
+		$ext = strtolower(pathinfo($fbPath, PATHINFO_EXTENSION));
+		if ($ext === 'php') {
+			if (!self::scriptRunnable($fbPath)) return null;
+			return self::handlePhp($client, $parsed, $fbPath);
+		}
+		if (!in_array($ext, self::$allowedExtensions) or !self::insideRoot($fbPath)) return null;
+		if ($status === 200) {
+			self::serveStaticFile($client, $fbPath, $method, $parsed['headers'] ?? array(),
+				!empty($parsed['_keepAlive']));
+			return false;
+		}
+		$body = @file_get_contents($fbPath);
+		if ($body === false) return null;
+		self::sendResponse($client, $status, $body, self::mimeType($ext), array(), $method === 'HEAD');
 		return false;
 	}
 
