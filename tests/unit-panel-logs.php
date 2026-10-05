@@ -78,6 +78,35 @@ foreach ($r['lines'] as $l) if (!preg_match('/^10\.0\.\d+\.\d+ /', $l)) $whole =
 check('...filtered lines are whole lines', $whole, true);
 check('...and all 503', count(array_filter($r['lines'], function ($l) { return strpos($l, '" 503 ') !== false; })), count($r['lines']));
 
+// Tail cursor: after a byte offset returns only new lines, without fragments.
+// Use a fresh small log; the earlier long-log test replaced the file.
+file_put_contents($log, implode("\n", $lines) . "\n");
+Q_WebServer_Log::$accessPath = $log;
+$r = Q_WebServer_Panel::apiLogs($parsed('type=access&lines=50&after=0'));
+check('after=0 reads from the start', $r['complete'], true);
+check('after=0 returns all lines', count($r['lines']), 3);
+$afterOffset = strlen($lines[0]) + 1;
+$r = Q_WebServer_Panel::apiLogs($parsed('type=access&lines=50&after=' . $afterOffset));
+check('after a line boundary returns the remaining lines', count($r['lines']), 2);
+check('...and the first line is complete', strpos($r['lines'][0], 'POST /bar') !== false, true);
+$size = filesize($log);
+$r = Q_WebServer_Panel::apiLogs($parsed('type=access&lines=50&after=' . $size));
+check('after the current end returns no new lines', count($r['lines']), 0);
+check('...and is not marked rotated', $r['rotated'], false);
+
+// Append a line and fetch from the previous end: only the new line arrives.
+$extra = '192.168.1.4 - - [24/Sep/2026:18:00:03 +0000] "GET /qux HTTP/1.1" 301 99 "-" "curl" 0.8ms';
+file_put_contents($log, $extra . "\n", FILE_APPEND);
+$r = Q_WebServer_Panel::apiLogs($parsed('type=access&lines=50&after=' . $size));
+check('after the previous end returns the appended line', count($r['lines']), 1);
+check('...and it is the new line', strpos($r['lines'][0], 'GET /qux') !== false, true);
+
+// A rotated log (after beyond the current size) is reported so the client can reset.
+file_put_contents($log, "fresh start\n");
+$r = Q_WebServer_Panel::apiLogs($parsed('type=access&lines=50&after=' . $size));
+check('after a rotated file is marked rotated', $r['rotated'], true);
+check('...and still returns the new file\'s lines', count($r['lines']), 1);
+
 // View parameters in the panel path.
 check('view params: tab', Q_WebServer_Panel::parseViewParams('/Q/panel/(tab)/logs'), array('tab' => 'logs'));
 check('view params: several, decoded', Q_WebServer_Panel::parseViewParams('/Q/panel/(tab)/logs/(filter)/%2Ffoo%20bar'), array('tab' => 'logs', 'filter' => '/foo bar'));

@@ -2161,9 +2161,10 @@ function cacheRenderEntries() {
 }
 
 // ── Logs ────────────────────────────────────────────
-var logTailInterval = null;
+var logTailTimeout = null;
 var logTailOn = false;
 var logLastFile = null;
+var logLastSize = 0;
 var logLastLines = [];
 
 function getLogParams() {
@@ -2210,6 +2211,9 @@ function updateLogControls() {
 }
 
 function logControlChanged() {
+  stopLogTail();
+  logTailOn = false;
+  updateTailButton();
   setLogParams({
     type: document.getElementById('log-type').value,
     lines: document.getElementById('log-lines').value,
@@ -2227,44 +2231,100 @@ function logFilterChanged() {
   logFilterTimer = setTimeout(logControlChanged, 250);
 }
 
-async function loadLogs() {
+function updateTailButton() {
+  var btn = document.getElementById('log-tail');
+  if (!btn) return;
+  var wasOn = btn.classList.contains('tail-active');
+  btn.textContent = 'Tail: ' + (logTailOn ? 'on' : 'off');
+  btn.classList.toggle('btn-grn', logTailOn);
+  btn.classList.toggle('btn-ghost', !logTailOn);
+  btn.classList.toggle('tail-active', logTailOn);
+  var badge = document.getElementById('log-live-badge');
+  if (badge) badge.classList.toggle('hidden', !logTailOn);
+  // Announce the state for accessibility.
+  btn.setAttribute('aria-pressed', String(logTailOn));
+  if (wasOn !== logTailOn) {
+    var status = document.getElementById('log-stats');
+    if (status) status.textContent = logTailOn ? 'Live tail enabled' : 'Live tail paused';
+  }
+}
+
+function tailStatusHtml() {
+  return '<span class="tail-dot"></span>';
+}
+
+function logStatsText(r, p, tail) {
+  var shown = r.lines ? r.lines.length : 0;
+  var filtering = p.filter || p.method || p.status || p.host;
+  var depth = r.complete ? 'the whole file' : 'the last ' + fmtBytesPlain(r.scanned || 0);
+  var prefix = tail ? tailStatusHtml() + 'Live · ' : '';
+  var body = filtering
+    ? shown + ' of ' + (r.matched || 0) + ' matching lines in ' + depth
+    : shown + ' lines';
+  return prefix + body + ' <span class="log-file">' + escH(r.file) + '</span>';
+}
+
+async function loadLogs(opts) {
+  opts = opts || {};
   var p = getLogParams();
+  var el = document.getElementById('logs-output');
+  var stats = document.getElementById('log-stats');
+  var previousSize = logLastSize;
   var url = 'logs?type=' + encodeURIComponent(p.type)
     + '&lines=' + encodeURIComponent(p.lines)
     + '&filter=' + encodeURIComponent(p.filter)
     + '&method=' + encodeURIComponent(p.method)
     + '&status=' + encodeURIComponent(p.status)
-    + (p.host ? '&host=' + encodeURIComponent(p.host) : '');
-  var el = document.getElementById('logs-output');
-  var stats = document.getElementById('log-stats');
-  if (el) el.innerHTML = '<p style="color:var(--dim)">Loading…</p>';
+    + (p.host ? '&host=' + encodeURIComponent(p.host) : '')
+    + (opts.tail && previousSize > 0 ? '&after=' + previousSize : '');
+  if (el && !opts.tail && !logTailOn) el.innerHTML = '<p style="color:var(--dim)">Loading…</p>';
+  if (stats && opts.tail) stats.innerHTML = tailStatusHtml() + 'Tailing…';
   try {
     var r = await api(url);
     if (r.error) {
-      if (el) el.innerHTML = '<p style="color:var(--red)">' + escH(r.error) + '</p>';
-      if (stats) stats.textContent = '';
+      if (stats) stats.innerHTML = '<span style="color:var(--red)">' + escH(r.error) + '</span>';
+      if (el && !opts.tail) el.innerHTML = '<p style="color:var(--red)">' + escH(r.error) + '</p>';
+      if (opts.tail) { stopLogTail(); logTailOn = false; updateTailButton(); }
       return;
     }
     if (!r.exists) {
-      if (el) el.innerHTML = '<p style="color:var(--red)">Log file not found: ' + escH(r.file) + '</p>';
-      if (stats) stats.textContent = '';
+      if (stats) stats.innerHTML = '<span style="color:var(--red)">Log file not found: ' + escH(r.file) + '</span>';
+      if (el && !opts.tail) el.innerHTML = '<p style="color:var(--red)">Log file not found: ' + escH(r.file) + '</p>';
+      logLastFile = r.file;
+      logLastSize = 0;
       logLastLines = [];
+      if (opts.tail) { stopLogTail(); logTailOn = false; updateTailButton(); }
       return;
     }
     logLastFile = r.file;
-    logLastLines = r.lines || [];
-    renderLogs(logLastLines, p);
-    if (stats) {
-      var shown = r.lines ? r.lines.length : 0;
-      var filtering = p.filter || p.method || p.status || p.host;
-      var depth = r.complete ? 'the whole file' : 'the last ' + fmtBytesPlain(r.scanned || 0);
-      stats.textContent = (filtering
-        ? shown + ' of ' + (r.matched || 0) + ' matching lines in ' + depth
-        : shown + ' lines') + ' · ' + r.file;
+    logLastSize = (r.size || 0);
+    var newLines = r.lines || [];
+    if (r.rotated) {
+      // The log file was rotated or truncated. Reset and reload from the new file.
+      logLastSize = 0;
+      logLastLines = [];
+      if (stats) stats.innerHTML = tailStatusHtml() + 'Log rotated. Reloading…';
+      if (el) el.innerHTML = '<p style="color:var(--dim)">Log rotated. Reloading…</p>';
+      if (opts.tail) { loadLogs(opts); return; }
+      renderLogs(newLines, p);
+    } else if (opts.tail && newLines.length && previousSize > 0) {
+      // Appending only the bytes that arrived since the previous poll.
+      logLastLines = logLastLines.concat(newLines);
+      if (logLastLines.length > p.lines) logLastLines = logLastLines.slice(-p.lines);
+      appendLogs(newLines, p);
+    } else {
+      logLastLines = newLines;
+      renderLogs(logLastLines, p);
     }
+    if (stats) stats.innerHTML = logStatsText(r, p, opts.tail);
     if (el && logTailOn) el.scrollTop = el.scrollHeight;
+    if (logTailOn && opts.tail) {
+      logTailTimeout = setTimeout(tailLoop, 1000);
+    }
   } catch (e) {
-    if (el) el.innerHTML = '<p style="color:var(--red)">Error: ' + escH(e.message) + '</p>';
+    if (stats) stats.innerHTML = '<span style="color:var(--red)">Error: ' + escH(e.message) + '</span>';
+    if (el && !opts.tail) el.innerHTML = '<p style="color:var(--red)">Error: ' + escH(e.message) + '</p>';
+    if (opts.tail) { stopLogTail(); logTailOn = false; updateTailButton(); }
   }
 }
 
@@ -2283,6 +2343,23 @@ function renderLogs(lines, p) {
     }
   });
   el.innerHTML = html;
+}
+
+function appendLogs(fresh, p) {
+  var el = document.getElementById('logs-output');
+  if (!el || !fresh.length) return;
+  if (el.innerHTML.indexOf('No matching lines') !== -1 || el.innerHTML.indexOf('Loading…') !== -1) el.innerHTML = '';
+  var html = '';
+  var filter = p.filter.toLowerCase();
+  fresh.forEach(function(line) {
+    var parsed = parseAccessLog(line);
+    if (parsed && p.type === 'access') html += renderAccessRow(parsed, filter);
+    else html += renderLogLine(line, filter, p.type);
+  });
+  el.insertAdjacentHTML('beforeend', html);
+  while (el.children.length > p.lines) {
+    el.removeChild(el.firstChild);
+  }
 }
 
 // Apache/NCSA combined + Qbix ms extension
@@ -2309,16 +2386,14 @@ function parseAccessLog(line) {
 
 function renderAccessRow(r, filter) {
   var statusClass = 'status-' + (r.status[0] || 'x') + 'xx';
-  var text = r.ip + ' ' + r.time + ' ' + r.method + ' ' + r.path + ' ' + r.status + ' ' + r.size + ' ' + r.ms;
-  var hl = filter ? highlightText(text, filter) : escH(text);
-  return '<div class="log-row ' + statusClass + '" style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--bdr)" title="' + escH((r.referer && r.referer !== '-' ? 'Referrer: ' + r.referer + '\n' : '') + r.ua) + '">'
-    + '<span style="min-width:100px;color:var(--dim)">' + escH(r.ip) + '</span>'
-    + '<span style="min-width:140px;color:var(--dim)">' + escH(r.time) + '</span>'
-    + '<span style="min-width:45px;font-weight:600">' + escH(r.method) + '</span>'
-    + '<span style="flex:1;min-width:120px;word-break:break-all">' + (filter ? highlightText(r.path, filter) : escH(r.path)) + '</span>'
-    + '<span style="min-width:50px;text-align:right" class="log-status-' + escH(r.status[0]) + 'xx">' + escH(r.status) + '</span>'
-    + '<span style="min-width:60px;text-align:right;color:var(--dim)">' + escH(r.size) + '</span>'
-    + '<span style="min-width:70px;text-align:right;color:var(--dim)">' + (r.ms ? escH(r.ms) + 'ms' : '') + '</span>'
+  return '<div class="log-row ' + statusClass + '" title="' + escH((r.referer && r.referer !== '-' ? 'Referrer: ' + r.referer + '\n' : '') + r.ua) + '">'
+    + '<span class="log-col log-col-ip">' + escH(r.ip) + '</span>'
+    + '<span class="log-col log-col-time">' + escH(r.time) + '</span>'
+    + '<span class="log-col log-col-method">' + escH(r.method) + '</span>'
+    + '<span class="log-col log-col-path">' + (filter ? highlightText(r.path, filter) : escH(r.path)) + '</span>'
+    + '<span class="log-col log-col-status log-status-' + escH(r.status[0]) + 'xx">' + escH(r.status) + '</span>'
+    + '<span class="log-col log-col-size">' + escH(r.size) + '</span>'
+    + '<span class="log-col log-col-ms">' + (r.ms ? escH(r.ms) + 'ms' : '') + '</span>'
     + '</div>';
 }
 
@@ -2330,7 +2405,7 @@ function renderLogLine(line, filter, type) {
       highlighted = '<span style="color:var(--dim)">[' + escH(m[1]) + ']</span> ' + (filter ? highlightText(m[2], filter) : escH(m[2]));
     }
   }
-  return '<div class="log-row" style="padding:3px 0;border-bottom:1px solid var(--bdr)">' + highlighted + '</div>';
+  return '<div class="log-row">' + highlighted + '</div>';
 }
 
 function highlightText(text, q) {
@@ -2345,8 +2420,7 @@ function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 function toggleLogTail() {
   logTailOn = !logTailOn;
-  var btn = document.getElementById('log-tail');
-  if (btn) btn.textContent = 'Tail: ' + (logTailOn ? 'on' : 'off');
+  updateTailButton();
   if (logTailOn) startLogTail(); else stopLogTail();
 }
 
@@ -2354,19 +2428,24 @@ function startLogTail() {
   stopLogTail();
   if (!document.getElementById('tab-logs') || document.getElementById('tab-logs').classList.contains('hidden')) {
     logTailOn = false;
-    var btn = document.getElementById('log-tail');
-    if (btn) btn.textContent = 'Tail: off';
+    updateTailButton();
     return;
   }
-  loadLogs();
-  logTailInterval = setInterval(function() {
-    if (!logTailOn) return;
-    loadLogs();
-  }, 2000);
+  loadLogs({tail: true});
+}
+
+function tailLoop() {
+  if (!logTailOn) return;
+  if (!document.getElementById('tab-logs') || document.getElementById('tab-logs').classList.contains('hidden')) {
+    logTailOn = false;
+    updateTailButton();
+    return;
+  }
+  loadLogs({tail: true});
 }
 
 function stopLogTail() {
-  if (logTailInterval) { clearInterval(logTailInterval); logTailInterval = null; }
+  if (logTailTimeout) { clearTimeout(logTailTimeout); logTailTimeout = null; }
 }
 
 function copyLogLink() {
@@ -2395,8 +2474,7 @@ function downloadLog() {
 function onLeaveLogs() {
   stopLogTail();
   logTailOn = false;
-  var btn = document.getElementById('log-tail');
-  if (btn) btn.textContent = 'Tail: off';
+  updateTailButton();
 }
 
 // ── Cron ────────────────────────────────────────────

@@ -150,23 +150,55 @@ body[data-auth="unknown"] .tabs,body[data-auth="unknown"] .content[id^="tab-"]{v
 .auth-pending-card{color:var(--dim);font-size:13px;display:flex;align-items:center;gap:8px}
 
 /* ── Logs viewer ── */
+.log-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:2px 0}
 .log-toolbar select,
 .log-toolbar input[type="text"]{
   background:var(--card);color:var(--txt);border:1px solid var(--bdr);border-radius:6px;
-  padding:5px 8px;font-size:12px;min-width:70px}
-#log-filter{min-width:160px}
+  padding:6px 10px;font-size:12px;min-width:70px;transition:border .15s,box-shadow .15s}
+.log-toolbar select:focus,
+.log-toolbar input[type="text"]:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 3px var(--glow)}
+#log-filter{min-width:180px}
 #log-status{width:70px}
-.log-row{font-family:'SF Mono','Fira Code',monospace;font-size:12px;line-height:1.5}
+#log-host{min-width:120px}
+#log-tail{transition:all .15s;min-width:96px}
+#log-tail::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--dim);margin-right:6px;transition:all .15s}
+#log-tail.tail-active::before{background:var(--grn);box-shadow:0 0 8px rgba(74,222,128,.5);animation:tail-pulse 1.2s infinite}
+#log-tail.tail-active{box-shadow:0 0 0 2px rgba(34,197,94,.3)}
+.tail-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--grn);margin-right:6px;
+  box-shadow:0 0 8px rgba(74,222,128,.4);animation:tail-pulse 1.2s infinite}
+@keyframes tail-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.85)}}
+#log-live-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--grn);
+  padding:3px 10px;border-radius:20px;background:rgba(34,197,94,.1);margin-left:auto;transition:opacity .15s}
+#log-live-badge.hidden{display:none}
+#log-live-badge .tail-dot{margin-right:0}
+#log-stats{display:flex;align-items:center;gap:8px;min-height:20px;font-size:12px;color:var(--dim);flex-wrap:wrap}
+#log-stats .log-file{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:520px;min-width:0;opacity:.8}
+#logs-output{background:var(--card);border:1px solid var(--bdr);border-radius:10px;padding:12px;max-height:520px;overflow:auto;
+  font-size:12px;line-height:1.5;box-shadow:inset 0 1px 4px rgba(0,0,0,.2);min-height:120px}
+#logs-output:empty::before{content:'Select a log type and click Load, or enable Tail to follow new entries.';color:var(--dim);font-size:13px}
+.log-row{font-family:'SF Mono','Fira Code',monospace;display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--bdr);align-items:baseline;
+  transition:background .12s}
+.log-row:hover{background:rgba(255,255,255,.04)}
 .log-row:last-child{border-bottom:none !important}
+.log-col{flex-shrink:0}
+.log-col-ip{min-width:108px;color:var(--dim)}
+.log-col-time{min-width:146px;color:var(--dim)}
+.log-col-method{min-width:48px;font-weight:600}
+.log-col-path{flex:1;min-width:120px;word-break:break-all}
+.log-col-status{min-width:52px;text-align:right}
+.log-col-size{min-width:64px;text-align:right;color:var(--dim)}
+.log-col-ms{min-width:74px;text-align:right;color:var(--dim)}
 .log-status-2xx{color:var(--grn)}
 .log-status-3xx{color:var(--cyn)}
 .log-status-4xx{color:var(--yel)}
 .log-status-5xx{color:var(--red)}
 @media(max-width:768px){
-  .log-toolbar{gap:8px !important}
+  .log-toolbar{gap:8px}
   .log-toolbar label{display:none}
+  #log-live-badge{margin-left:0;width:100%;justify-content:center}
   .log-row{flex-wrap:wrap;gap:4px 8px}
-  .log-row span{min-width:auto !important}
+  .log-col{min-width:auto !important;flex:none !important}
+  #log-stats .log-file{max-width:260px}
 }
 .dom-usage-wrap{overflow-x:auto}
 .dom-usage{width:100%;border-collapse:collapse;font-size:13px}

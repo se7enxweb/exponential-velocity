@@ -2976,7 +2976,9 @@ class Q_WebServer_Panel
 		}
 
 		if (!is_file($file)) {
-			return ['lines' => [], 'file' => $file, 'exists' => false];
+			return ['lines' => [], 'file' => $file, 'exists' => false, 'size' => 0,
+				'after' => isset($params['after']) ? (int) $params['after'] : null,
+				'rotated' => false];
 		}
 
 		// Filters: free text, HTTP method, status (exact, or a class: 5, 5xx).
@@ -2992,23 +2994,54 @@ class Q_WebServer_Panel
 		}
 		$filtering = ($filter !== '' or $method !== '' or $status !== '' or $hostNames);
 
-		// Read the end of the file only, never the whole of it: the last few
-		// hundred KB without a filter, up to Q.panel.logScanBytes (2 MB) with
-		// one, so a search reaches further back than the lines it returns.
 		$size = (int) filesize($file);
-		$want = $filtering
-			? max(65536, (int) Q_Config::get('Q', 'panel', 'logScanBytes', 2097152))
-			: min(1048576, $lines * 1024);
-		$from = max(0, $size - $want);
+		$after = isset($params['after']) ? (int) $params['after'] : null;
+		$rotated = false;
+		if ($after !== null) {
+			if ($after < 0) {
+				return ['status' => 400, 'error' => 'after must be a non-negative byte offset'];
+			}
+			// The file was rotated or truncated since the last poll.
+			if ($after > $size) {
+				$rotated = true;
+				$from = 0;
+				$want = $filtering
+					? max(65536, (int) Q_Config::get('Q', 'panel', 'logScanBytes', 2097152))
+					: min(1048576, $lines * 1024);
+			} else {
+				$from = $after;
+				$want = $size - $from;
+				// With a filter, cap the tail read to the same scan window.
+				$scanBytes = max(65536, (int) Q_Config::get('Q', 'panel', 'logScanBytes', 2097152));
+				if ($filtering and $want > $scanBytes) {
+					$from = $size - $scanBytes;
+					$want = $scanBytes;
+				}
+			}
+		} else {
+			// Read the end of the file only, never the whole of it: the last few
+			// hundred KB without a filter, up to Q.panel.logScanBytes (2 MB) with
+			// one, so a search reaches further back than the lines it returns.
+			$want = $filtering
+				? max(65536, (int) Q_Config::get('Q', 'panel', 'logScanBytes', 2097152))
+				: min(1048576, $lines * 1024);
+			$from = max(0, $size - $want);
+		}
 		$content = '';
+		$firstIsFragment = false;
 		if ($size > 0 and ($fp = @fopen($file, 'rb'))) {
+			if ($from > 0) {
+				fseek($fp, $from - 1);
+				$firstIsFragment = (fread($fp, 1) !== "\n");
+			}
 			fseek($fp, $from);
 			$content = (string) stream_get_contents($fp, $size - $from);
 			fclose($fp);
 		}
 		$all = $content === '' ? [] : explode("\n", rtrim($content, "\n"));
-		// Started mid-file: the first line is a fragment.
-		if ($from > 0 and $all) array_shift($all);
+		// Started mid-file: the first line is a fragment, unless the byte
+		// immediately before the read is a newline (after= is on a boundary).
+		if ($from > 0 and $all and $firstIsFragment) array_shift($all);
 
 		$matched = 0;
 		$result = [];
@@ -3042,7 +3075,7 @@ class Q_WebServer_Panel
 
 		return ['lines' => array_values($result), 'file' => $file, 'exists' => true, 'size' => $size,
 			'matched' => $matched, 'scanned' => $size - $from, 'complete' => $from === 0,
-			'hosts' => $hostNames];
+			'hosts' => $hostNames, 'after' => $after, 'rotated' => $rotated];
 	}
 
 	// ── Cron / Scheduler API ─────────────────────────────
