@@ -65,6 +65,20 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.43 — Logs panel tail now uses an after= byte cursor, appends without re-rendering, handles rotation, and shows live/paused state visibly.
+
+2026-10-05
+
+### Updated
+
+- **Logs panel tail now polls with a byte cursor.** The `logs` API accepts an `after=` parameter and returns only the lines appended since that byte offset, plus `rotated=true` when the log file was rotated or truncated. The JavaScript `loadLogs()` appends new rows instead of re-rendering the whole view, stops on errors, and restarts cleanly after rotation.
+- **Logs controls and status are more visible.** The Tail button now shows an on/off dot and a "Live" badge, the stats line is clearer, and the output has an empty-state hint and better responsive styling.
+- **Panel view parameters are preserved across tabs.** `window.Q_VIEW_PARAMS` and `history.replaceState` keep filters and the active tab in the URL.
+
+### Fixed
+
+- **Tail button no longer fails silently.** API or network errors now update the stats line and stop the tail loop.
+
 ## v0.0.4.42 — persistent workers report each request's own start time and read sessions without a warning; uwebserver becomes a small static file server with a GNU command line, safe defaults and four security reviews; the packages install the shell as vc-qshell
 
 2026-09-30
