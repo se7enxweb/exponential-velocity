@@ -65,6 +65,15 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.45 — Q.webserver.fallback serves the file it names
+
+2026-10-05
+
+### Fixed
+
+- **`Q.webserver.fallback` works.** A string fallback and `{"file": ...}` called a method that did not exist, so any configured fallback ended the request in a fatal error instead of the page it named. As [routing.md](docs/routing.md#fallback--spa-routing-custom-404-catch-all) describes, a string now names a file answered with 200 through the static file path (the single-page application catch-all; a `.php` file is run when `Q.webserver.scripts` allows it), and `{"file": ...}` is answered with 404 and the file as the page. A file outside the root or with an extension the server does not serve is not sent; the request gets the server's own 404. `tests/unit-fallback.php` covers each form.
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.45.
+
 ## v0.0.4.44 — forwarded protocol headers are honoured only from trusted proxies
 
 2026-10-05
