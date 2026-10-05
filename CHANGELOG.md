@@ -65,6 +65,16 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.44 — forwarded protocol headers are honoured only from trusted proxies
+
+2026-10-05
+
+### Updated
+
+- **`HTTPS` and `REQUEST_SCHEME` follow a forwarded protocol only from a trusted proxy.** `X-Forwarded-Proto` (or the header named in `Q.webserver.proxy.headers.proto`), `CloudFront-Forwarded-Proto` and Cloudflare's `CF-Visitor` are read only when the connection comes from an address in `Q.webserver.proxy.trusted`, the same list that decides `REMOTE_ADDR`. Of a comma-separated `X-Forwarded-Proto` the first entry counts. A TLS connection is HTTPS from any client. The pool, the php-cgi and subprocess paths and `--app` all ask the same helper, `Q_WebServer_Proxy::clientProto()` (and the new `isHttps()`), and take TLS from the request's own connection rather than from whether a TLS listener exists. A proxy that sets the protocol header has to be listed in `Q.webserver.proxy.trusted`, which is loopback only (`127.0.0.1`, `::1`) unless configured.
+- **The trusted proxy settings are documented.** [configuration.md](docs/configuration.md) lists `webserver.proxy.trusted` and the `ip` and `proto` headers, and the `Q_WebServer_Proxy` class comment no longer says that Cloudflare's addresses are trusted by default: the default is loopback only.
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.44.
+
 ## v0.0.4.43 — Logs panel tail now uses an after= byte cursor, appends without re-rendering, handles rotation, and shows live/paused state visibly.
 
 2026-10-05
