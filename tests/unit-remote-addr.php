@@ -160,6 +160,8 @@ function run($server, $forkPerRequest, $http2)
 	file_put_contents($root . DS . 'index.php', '<?php echo json_encode(array(
 		"addr" => isset($_SERVER["REMOTE_ADDR"]) ? $_SERVER["REMOTE_ADDR"] : null,
 		"port" => isset($_SERVER["REMOTE_PORT"]) ? (string) $_SERVER["REMOTE_PORT"] : null,
+		"https" => isset($_SERVER["HTTPS"]) ? (string) $_SERVER["HTTPS"] : null,
+		"scheme" => isset($_SERVER["REQUEST_SCHEME"]) ? (string) $_SERVER["REQUEST_SCHEME"] : null,
 	));');
 
 	$port = freePort();
@@ -215,6 +217,33 @@ function run($server, $forkPerRequest, $http2)
 		check("$mode, HTTP/1.1: a trusted proxy forwards the visitor's address",
 			$r['addr'] ?? null, $forged);
 
+		// The protocol, the same way: a plain connection is plain, whatever an
+		// untrusted client says it came in on, and a trusted proxy that ended
+		// TLS for the visitor can say so.
+		$r = fetch1($port, $client, '');
+		check("$mode, HTTP/1.1: a plain connection is not HTTPS",
+			array(!empty($r['https']) && $r['https'] !== 'off', $r['scheme'] ?? null), array(false, 'http'));
+
+		$r = fetch1($port, $client, "X-Forwarded-Proto: https\r\n"
+			. "CloudFront-Forwarded-Proto: https\r\n"
+			. "CF-Visitor: {\"scheme\":\"https\"}\r\n");
+		check("$mode, HTTP/1.1: an untrusted client cannot forward HTTPS",
+			array(!empty($r['https']) && $r['https'] !== 'off', $r['scheme'] ?? null), array(false, 'http'));
+
+		foreach (array(
+			'X-Forwarded-Proto' => "X-Forwarded-Proto: https\r\n",
+			'CloudFront-Forwarded-Proto' => "CloudFront-Forwarded-Proto: https\r\n",
+			'CF-Visitor' => "CF-Visitor: {\"scheme\":\"https\"}\r\n",
+		) as $name => $header) {
+			$r = fetch1($port, $proxy, $header);
+			check("$mode, HTTP/1.1: a trusted proxy forwards HTTPS in $name",
+				array($r['https'] ?? null, $r['scheme'] ?? null), array('on', 'https'));
+		}
+
+		$r = fetch1($port, $proxy, "X-Forwarded-Proto: http\r\n");
+		check("$mode, HTTP/1.1: a trusted proxy forwarding http is not HTTPS",
+			array(!empty($r['https']) && $r['https'] !== 'off', $r['scheme'] ?? null), array(false, 'http'));
+
 		if ($http2) {
 			$r = fetch2($tlsPort, $client, array("X-Real-IP: $forged", "X-Forwarded-For: $forged"));
 			check("$mode, HTTP/2: the request went over HTTP/2",
@@ -222,6 +251,8 @@ function run($server, $forkPerRequest, $http2)
 			check("$mode, HTTP/2: REMOTE_ADDR is the client's, not X-Real-IP",
 				$r['addr'] ?? null, $client);
 			check("$mode, HTTP/2: REMOTE_PORT is the client's", $r['port'] ?? null, $r['local'] ?? 'no answer');
+			check("$mode, HTTP/2: a TLS connection is HTTPS from any client",
+				array($r['https'] ?? null, $r['scheme'] ?? null), array('on', 'https'));
 
 			$r = fetch2($tlsPort, $proxy, array("X-Forwarded-For: $forged"));
 			check("$mode, HTTP/2: a trusted proxy forwards the visitor's address",

@@ -66,24 +66,62 @@ class Q_WebServer_Proxy
 	/**
 	 * Extract the real protocol (http/https).
 	 *
+	 * A TLS connection is https whoever sent it. Otherwise the protocol a
+	 * proxy forwarded is believed only when the connection comes from a
+	 * trusted proxy, exactly as clientIp() believes only a trusted proxy's
+	 * address. The configured header is read first (X-Forwarded-Proto by
+	 * default), then CloudFront-Forwarded-Proto and Cloudflare's CF-Visitor.
+	 *
+	 * The headers used to be read wherever HTTPS was set, from any client,
+	 * so a visitor on a plain listener could have the application believe
+	 * the request was secure -- its absolute URLs, its secure cookies and
+	 * its own "is this HTTPS" answers -- just by sending the header.
+	 *
 	 * @method clientProto
 	 * @static
-	 * @param {string} $directIp
-	 * @param {array} $headers
+	 * @param {string} $directIp The socket-level remote IP
+	 * @param {array} $headers Request headers (lowercase keys)
 	 * @param {boolean} $isTls Whether connection is TLS
 	 * @return {string} 'http' or 'https'
 	 */
 	static function clientProto($directIp, $headers, $isTls = false)
 	{
 		if ($isTls) return 'https';
-		if (!self::isTrusted($directIp)) return 'http';
+		if (!is_string($directIp) or $directIp === '' or !self::isTrusted($directIp)) return 'http';
 
 		$headerName = strtolower(Q_Config::get(
 			'Q', 'webserver', 'proxy', 'headers', 'proto',
 			'x-forwarded-proto'
 		));
-		$proto = $headers[$headerName] ?? '';
-		return strtolower($proto) === 'https' ? 'https' : 'http';
+		foreach (array_unique(array($headerName, 'x-forwarded-proto', 'cloudfront-forwarded-proto')) as $name) {
+			$proto = (string) ($headers[$name] ?? '');
+			if ($proto === '') continue;
+			// "https, http" from a chain of proxies: the first is the visitor's.
+			$first = strtolower(trim(explode(',', $proto, 2)[0]));
+			if ($first === 'https') return 'https';
+		}
+		// Cloudflare: CF-Visitor: {"scheme":"https"}
+		$visitor = json_decode((string) ($headers['cf-visitor'] ?? ''), true);
+		if (is_array($visitor) and strtolower((string) ($visitor['scheme'] ?? '')) === 'https') {
+			return 'https';
+		}
+		return 'http';
+	}
+
+	/**
+	 * Whether a parsed request is HTTPS: its own connection is TLS, or a
+	 * trusted proxy says the visitor's was. See clientProto().
+	 *
+	 * @method isHttps
+	 * @static
+	 * @param {array} $parsed The parsed request; "_directIp" is the connection's address
+	 * @param {boolean} $isTls Whether the request's own connection is TLS
+	 * @return {boolean}
+	 */
+	static function isHttps($parsed, $isTls)
+	{
+		return self::clientProto($parsed['_directIp'] ?? '',
+			$parsed['headers'] ?? array(), $isTls) === 'https';
 	}
 
 	/**

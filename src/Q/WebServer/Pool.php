@@ -1240,9 +1240,10 @@ class Q_WebServer_Pool
 		if (isset($req['headers']['content-length']))
 			$_SERVER['CONTENT_LENGTH'] = $req['headers']['content-length'];
 
-		// REQUEST_SCHEME / HTTPS from proxy headers or direct
-		$proto = $req['headers']['x-forwarded-proto'] ?? '';
-		if (strtolower($proto) === 'https' || ($req['https'] ?? false)) {
+		// REQUEST_SCHEME / HTTPS: this connection's TLS, or a trusted proxy's
+		// forwarded protocol, which the parent has already checked. The
+		// header itself is not read here: any client can send it.
+		if (!empty($req['https']) || !empty($req['forwardedHttps'])) {
 			$_SERVER['HTTPS'] = 'on';
 			$_SERVER['REQUEST_SCHEME'] = 'https';
 		} else {
@@ -1712,7 +1713,13 @@ class Q_WebServer_Pool
 			// listener and the only possible outcome is a reset. It presents
 			// as "Secure Connection Failed" with nothing wrong in any log,
 			// and it breaks every redirect: after a login, after a publish.
-			'https'          => self::isTlsClient($client)
+			'https'          => self::isTlsClient($client),
+			// Whether a trusted proxy says the visitor's connection was TLS.
+			// Worked out here, where the connection's own address is known;
+			// the worker sees only the visitor's, so it cannot tell a proxy's
+			// X-Forwarded-Proto from one any client sent.
+			'forwardedHttps' => Q_WebServer_Proxy::isHttps(
+				$parsed + array('_directIp' => self::peerAddressOf($client, false)), false)
 		);
 		$msg = json_encode($payload);
 		// A request body that is not valid UTF-8 cannot go through

@@ -1178,6 +1178,7 @@ class Q_WebServer
 				// gives them.
 				'clientIp' => $clientIp,
 				'_remoteAddr' => $clientIp,
+				'_directIp' => $directIp,
 				'_remotePort' => $peer ? (int) substr(strrchr($peer, ':'), 1) : 0,
 				'cookies' => isset($request['headers']['cookie'])
 					? self::parseCookieHeader($request['headers']['cookie']) : array(),
@@ -2444,6 +2445,9 @@ class Q_WebServer
 		$directIp = self::$clientInfo[$key]['ip'] ?? self::peerIp($client);
 		$parsed['clientIp'] = Q_WebServer_Proxy::clientIp($directIp, $parsed['headers']);
 		$parsed['_remoteAddr'] = $parsed['clientIp'];
+		// Kept for the protocol, which a forwarded header may change only
+		// when this address is a trusted proxy (Q_WebServer_Proxy::isHttps()).
+		$parsed['_directIp'] = $directIp;
 		$peer = stream_socket_get_name($client, true);
 		$parsed['_remotePort'] = $peer ? (int) substr(strrchr($peer, ':'), 1) : 0;
 
@@ -4269,7 +4273,7 @@ WORKER;
 			'serverPort'  => (string) self::$port,
 			'remoteAddr'  => $parsed['_remoteAddr'] ?? '127.0.0.1',
 			'remotePort'  => $parsed['_remotePort'] ?? 0,
-			'https'       => !empty(self::$tlsSocket),
+			'https'       => Q_WebServer_Proxy::isHttps($parsed, self::connectionIsTls($parsed)),
 			'qFile'       => $qFile,
 			'projectRoot' => dirname(rtrim(self::$rootDir, DS)),
 			// Where this class lives, so the worker can load it. Inside a phar
@@ -4348,11 +4352,8 @@ WORKER;
 	{
 		$host = $parsed['headers']['host'] ?? 'localhost';
 		$hostParts = explode(':', $host);
-		$isHttps = !empty(self::$tlsSocket);
-		$fwdProto = strtolower($parsed['headers']['x-forwarded-proto'] ?? '');
-		if ($fwdProto === 'https') $isHttps = true;
-		$cfVisitor = $parsed['headers']['cf-visitor'] ?? '';
-		if (strpos($cfVisitor, '"https"') !== false) $isHttps = true;
+		// This connection's TLS, or a trusted proxy's forwarded protocol.
+		$isHttps = Q_WebServer_Proxy::isHttps($parsed, self::connectionIsTls($parsed));
 
 		// Compute SCRIPT_NAME and PATH_INFO (frameworks need correct PATH_INFO)
 		// Issue #14: realpath-normalise both sides to prevent segment loss.
@@ -5193,16 +5194,10 @@ WORKER;
 		$_SERVER['REQUEST_TIME']      = time();
 		$_SERVER['REQUEST_TIME_FLOAT']= microtime(true);
 
-		// ── HTTPS detection (direct TLS or proxy header) ──
-		$isHttps = !empty(self::$tlsSocket);
-		$fwdProto = $parsed['headers']['x-forwarded-proto'] ?? '';
-		if (strtolower($fwdProto) === 'https') $isHttps = true;
-		// CloudFront
-		$cfProto = $parsed['headers']['cloudfront-forwarded-proto'] ?? '';
-		if (strtolower($cfProto) === 'https') $isHttps = true;
-		// Cloudflare
-		$cfVisitor = $parsed['headers']['cf-visitor'] ?? '';
-		if (strpos($cfVisitor, '"https"') !== false) $isHttps = true;
+		// ── HTTPS detection (direct TLS or a trusted proxy's header) ──
+		// X-Forwarded-Proto, CloudFront-Forwarded-Proto and CF-Visitor count
+		// only from a trusted proxy, the list that also decides REMOTE_ADDR.
+		$isHttps = Q_WebServer_Proxy::isHttps($parsed, self::connectionIsTls($parsed));
 		$_SERVER['REQUEST_SCHEME']    = $isHttps ? 'https' : 'http';
 		$_SERVER['HTTPS']             = $isHttps ? 'on' : '';
 
@@ -6255,6 +6250,24 @@ WORKER;
 		if ($colons === 1) return substr($peer, 0, strpos($peer, ':'));
 		// Unbracketed IPv6 with a port: the port follows the last colon.
 		return substr($peer, 0, strrpos($peer, ':'));
+	}
+
+	/**
+	 * Whether the connection a parsed request arrived on is TLS.
+	 *
+	 * handleRequest() reads it off the socket into "_https" (HTTP/2 sets it
+	 * too). Only a request that never passed there falls back to whether a
+	 * TLS listener exists at all, which is what was asked before.
+	 *
+	 * @method connectionIsTls
+	 * @static
+	 * @param {array} $parsed
+	 * @return {boolean}
+	 */
+	static function connectionIsTls($parsed)
+	{
+		if (array_key_exists('_https', $parsed)) return !empty($parsed['_https']);
+		return !empty(self::$tlsSocket);
 	}
 
 	/**
