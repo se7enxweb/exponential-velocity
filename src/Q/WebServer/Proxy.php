@@ -7,13 +7,15 @@
  * Reverse proxy header handling for Q_WebServer.
  *
  * When behind Cloudflare, AWS ALB, Caddy, nginx, etc.,
- * the client's real IP and protocol are in X-Forwarded-*
- * headers. This class extracts them from trusted proxies.
+ * the client's real IP, protocol and host are in forwarded
+ * headers. This class reads them only from a connection whose
+ * address is in Q.webserver.proxy.trusted; from any other
+ * client they are ignored.
  *
- * Config:
+ * Config (an example; the ranges are what you list):
  *   "Q": { "webserver": { "proxy": {
- *     "trusted": ["127.0.0.1", "10.0.0.0/8", "172.16.0.0/12",
- *       "192.168.0.0/16", "173.245.48.0/20", "103.21.244.0/22"],
+ *     "trusted": ["127.0.0.1", "::1", "10.0.0.0/8",
+ *       "173.245.48.0/20", "103.21.244.0/22"],
  *     "headers": {
  *       "ip": "X-Forwarded-For",
  *       "proto": "X-Forwarded-Proto",
@@ -21,8 +23,15 @@
  *     }
  *   }}}
  *
- * Cloudflare IPs are in the default trusted list. Add your
- * own load balancer IPs as needed.
+ * The default trusted list is loopback only, 127.0.0.1 and ::1.
+ * No CDN or load balancer is trusted unless you add its
+ * addresses: list Cloudflare's published ranges, your load
+ * balancer's or your private network's as needed.
+ *
+ * The protocol (HTTPS, REQUEST_SCHEME) comes from the "proto"
+ * header (X-Forwarded-Proto by default), then
+ * CloudFront-Forwarded-Proto, then CF-Visitor; a TLS connection
+ * is https from any client. See clientProto().
  *
  * @class Q_WebServer_Proxy
  */
