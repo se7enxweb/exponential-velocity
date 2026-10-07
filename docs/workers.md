@@ -256,7 +256,7 @@ that exits is noticed within two seconds, removed and replaced. Every exited wor
 is reaped, so none is left behind as a zombie.
 
 A worker still on one request after `requestTimeout` seconds (default `30`, `0` for
-no limit) is killed: the client gets `504`, the kill is logged with the request,
+no limit) is stopped: the client gets `504`, the stop is logged with the request,
 and a fresh worker takes its place. The request is not run again elsewhere, where
 it would hang the same way.
 
@@ -280,6 +280,50 @@ ended. The new server forks a new pool from the new code and configuration.
 
 The control panel's Workers tab can recycle one worker or all of them without a
 reload: an idle worker is replaced at once, a busy one after its current request.
+
+SIGTERM or SIGINT stops the server the same way and then ends the process. The
+stop is bounded by `shutdownTimeout` (default `15` seconds, `0` for no bound):
+at the signal a small process is forked to keep the time. It holds nothing of the
+server's, ignores the signals a supervisor sends to stop the server, and waits.
+If the server has not exited when the time is up, the server and every process it
+started are killed with SIGKILL, and the console log says so. Either way, once the
+server is gone, whatever it left in its own process group (a worker stuck where it
+is, a program a script ran) is killed too, when the server leads its group -- as it
+does when started with `setsid`, the way `qbixctl` and supervisors start it. A
+server that shares its group with a shell does not take the shell down.
+
+The bound matters because a server can stop where no PHP code runs again: blocked
+in the kernel on a lock in memory it shares with its workers. A signal handler of
+PHP's, a timer of the event loop or an alarm are all deferred there; only SIGKILL
+from another process ends it.
+
+Neither the zygote nor any worker holds a listening socket, so a server that is
+killed outright leaves nothing that accepts a connection on its ports; its workers
+end when their socket pair closes.
+
+#### How a worker is stopped
+
+A worker acts on SIGTERM, SIGINT and SIGALRM (`set_time_limit()`) in PHP code,
+never inside an extension's C function: the signal interrupts a blocking call,
+and the worker ends at the next point where PHP code runs, without the
+application's shutdown functions. Inside the callback of `apcu_entry()`, the one
+place PHP code runs while APCu holds its lock, it exits through the callback
+instead, which releases the lock first.
+
+This is what keeps APCu's lock from being orphaned. The server and its workers
+share one APCu segment, and its read-write lock is not robust: a process killed
+while it holds the lock leaves it held for ever, and every other process that
+touches APCu -- the server at its next cache lookup -- blocks in `futex_do_wait`.
+The server then accepts no connection, keeps its ports, and does not act on
+SIGTERM. A worker past `requestTimeout` is therefore sent SIGTERM, and SIGKILL
+only `requestTimeoutGrace` seconds later (default `5`) if it is still there: a
+worker that has not reached PHP code in that time is blocked elsewhere and holds
+no APCu lock. The pool's shutdown does the same with its three seconds.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `shutdownTimeout` | `15` | Seconds a graceful stop (SIGTERM, SIGINT) may take before the server and every process it started are killed. `0` means no bound. |
+| `requestTimeoutGrace` | `5` | Seconds between the SIGTERM a worker past `requestTimeout` is sent and the SIGKILL that follows if it is still there. `0` kills at once. |
 
 ---
 
