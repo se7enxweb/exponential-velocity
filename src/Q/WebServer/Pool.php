@@ -111,6 +111,64 @@ class Q_WebServer_Pool
 	}
 
 	/**
+	 * In a freshly forked worker: the signals that end it, made safe to
+	 * deliver at any moment.
+	 *
+	 * A worker used to die wherever a signal found it: SIGTERM and SIGALRM
+	 * had their default action (a zygote's worker), or a handler inherited
+	 * from the server that nothing ever dispatched (a worker the server
+	 * forked itself, which then ignored SIGTERM until the SIGKILL that
+	 * followed it). Either way the end came at an arbitrary instruction, and
+	 * a process that is killed while it holds a lock in memory it shares
+	 * with the server never releases it. APCu's lock is such a lock: the
+	 * server and every worker map the same segment, and its read-write lock
+	 * is not robust. A worker killed inside apcu_store() -- the request
+	 * timeout's SIGKILL, set_time_limit()'s SIGALRM -- left the lock held for
+	 * ever, and the next apcu_fetch() anywhere blocked in futex_do_wait: the
+	 * server stopped accepting connections, kept its port, and a graceful
+	 * stop waited on it for ever.
+	 *
+	 * Now SIGTERM, SIGINT and SIGALRM run a handler, dispatched as soon as
+	 * the worker is back in PHP code -- by definition outside any extension's
+	 * C function, so outside APCu's lock -- and a blocking call is
+	 * interrupted to get there. The handler ends the process at once, as the
+	 * signal's default action would, without running the application's
+	 * shutdown functions; inside the callback of apcu_entry(), the one place
+	 * PHP code runs while APCu holds its lock, it exits instead, which
+	 * unwinds through apcu_entry() and so releases the lock first.
+	 *
+	 * A worker that does not reach PHP code -- stuck in a database call,
+	 * say -- holds no APCu lock either, and the SIGKILL that follows the
+	 * signal after a grace period (killOverdue(), shutdown()) is safe there.
+	 *
+	 * @method workerSignals
+	 * @static
+	 */
+	static function workerSignals()
+	{
+		if (!function_exists('pcntl_signal')) return;
+		pcntl_signal(SIGCHLD, SIG_DFL);
+		pcntl_signal(SIGHUP, SIG_DFL);
+		$end = function ($signal) {
+			foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame) {
+				if (($frame['function'] ?? '') === 'apcu_entry' and empty($frame['class'])) {
+					exit(128 + (int) $signal);
+				}
+			}
+			if (function_exists('posix_kill') and defined('SIGKILL')) {
+				posix_kill(getmypid(), SIGKILL);
+			}
+			exit(128 + (int) $signal);
+		};
+		// Not restarting the interrupted call: a worker blocked in a read or
+		// a sleep returns to PHP code, where the handler runs.
+		foreach (array('SIGTERM', 'SIGINT', 'SIGALRM') as $name) {
+			if (defined($name)) pcntl_signal(constant($name), $end, false);
+		}
+		if (function_exists('pcntl_async_signals')) pcntl_async_signals(true);
+	}
+
+	/**
 	 * In a freshly forked worker: close every socket stream except $keep.
 	 *
 	 * Only sockets. Files the parent has open (logs, a warm-up's handles)
@@ -696,6 +754,7 @@ class Q_WebServer_Pool
 			// The sockets above are closed first, so a worker that cannot
 			// switch leaves holding nothing of the server's.
 			if (class_exists('Q_WebServer_RunAs', false)) Q_WebServer_RunAs::dropOrExit('worker');
+			self::workerSignals();
 			self::childRun($pair[1], $this->octane, $this->maxRequests);
 			exit(0);
 		}
@@ -838,12 +897,7 @@ class Q_WebServer_Pool
 				// ── WORKER, forked from the zygote ──
 				socket_close($ctl);
 				if ($title !== '' and function_exists('cli_set_process_title')) @cli_set_process_title($title);
-				if (function_exists('pcntl_signal')) {
-					pcntl_signal(SIGCHLD, SIG_DFL);
-					pcntl_signal(SIGTERM, SIG_DFL);
-					pcntl_signal(SIGHUP, SIG_DFL);
-				}
-				if (function_exists('pcntl_async_signals')) pcntl_async_signals(false);
+				self::workerSignals();
 				$stream = is_resource($fd) ? $fd : socket_export_stream($fd);
 				if (class_exists('Q_WebServer_CompatFileWrapper', false)) {
 					Q_WebServer_CompatFileWrapper::forgetStats(true);
@@ -2299,16 +2353,37 @@ class Q_WebServer_Pool
 	 * is not taken for a lost request and run again on another worker, where
 	 * it would hang the same way. The socket then reaches EOF and recycle()
 	 * reaps and replaces the worker as for any other death.
+	 *
+	 * The worker is sent SIGTERM, which it acts on at a point where it holds
+	 * no lock it shares with the server (workerSignals()), and SIGKILL only
+	 * when it is still there $grace seconds later. Killing it outright could
+	 * land inside apcu_store() and leave APCu's lock held for ever, which
+	 * stopped the server itself at its next cache lookup.
 	 * @method killOverdue
 	 * @param {float} $timeout seconds; 0 or less does nothing
+	 * @param {float} $grace seconds between SIGTERM and SIGKILL;
+	 *   null reads Q.webserver.requestTimeoutGrace (default 5)
 	 * @return {integer} how many workers were killed
 	 */
-	function killOverdue($timeout)
+	function killOverdue($timeout, $grace = null)
 	{
 		if ($timeout <= 0) return 0;
+		if ($grace === null) {
+			$grace = (float) Q_Config::get('Q', 'webserver', 'requestTimeoutGrace', 5);
+		}
 		$now = microtime(true);
 		$killed = 0;
 		foreach ($this->workers as $index => $w) {
+			// Signalled and still not gone: now without asking.
+			if (!empty($w['dying']) and empty($w['killed']) and isset($w['dyingSince'])
+			and $now - $w['dyingSince'] >= $grace) {
+				$pid = (int) ($w['pid'] ?? 0);
+				if ($pid > 0) @posix_kill($pid, SIGKILL);
+				$this->workers[$index]['killed'] = true;
+				fwrite(STDERR, sprintf("  worker %d did not end %.1fs after SIGTERM; SIGKILL\n",
+					$pid, $now - $w['dyingSince']));
+				continue;
+			}
 			if (empty($w['busy']) or !empty($w['dying'])) continue;
 			$started = $this->workerStarted[$index] ?? null;
 			if ($started === null or $now - $started <= $timeout) continue;
@@ -2332,8 +2407,10 @@ class Q_WebServer_Pool
 			unset($this->workerClients[$index], $this->workerResponders[$index]);
 			// Still busy, so nothing is dispatched to it while it dies.
 			$this->workers[$index]['dying'] = true;
+			$this->workers[$index]['dyingSince'] = $now;
 			$pid = (int) ($w['pid'] ?? 0);
-			if ($pid > 0) @posix_kill($pid, SIGKILL);
+			if ($pid > 0) @posix_kill($pid, $grace > 0 ? SIGTERM : SIGKILL);
+			if ($grace <= 0) $this->workers[$index]['killed'] = true;
 			fwrite(STDERR, sprintf("  worker %d killed after %.1fs on %s %s (requestTimeout %ss)\n",
 				$pid, $now - $started, $method, $uri, $timeout));
 			Q_WebServer_Dashboard::recordRequest($method, $uri, 504, $ms, 0, true);
@@ -2459,6 +2536,41 @@ class Q_WebServer_Pool
 
 		$this->workers = array();
 		$this->stopZygote();
+	}
+
+	/**
+	 * The processes of the pool: every worker and the zygote.
+	 * @method processIds
+	 * @return {array} of integer
+	 */
+	function processIds()
+	{
+		$pids = array();
+		foreach ($this->workers as $w) {
+			if (!empty($w['pid'])) $pids[] = (int) $w['pid'];
+		}
+		if ($this->zygote !== null and !empty($this->zygote['pid'])) $pids[] = (int) $this->zygote['pid'];
+		return $pids;
+	}
+
+	/**
+	 * In a process forked from the server that is not a worker: let go of
+	 * this copy of the pool without touching the processes it names. Holding
+	 * the server's end of a worker's pair keeps that worker from seeing the
+	 * server go, and holding the zygote's control socket keeps the zygote.
+	 * @method detachInChild
+	 */
+	function detachInChild()
+	{
+		foreach ($this->workers as $w) {
+			if (isset($w['socket']) and is_resource($w['socket'])) @fclose($w['socket']);
+		}
+		$this->workers = array();
+		$this->watchers = array();
+		if ($this->zygote !== null) {
+			@socket_close($this->zygote['ctl']);
+			$this->zygote = null;
+		}
 	}
 
 	function idleCount()
