@@ -88,6 +88,9 @@ class Q_WebServer_Compat
 		'shell_exec'           => 'Q_WebServer_Compat::_shell_exec',
 		'proc_close'           => 'Q_WebServer_Compat::_proc_close',
 		'pclose'               => 'Q_WebServer_Compat::_pclose',
+		// A local file opened through the wrapper is a user-space stream,
+		// which PHP reads one chunk per fread(). See _fread().
+		'fread'                => 'Q_WebServer_Compat::_fread',
 	);
 
 	/**
@@ -182,6 +185,48 @@ class Q_WebServer_Compat
 		} finally {
 			self::forgetFilesAfterProcess();
 		}
+	}
+
+	/**
+	 * Replacement for fread(): on a file opened through the file wrapper,
+	 * the length asked for, or what is left of the file.
+	 *
+	 * On the plain file layer fread($fp, $n) returns $n bytes unless the file
+	 * ends first. A stream opened through a user-space wrapper is read at
+	 * most one chunk (8192 bytes) per call instead, and with the wrapper
+	 * registered for file:// that is every local file. A download loop that
+	 * counts the bytes it asked for rather than the bytes it got -- a common
+	 * shape -- then sent half of every file and stopped, with status 200 and
+	 * a length that matched what was sent.
+	 *
+	 * Only streams of the wrapper are read on. Any other stream returns what
+	 * PHP's fread() returns: a short read from a socket or a pipe means "this
+	 * is what has arrived", and waiting for the rest would block the caller.
+	 *
+	 * @method _fread
+	 * @static
+	 * @param {resource} $stream
+	 * @param {integer} $length
+	 * @return {string|false}
+	 */
+	static function _fread($stream, $length)
+	{
+		$data = \fread($stream, $length);
+		if (!is_string($data) or $data === '') return $data;
+		$got = strlen($data);
+		if ($got >= $length) return $data;
+		$meta = @stream_get_meta_data($stream);
+		if (!isset($meta['wrapper_data'])
+			or !($meta['wrapper_data'] instanceof Q_WebServer_CompatFileWrapper)) {
+			return $data;
+		}
+		while ($got < $length) {
+			$more = \fread($stream, $length - $got);
+			if (!is_string($more) or $more === '') break;
+			$data .= $more;
+			$got += strlen($more);
+		}
+		return $data;
 	}
 
 	/** @var bool Whether the phar:// scheme is currently wrapped for transforms. */
