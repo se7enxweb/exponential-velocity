@@ -1615,6 +1615,165 @@ class Q_WebServer
 		if (self::$pool) { self::$pool->shutdown(); self::$pool = null; }
 	}
 
+	/**
+	 * Bound a graceful shutdown: Q.webserver.shutdownTimeout seconds (15 by
+	 * default; 0 for no bound) from now, the process ends whatever it is
+	 * doing.
+	 *
+	 * stop() waits for connections to drain and for the pool to go, and a
+	 * wait can go wrong in ways no PHP code can see: a lock in shared memory
+	 * whose holder was killed blocks the process in the kernel
+	 * (futex_do_wait), where no timer of the event loop and no handler of
+	 * PHP's runs again. That happened: SIGTERM was logged, the process never
+	 * exited, its port stayed bound with connections queued that nobody
+	 * accepted, and a restart could start nothing in its place.
+	 *
+	 * Nor can a signal to the process itself bound it: an alarm is deferred
+	 * by PHP while an extension blocks interruptions around its lock, which
+	 * is where the process waits. Only SIGKILL from another process ends it
+	 * there. So a small process is forked to keep the time: it holds nothing
+	 * of the server's (no listener, no client, no worker's socket pair, not
+	 * the zygote's control socket), ignores the signals a supervisor sends
+	 * to stop the server, and waits for the server to exit. If it has not
+	 * when the time is up, the server and every process it started are
+	 * killed. Either way, once the server is gone, whatever it started and
+	 * left behind in its process group -- a worker stuck on the same lock,
+	 * a program a script ran -- is killed too, so nothing of it outlives
+	 * the stop.
+	 *
+	 * @method armShutdownDeadline
+	 * @static
+	 * @param {float} [$seconds] defaults to Q.webserver.shutdownTimeout
+	 * @return {float} the bound in seconds, 0 when none was set
+	 */
+	static function armShutdownDeadline($seconds = null)
+	{
+		if ($seconds === null) {
+			$seconds = Q_Config::get('Q', 'webserver', 'shutdownTimeout', 15);
+		}
+		$seconds = (float) $seconds;
+		if ($seconds <= 0 or !function_exists('pcntl_fork') or !function_exists('posix_kill')) return 0;
+		// One per stop: a second signal during the stop keeps the first bound.
+		static $armed = null;
+		if ($armed !== null and $armed['pid'] === getmypid()) return $armed['seconds'];
+
+		$server = getmypid();
+		$known = self::$pool ? self::$pool->processIds() : array();
+		foreach (array_keys(self::$workerPids) as $pid) $known[] = (int) $pid;
+		$pid = Q_WebServer_Fork::fork();
+		if ($pid === -1 or $pid === false) return 0;
+		if ($pid > 0) {
+			$armed = array('pid' => $server, 'seconds' => $seconds);
+			return $seconds;
+		}
+
+		// ── THE TIMEKEEPER ──
+		if (function_exists('pcntl_signal')) {
+			foreach (array('SIGTERM', 'SIGINT', 'SIGHUP', 'SIGQUIT') as $name) {
+				if (defined($name)) pcntl_signal(constant($name), SIG_IGN);
+			}
+			pcntl_signal(SIGCHLD, SIG_DFL);
+		}
+		if (self::$pool) self::$pool->detachInChild();
+		self::closeInheritedDescriptors();
+		if (class_exists('Q_WebServer_Pool', false)) Q_WebServer_Pool::closeInheritedSockets(null);
+		if (function_exists('cli_set_process_title')) @cli_set_process_title('qbixserver: shutdown deadline');
+
+		$deadline = microtime(true) + $seconds;
+		$gone = function () use ($server) {
+			// Reparented: the server has exited (and its pid may be reused).
+			return posix_getppid() !== $server;
+		};
+		while (!$gone() and microtime(true) < $deadline) usleep(100000);
+
+		$self = getmypid();
+		$targets = array();
+		if (!$gone()) {
+			fwrite(STDERR, sprintf("  shutdown did not finish within %ss: killing the server (%d) and its processes\n",
+				rtrim(rtrim(sprintf('%.1f', $seconds), '0'), '.'), $server));
+			@posix_kill($server, SIGKILL);
+			$targets = array_merge($targets, $known, self::descendantsOf($server));
+		}
+		// What the server left in its own process group (when it leads one;
+		// a server sharing the group of a shell must not take the shell down).
+		$group = function_exists('posix_getpgid') ? @posix_getpgid(0) : false;
+		if ($group === $server) $targets = array_merge($targets, self::processGroup($group));
+		foreach (array_unique($targets) as $p) {
+			if ($p > 1 and $p !== $self and $p !== $server) @posix_kill($p, SIGKILL);
+		}
+		// No shutdown functions, no destructors: they belong to the server.
+		posix_kill($self, SIGKILL);
+		exit(0);
+	}
+
+	/**
+	 * Every live process descended from $pid, from /proc (empty elsewhere).
+	 * @method descendantsOf
+	 * @static
+	 * @param {integer} $pid
+	 * @return {array}
+	 */
+	static function descendantsOf($pid)
+	{
+		$children = array();
+		foreach (self::procStats() as $p => $st) $children[$st['ppid']][] = $p;
+		$all = array();
+		$queue = array((int) $pid);
+		while ($queue) {
+			$p = array_shift($queue);
+			foreach ($children[$p] ?? array() as $c) {
+				if (!in_array($c, $all, true)) { $all[] = $c; $queue[] = $c; }
+			}
+		}
+		return $all;
+	}
+
+	/**
+	 * Every live process in process group $group, from /proc (empty elsewhere).
+	 * @method processGroup
+	 * @static
+	 * @param {integer} $group
+	 * @return {array}
+	 */
+	static function processGroup($group)
+	{
+		$members = array();
+		foreach (self::procStats() as $p => $st) {
+			if ($st['pgrp'] === (int) $group) $members[] = $p;
+		}
+		return $members;
+	}
+
+	/** pid => array(ppid, pgrp) of every process but a zombie, from /proc. */
+	protected static function procStats()
+	{
+		$stats = array();
+		if (!is_dir('/proc/self')) return $stats;
+		foreach (glob('/proc/[0-9]*', GLOB_ONLYDIR) ?: array() as $dir) {
+			$stat = @file_get_contents($dir . '/stat');
+			if (!$stat or ($p = strrpos($stat, ')')) === false) continue;
+			$rest = explode(' ', substr($stat, $p + 2));
+			if (($rest[0] ?? '') === 'Z' or ($rest[0] ?? '') === 'X') continue;
+			$stats[(int) basename($dir)] = array('ppid' => (int) ($rest[1] ?? 0), 'pgrp' => (int) ($rest[2] ?? 0));
+		}
+		return $stats;
+	}
+
+	/**
+	 * How long stop() may wait for connections to drain within a shutdown
+	 * bounded to $limit seconds: five, or less when the bound is short, so
+	 * the pool and the zygote still have their time before it.
+	 * @method drainTimeout
+	 * @static
+	 * @param {float} $limit 0 for no bound
+	 * @return {float}
+	 */
+	static function drainTimeout($limit)
+	{
+		if ($limit <= 0) return 5.0;
+		return max(0.5, min(5.0, $limit - 5.0));
+	}
+
 	static function run()
 	{
 		if (!self::$running) return;
@@ -1632,15 +1791,20 @@ class Q_WebServer
 			// Exiting here is safe because everything that needed ordering has
 			// already happened inside stop(): connections drained, workers
 			// signalled and reaped, sockets closed, the UDS path unlinked.
+			//
+			// And it has to end within a bound. armShutdownDeadline() makes
+			// sure of that whatever stop() runs into.
 			Q_Evented::onSignal(SIGINT, function () {
 				echo "\n  Graceful shutdown (SIGINT)...\n";
-				self::stop();
+				$limit = self::armShutdownDeadline();
+				self::stop(self::drainTimeout($limit));
 				Q_Evented::stop();
 				exit(0);
 			});
 			Q_Evented::onSignal(SIGTERM, function () {
 				echo "\n  Graceful shutdown (SIGTERM)...\n";
-				self::stop();
+				$limit = self::armShutdownDeadline();
+				self::stop(self::drainTimeout($limit));
 				Q_Evented::stop();
 				exit(0);
 			});
