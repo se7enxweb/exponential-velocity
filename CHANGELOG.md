@@ -65,6 +65,17 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.46 — a stop is bounded and leaves nothing behind, and a file read through the compat wrapper is read whole
+
+2026-10-07
+
+### Fixed
+
+- **A stop or restart can no longer hang.** A worker killed while it held the shared APCu lock left that lock held for ever; the parent's next cache lookup then waited on it, stopped accepting connections and never acted on SIGTERM. A worker now ends on SIGTERM, SIGINT or SIGALRM only at a point where it holds no APCu lock (inside an `apcu_entry` callback it exits, which releases the lock first), and the request timeout sends SIGTERM first and SIGKILL only after `Q.webserver.requestTimeoutGrace` (default 5 s). Workers forked by the server itself now honour SIGTERM too.
+- **A graceful stop is bounded.** On SIGTERM or SIGINT a short-lived process keeps the deadline `Q.webserver.shutdownTimeout` (default 15 s); at the deadline it kills the server and everything it started, including what is left in its process group, so no process can keep serving the ports after a stop. See [workers.md](docs/workers.md) and [configuration.md](docs/configuration.md). `tests/unit-shutdown-bounded.php` covers it.
+- **Files read through the compat file wrapper are read whole.** Every local file opened through `Q_WebServer_CompatFileWrapper` is a user-space stream, and PHP returns at most 8192 bytes per `fread()` on one; an application loop that requested 16384 bytes and counted 16384 sent each file half-sized with status 200, a matching Content-Length and a cached copy of the short body (downloads were cut to half their size, range requests too). `fread()` is now replaced for such streams with a read that returns the length asked for or the rest of the file; sockets and pipes keep their normal short reads. `tests/unit-compat-fread-full-length.php` covers file sizes, ranges, empty files and sockets.
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.46.
+
 ## v0.0.4.45 — Q.webserver.fallback serves the file it names
 
 2026-10-05
