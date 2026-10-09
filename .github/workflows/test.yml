@@ -109,6 +109,9 @@ jobs:
       - name: Autoloaders across requests
         run: bash tests/autoloader-persistence.sh
 
+      - name: REQUEST_* keys across requests
+        run: bash tests/request-keys-reset.sh
+
       - name: Working directory per request
         run: bash tests/working-directory.sh
 
