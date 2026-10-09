@@ -65,6 +65,12 @@ edited down to what a reader actually needs.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **A `REQUEST_*` key a script adds to `$_SERVER` ends with its request.** Between two requests a persistent worker keeps the `$_SERVER` keys the server provides and removes the rest, but it kept every key starting with `REQUEST_`, so a key an application recorded under that prefix (a request filter's verdict, for instance) was still there on the next request the same worker served. Only the `REQUEST_*` keys the server sets for every request survive now: `REQUEST_METHOD`, `REQUEST_URI`, `REQUEST_SCHEME`, `REQUEST_TIME` and `REQUEST_TIME_FLOAT`. `tests/request-keys-reset.sh` covers it.
+
 ## v0.0.4.46 — a stop is bounded and leaves nothing behind, and a file read through the compat wrapper is read whole
 
 2026-10-07

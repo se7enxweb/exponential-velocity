@@ -1225,9 +1225,14 @@ class Q_WebServer_Pool
 		$_serverKeep = array('PATH','HOME','LANG','USER','SHELL','TERM',
 			'SHLVL','_','SERVER_SOFTWARE','GATEWAY_INTERFACE',
 			'REQUEST_SCHEME','HTTPS','PHP_SELF','argv','argc');
+		// Of the REQUEST_* keys only those the server sets itself survive:
+		// a key a script added under that prefix (a request filter's verdict,
+		// for instance) belongs to its request and must not reach the next one.
+		$_serverRequestKeys = array('REQUEST_METHOD','REQUEST_URI','REQUEST_SCHEME',
+			'REQUEST_TIME','REQUEST_TIME_FLOAT');
 		foreach (array_keys($_SERVER) as $k) {
 			if (!in_array($k, $_serverKeep, true)
-				&& strncmp($k, 'REQUEST_', 8) !== 0
+				&& !in_array($k, $_serverRequestKeys, true)
 				&& strncmp($k, 'SERVER_', 7) !== 0
 				&& strncmp($k, 'SCRIPT_', 7) !== 0
 				&& strncmp($k, 'DOCUMENT_', 9) !== 0
