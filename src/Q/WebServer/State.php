@@ -108,11 +108,16 @@ class Q_WebServer_State
 	static function isStreaming()
 	{
 		if (self::$streaming) return true;
-		// Auto-detect from headers
-		$ct = self::getHeader('Content-Type');
-		if ($ct && strpos($ct, 'text/event-stream') !== false) return true;
-		$xab = self::getHeader('X-Accel-Buffering');
-		if ($xab && strtolower($xab) === 'no') return true;
+		// Auto-detect from headers. A header's name is case-insensitive, and
+		// header('content-type: text/event-stream') is stored under the name
+		// as the script wrote it, so the lookup is too.
+		foreach (self::$headers as $name => $value) {
+			$lower = strtolower($name);
+			if ($lower === 'content-type'
+				and stripos((string) $value, 'text/event-stream') !== false) return true;
+			if ($lower === 'x-accel-buffering'
+				and strtolower(trim((string) $value)) === 'no') return true;
+		}
 		return false;
 	}
 

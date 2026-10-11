@@ -65,6 +65,23 @@ edited down to what a reader actually needs.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Streaming responses from persistent pool workers.** A response that asks to stream -- `Content-Type: text/event-stream`, `X-Accel-Buffering: no`, or `Q_WebServer_State::setStreaming(true)` -- is sent as it is written: its status and headers on the first `flush()`/`ob_flush()`, then what the script printed on every flush, chunked over HTTP/1.1 and as DATA frames over HTTP/2, with no `Content-Length`, no compression and nothing stored in the response cache. A pooled worker used to collect the whole response and send it when the script ended, so Server-Sent Events arrived all at once at the end (measured: 40 events written 500 ms apart, all delivered at 20.7 s, with a `Content-Length`); only a fork-per-request child without a pool could stream. See [workers.md](docs/workers.md#streaming-responses). `tests/unit-pool-streaming.php` covers both protocols.
+- **A client that leaves a stream ends it.** The server notices at once over HTTP/1.1 and within a second over HTTP/2 (`RST_STREAM` or a closed connection) and tells the worker: with `ignore_user_abort` off the script ends at its next flush, as under PHP-FPM, and with it on `connection_aborted()` returns `1`. The worker then serves the next request; it used to run the script to the end for nobody. `flush()`, `connection_aborted()`, `connection_status()` and `ignore_user_abort()` are now provided by the compatibility layer in pooled requests.
+- **`Q.webserver.streamTimeout`** (default `300` s): how long a streaming response, or a request with `Accept: text/event-stream` before its first byte, may run instead of `requestTimeout`. At the limit the stream is ended cleanly, so an `EventSource` reconnects. A stream used to be killed at `requestTimeout` (30 s) with nothing sent at all.
+- **A cap on streams: `Q.webserver.streamShare`** (default `0.25` of `workers`, at least one) **or `Q.webserver.maxStreams`** (an absolute number). Each open stream holds a worker; past the cap a request for an event stream is answered `503` with `Retry-After: 5`, and the rest of the pool stays free for pages.
+- **`Q.webserver.retryWithin`** (default `10` s): see below.
+
+### Updated
+
+- **A request whose worker died is run again only when that is safe.** Only a `GET`, `HEAD` or `OPTIONS` that was lost within `retryWithin` seconds of reaching its worker, that is not a request for an event stream, and of whose answer nothing was sent, is retried (once). A long `GET` used to be retried however long it had run, so it ran twice; the log now says why a request was not run again. A stream whose worker dies part-way is cut short (HTTP/1.1 closes without the last chunk, HTTP/2 resets the stream) rather than answered with a second status line.
+- **An HTTP/2 connection with a stream in progress, or a request still with its worker, is not closed as idle** after `Q.web.http2.limits.idleSeconds`, however quiet the socket.
+- **An HTTP/2 request answered at once by the pool (a refusal) no longer leaves a half-made stream behind**, which every later `WINDOW_UPDATE` for it tripped over with PHP warnings.
+- **`Q_WebServer_State::isStreaming()` reads the header names case-insensitively**, so `header('content-type: text/event-stream')` opts in like `Content-Type`.
+
 ## v0.0.4.48 — the full Docker images load event after sockets
 
 2026-10-11

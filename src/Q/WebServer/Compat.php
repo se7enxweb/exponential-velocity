@@ -91,7 +91,84 @@ class Q_WebServer_Compat
 		// A local file opened through the wrapper is a user-space stream,
 		// which PHP reads one chunk per fread(). See _fread().
 		'fread'                => 'Q_WebServer_Compat::_fread',
+		// A response that streams. Under fpm, flush() pushes what the script
+		// printed to the client and a write to a client that has gone away
+		// ends the script; in a persistent worker the output is captured, so
+		// these reach the server instead -- see Q_WebServer_Pool::streamFlush().
+		'flush'                => 'Q_WebServer_Compat::_flush',
+		'connection_aborted'   => 'Q_WebServer_Compat::_connection_aborted',
+		'connection_status'    => 'Q_WebServer_Compat::_connection_status',
+		'ignore_user_abort'    => 'Q_WebServer_Compat::_ignore_user_abort',
 	);
+
+	/**
+	 * Replacement for flush(): send what the script has printed so far to the
+	 * client, when the response streams, and end the request there if the
+	 * client has gone and the script does not ignore that.
+	 *
+	 * Outside a pooled request it is PHP's own flush().
+	 *
+	 * @method _flush
+	 * @static
+	 */
+	static function _flush()
+	{
+		if (class_exists('Q_WebServer_Pool', false) and Q_WebServer_Pool::inRequest()) {
+			Q_WebServer_Pool::streamFlush();
+			return;
+		}
+		\flush();
+	}
+
+	/**
+	 * Replacement for connection_aborted(): 1 once the client of a streaming
+	 * response has gone, as under fpm.
+	 *
+	 * @method _connection_aborted
+	 * @static
+	 * @return {integer}
+	 */
+	static function _connection_aborted()
+	{
+		if (class_exists('Q_WebServer_Pool', false) and Q_WebServer_Pool::inRequest()) {
+			return Q_WebServer_Pool::clientAborted() ? 1 : 0;
+		}
+		return \connection_aborted();
+	}
+
+	/**
+	 * Replacement for connection_status(): CONNECTION_ABORTED once the client
+	 * of a streaming response has gone.
+	 *
+	 * @method _connection_status
+	 * @static
+	 * @return {integer}
+	 */
+	static function _connection_status()
+	{
+		if (class_exists('Q_WebServer_Pool', false) and Q_WebServer_Pool::inRequest()) {
+			return Q_WebServer_Pool::clientAborted() ? CONNECTION_ABORTED : CONNECTION_NORMAL;
+		}
+		return \connection_status();
+	}
+
+	/**
+	 * Replacement for ignore_user_abort(): whether a request goes on once its
+	 * client has gone. Kept per request in a pooled worker, so one script's
+	 * choice does not reach the next request.
+	 *
+	 * @method _ignore_user_abort
+	 * @static
+	 * @param {boolean|null} $enable
+	 * @return {integer} the previous setting
+	 */
+	static function _ignore_user_abort($enable = null)
+	{
+		if (class_exists('Q_WebServer_Pool', false) and Q_WebServer_Pool::inRequest()) {
+			return Q_WebServer_Pool::ignoreUserAbort($enable);
+		}
+		return $enable === null ? \ignore_user_abort() : \ignore_user_abort((bool) $enable);
+	}
 
 	/**
 	 * Replacement for clearstatcache(): PHP's stat cache and the wrapper's

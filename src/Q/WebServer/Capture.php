@@ -49,6 +49,19 @@ class Q_WebServer_Capture
 	private static $level = 0;
 
 	/**
+	 * Called after every flush of our buffer while it is set: a callable that
+	 * may take() what has been captured so far and send it on. The worker
+	 * pool sets it for the length of a request, so a response that streams
+	 * (Server-Sent Events, a long download produced piece by piece) leaves on
+	 * each ob_flush() or flush() instead of when the script ends. It runs
+	 * inside the output handler, so it must not use output buffering itself.
+	 *
+	 * @property $onFlush
+	 * @type {callable|null}
+	 */
+	public static $onFlush = null;
+
+	/**
 	 * Output handler. Flushed output is kept; cleaned output is discarded, as
 	 * ob_clean() means. Either way the buffer is left empty.
 	 *
@@ -62,8 +75,38 @@ class Q_WebServer_Capture
 	{
 		if (!($phase & PHP_OUTPUT_HANDLER_CLEAN)) {
 			self::$captured .= $buffer;
+			if (self::$onFlush !== null and ($phase & PHP_OUTPUT_HANDLER_FLUSH)) {
+				call_user_func(self::$onFlush);
+			}
 		}
 		return '';
+	}
+
+	/**
+	 * Hand over what has been captured so far and forget it, for output that
+	 * leaves before the script ends. Only flushed output is here: what is
+	 * still in the buffer itself stays there.
+	 *
+	 * @method take
+	 * @static
+	 * @return {string}
+	 */
+	static function take()
+	{
+		$out = self::$captured;
+		self::$captured = '';
+		return $out;
+	}
+
+	/**
+	 * The level of our buffer, 0 before it is opened.
+	 * @method level
+	 * @static
+	 * @return {integer}
+	 */
+	static function level()
+	{
+		return self::$level;
 	}
 
 	/**

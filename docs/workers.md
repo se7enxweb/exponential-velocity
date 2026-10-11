@@ -14,6 +14,7 @@ exactly what is reset.
 - [Forking from a zygote](#forking-from-a-zygote)
 - [How a request reaches a worker](#how-a-request-reaches-a-worker)
 - [When a worker is replaced](#when-a-worker-is-replaced)
+- [Streaming responses](#streaming-responses)
 - [Reload and stop](#reload-and-stop)
 - [Settings reference](#settings-reference)
 - [Watching the pool](#watching-the-pool)
@@ -250,15 +251,69 @@ A worker answers the request it has, and is then replaced by a fresh fork, when:
 Each replacement is logged with its reason.
 
 A worker that dies while serving is replaced as well. When it died before writing
-anything and the request was a `GET`, `HEAD` or `OPTIONS`, the request is tried
-once more on another worker; otherwise the client is answered `502`. An idle worker
+anything, within `retryWithin` seconds (default `10`) of being given the request,
+and the request was a `GET`, `HEAD` or `OPTIONS` that does not ask for an event
+stream, the request is tried once more on another worker; otherwise the client is
+answered `502` and the log says why it was not run again. A request that had run
+longer has done real work by then, and running it again would do it twice. A
+stream whose worker dies part-way is cut short (see
+[Streaming responses](#streaming-responses)) and never run again. An idle worker
 that exits is noticed within two seconds, removed and replaced. Every exited worker
 is reaped, so none is left behind as a zombie.
 
 A worker still on one request after `requestTimeout` seconds (default `30`, `0` for
 no limit) is stopped: the client gets `504`, the stop is logged with the request,
 and a fresh worker takes its place. The request is not run again elsewhere, where
-it would hang the same way.
+it would hang the same way. A streaming response is held to `streamTimeout`
+instead; see below.
+
+### Streaming responses
+
+A worker normally collects what a script prints and sends it in one piece when the
+script ends, with its `Content-Length`. A response that asks to stream is sent as it
+is written instead:
+
+- **Opting in.** `Content-Type: text/event-stream` (Server-Sent Events),
+  `X-Accel-Buffering: no`, or `Q_WebServer_State::setStreaming(true)` from the
+  script. A response that does none of these is answered whole, `flush()` or not.
+- **When output leaves.** On every `flush()` or `ob_flush()` that reaches the
+  worker's own buffer -- as under PHP-FPM, output inside a buffer the script
+  opened itself does not leave until that buffer is ended. A streaming script
+  ends its buffers first (`while (@ob_end_clean());`) and flushes after each
+  event. Status and headers go out with the first flush; a header set after that
+  has no effect.
+- **On the wire.** HTTP/1.1: `Transfer-Encoding: chunked` (HTTP/1.0: the body
+  until the connection closes), `Connection: close`. HTTP/2: DATA frames as the
+  pieces arrive, under the usual flow control, and `END_STREAM` at the end. Never
+  a `Content-Length`, never compressed by the server, never stored in the
+  response cache. `Cache-Control: no-cache` is added when the script set none,
+  and `X-Accel-Buffering: no` for a proxy in front.
+- **A client that leaves.** The server notices at once on HTTP/1.1 (the socket
+  closes) and within a second on HTTP/2 (`RST_STREAM` or a closed connection),
+  and tells the worker. With `ignore_user_abort` off, as by default, the script
+  ends at its next flush, exactly as under PHP-FPM; with it on, the script carries
+  on and `connection_aborted()` returns `1` (`connection_status()` returns
+  `CONNECTION_ABORTED`). Either way the worker then takes the next request. These
+  functions, and `flush()`, are provided by the compatibility layer, which is on
+  by default.
+- **How long.** A streaming response, and a request that asks for one
+  (`Accept: text/event-stream`) before its first byte, may run for
+  `streamTimeout` seconds (default `300`, `0` for no limit) rather than
+  `requestTimeout`. At the limit the stream is ended cleanly -- the last chunk,
+  or `END_STREAM` -- so an `EventSource` reconnects, and the worker is replaced
+  as for any request past its time. A stream whose worker dies part-way is cut
+  short instead (HTTP/1.1 closes without the last chunk, HTTP/2 resets the
+  stream), so the client can tell.
+- **How many.** Each open stream holds one worker. Requests for an event stream
+  may hold at most `maxStreams` workers at once, or, when that is `0`,
+  `streamShare` of `workers` (default a quarter, at least one). Past that an
+  event stream is answered `503` with `Retry-After: 5` -- which an `EventSource`
+  reports as an error, so a page can fall back to polling -- and the rest of the
+  pool stays free for pages. A response that starts streaming without having
+  asked in its `Accept` header still counts against the cap while it runs.
+- **Sessions.** A PHP session is locked for the whole request, so a stream that
+  keeps it open blocks every other request of the same browser. Call
+  `session_write_close()` before the first event.
 
 The control panel's Workers tab (API `POST /Q/api/workers/resize` with
 `{"workers": N}`) changes the pool's size while it runs: a fixed pool forks up to
@@ -382,6 +437,10 @@ Every setting, with its default. All are under `Q.webserver`.
 | `idleWorkerTimeout` | `60` | Seconds a worker beyond the spare count may stay idle before it is retired. |
 | `maxRequests` | `1000` | Requests a worker serves before it is replaced. `0` means no limit. |
 | `requestTimeout` | `30` | Seconds a request may run before the client gets `504` and the worker is replaced. `0` means no limit. |
+| `streamTimeout` | `300` | Seconds a streaming response (or a request for an event stream) may run before it is ended and its worker replaced. `0` means no limit. See [Streaming responses](#streaming-responses). |
+| `streamShare` | `0.25` | Share of `workers` that event streams may hold at once, at least one; `0` refuses every request for an event stream. |
+| `maxStreams` | `0` | Workers event streams may hold at once, instead of `streamShare`. `0` uses the share. |
+| `retryWithin` | `10` | Seconds after a request reached its worker within which a `GET`, `HEAD` or `OPTIONS` whose worker died without answering is run again once. |
 | `workerMemoryCeiling` | `256`, or ¾ of `memory_limit` if lower | Heap size in MB past which a worker is replaced. `0` turns it off. |
 | `forkPerRequest` | `false` | One request per worker, then a fresh fork. |
 | `zygote` | `true` | Fork workers started after the pool from a zygote, so they inherit no visitor's connection. `false` forks them from the server as before. See [Forking from a zygote](#forking-from-a-zygote). |

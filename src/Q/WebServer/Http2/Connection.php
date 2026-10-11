@@ -754,7 +754,13 @@ class Q_WebServer_Http2_Connection
 		// this the connection could only ever serve what it could produce
 		// synchronously, which is files and nothing else.
 		if ($response === null) {
-			$this->streams[$stream]['awaiting'] = true;
+			// Unless it was answered already, synchronously, by whoever took
+			// it (a refusal, say): then respond() has finished and forgotten
+			// the stream, and writing here would bring back a half-made entry
+			// that every later WINDOW_UPDATE for it trips over.
+			if (isset($this->streams[$stream])) {
+				$this->streams[$stream]['awaiting'] = true;
+			}
 			return true;
 		}
 
@@ -842,6 +848,52 @@ class Q_WebServer_Http2_Connection
 				? $headers['vary'] . ', Accept-Encoding' : 'Accept-Encoding';
 		}
 
+		$list = $this->headerList($status, $headers, $body, $response);
+
+		$block = $this->outbound->encode($list);
+
+		$first = substr($block, 0, $this->maxFrameSize);
+		$rest = substr($block, $this->maxFrameSize);
+		$endHeaders = $rest === '' ? $F::FLAG_END_HEADERS : 0;
+		$endStream = ($body === '' and $rest === '') ? $F::FLAG_END_STREAM : 0;
+
+		$this->write($F::build($F::HEADERS, $endHeaders | $endStream, $stream, $first));
+
+		while ($rest !== '') {
+			$chunk = substr($rest, 0, $this->maxFrameSize);
+			$rest = substr($rest, $this->maxFrameSize);
+			$flags = $rest === '' ? $F::FLAG_END_HEADERS : 0;
+			$this->write($F::build($F::CONTINUATION, $flags, $stream, $chunk));
+		}
+
+		if ($body === '') {
+			unset($this->streams[$stream]);
+			return;
+		}
+
+		if (!isset($this->streams[$stream])) {
+			// The stream was reset while the answer was being prepared.
+			return;
+		}
+
+		$this->streams[$stream]['pending'] = $body;
+		$this->flush($stream);
+	}
+
+	/**
+	 * The header fields of a response, for HPACK: status, Date, the
+	 * response's own fields without the ones HTTP/2 forbids, a length when
+	 * the body is known, and the cookies a worker carried separately.
+	 *
+	 * @method headerList
+	 * @param {integer} $status
+	 * @param {array} $headers
+	 * @param {string} $body '' for none, or a stream (no length is stated)
+	 * @param {array} $response for its cookies
+	 * @return {array} list of [name, value]
+	 */
+	protected function headerList($status, $headers, $body, $response)
+	{
 		$list = array(array(':status', (string) $status));
 
 		// RFC 9110 requires Date on every response from a server that has a
@@ -902,34 +954,123 @@ class Q_WebServer_Http2_Connection
 			}
 		}
 
-		$block = $this->outbound->encode($list);
+		return $list;
+	}
 
+	// ── Streaming responses ────────────────────────────────────────
+	//
+	// A response that is written while it is produced (Server-Sent Events):
+	// HEADERS without END_STREAM, then DATA as each piece arrives, then an
+	// empty DATA frame with END_STREAM. Flow control applies as for any body:
+	// what the windows do not allow waits in 'pending' -- bounded by
+	// limits['writeBuffer'], past which the stream is reset, since a peer that
+	// stops reading a stream that never ends would otherwise grow it for ever.
+	// Nothing is compressed: a compressor holds output back until it has
+	// enough to work with, which is the opposite of what a stream is for.
+
+	/**
+	 * Whether a stream is still open on this connection: the peer has not
+	 * reset it and the connection has not been closed.
+	 *
+	 * @method streamOpen
+	 * @param {integer} $stream
+	 * @return {boolean}
+	 */
+	function streamOpen($stream)
+	{
+		return !$this->closed and is_resource($this->socket) and isset($this->streams[$stream]);
+	}
+
+	/**
+	 * Send the head of a streaming response.
+	 *
+	 * @method streamHead
+	 * @param {integer} $stream
+	 * @param {array} $response status, headers, cookies
+	 * @return {boolean} false when the stream is gone
+	 */
+	function streamHead($stream, $response)
+	{
+		$F = 'Q_WebServer_Http2_Frame';
+		if (!$this->streamOpen($stream)) return false;
+		$status = isset($response['status']) ? (int) $response['status'] : 200;
+		$headers = (array) (isset($response['headers']) ? $response['headers'] : array());
+		$block = $this->outbound->encode($this->headerList($status, $headers, '', $response));
 		$first = substr($block, 0, $this->maxFrameSize);
 		$rest = substr($block, $this->maxFrameSize);
-		$endHeaders = $rest === '' ? $F::FLAG_END_HEADERS : 0;
-		$endStream = ($body === '' and $rest === '') ? $F::FLAG_END_STREAM : 0;
-
-		$this->write($F::build($F::HEADERS, $endHeaders | $endStream, $stream, $first));
-
+		if (!$this->write($F::build($F::HEADERS, $rest === '' ? $F::FLAG_END_HEADERS : 0, $stream, $first))) {
+			return false;
+		}
 		while ($rest !== '') {
 			$chunk = substr($rest, 0, $this->maxFrameSize);
 			$rest = substr($rest, $this->maxFrameSize);
-			$flags = $rest === '' ? $F::FLAG_END_HEADERS : 0;
-			$this->write($F::build($F::CONTINUATION, $flags, $stream, $chunk));
+			$this->write($F::build($F::CONTINUATION, $rest === '' ? $F::FLAG_END_HEADERS : 0, $stream, $chunk));
 		}
+		$this->streams[$stream]['awaiting'] = false;
+		$this->streams[$stream]['streaming'] = true;
+		$this->streams[$stream]['ended'] = false;
+		$this->streams[$stream]['pending'] = '';
+		$this->streams[$stream]['finished'] = false;
+		return true;
+	}
 
-		if ($body === '') {
-			unset($this->streams[$stream]);
-			return;
+	/**
+	 * Send a piece of a streaming response.
+	 *
+	 * @method streamData
+	 * @param {integer} $stream
+	 * @param {string} $data
+	 * @return {boolean} false when the stream is gone
+	 */
+	function streamData($stream, $data)
+	{
+		if (!$this->streamOpen($stream) or empty($this->streams[$stream]['streaming'])) return false;
+		if ($data === '') return true;
+		$this->streams[$stream]['pending'] .= $data;
+		if (strlen($this->streams[$stream]['pending']) > $this->limits['writeBuffer']) {
+			$this->streamReset($stream);
+			return false;
 		}
-
-		if (!isset($this->streams[$stream])) {
-			// The stream was reset while the answer was being prepared.
-			return;
-		}
-
-		$this->streams[$stream]['pending'] = $body;
 		$this->flush($stream);
+		return !$this->closed and is_resource($this->socket);
+	}
+
+	/**
+	 * End a streaming response: END_STREAM once what is pending has gone.
+	 *
+	 * @method streamEnd
+	 * @param {integer} $stream
+	 * @return {boolean}
+	 */
+	function streamEnd($stream)
+	{
+		$F = 'Q_WebServer_Http2_Frame';
+		if (!$this->streamOpen($stream)) return false;
+		$this->streams[$stream]['ended'] = true;
+		if ($this->streams[$stream]['pending'] === '') {
+			$this->write($F::build($F::DATA, $F::FLAG_END_STREAM, $stream, ''));
+			unset($this->streams[$stream]);
+			return true;
+		}
+		$this->flush($stream);   // ends it with the last piece
+		return true;
+	}
+
+	/**
+	 * Abandon a stream: RST_STREAM, so the peer knows it is incomplete.
+	 *
+	 * @method streamReset
+	 * @param {integer} $stream
+	 * @param {integer} $error
+	 */
+	function streamReset($stream, $error = 0x2)
+	{
+		$F = 'Q_WebServer_Http2_Frame';
+		if (!isset($this->streams[$stream])) return;
+		unset($this->streams[$stream]);
+		if (!$this->closed and is_resource($this->socket)) {
+			$this->write($F::build($F::RST_STREAM, 0, $stream, $F::uint32($error)));
+		}
 	}
 
 	/**
@@ -1000,7 +1141,11 @@ class Q_WebServer_Http2_Connection
 			$this->streams[$stream]['pending'] =
 				substr($this->streams[$stream]['pending'], strlen($chunk));
 
-			$last = $this->streams[$stream]['pending'] === '';
+			// A streaming response is not over when what it has sent so far
+			// is out; only once its end was asked for (streamEnd()).
+			$last = ($this->streams[$stream]['pending'] === ''
+				&& (empty($this->streams[$stream]['streaming'])
+					|| !empty($this->streams[$stream]['ended'])));
 
 			$this->write($F::build(
 				$F::DATA, $last ? $F::FLAG_END_STREAM : 0, $stream, $chunk
@@ -1048,6 +1193,9 @@ class Q_WebServer_Http2_Connection
 		// which is the one thing a browser will never show on its own.
 		if ($error !== 0) {
 			foreach (array_keys($this->streams) as $stream) {
+				// A stream already answering has sent its head; a second one
+				// would be a protocol error of our own.
+				if (!empty($this->streams[$stream]['streaming'])) continue;
 				$this->respond($stream, Q_WebServer_Http2_ErrorPage::response(
 					'the HTTP/2 connection failed with error code ' . $error, $stream
 				));
@@ -1176,6 +1324,10 @@ class Q_WebServer_Http2_Connection
 		// it may be waiting on us.
 		foreach ($this->streams as $each) {
 			if (!empty($each['pending'])) return false;
+			// Nor is one with an answer being written, or still being worked
+			// out: a stream that sends an event a minute, or a request that
+			// waits for its worker, is busy however quiet the socket is.
+			if (!empty($each['streaming']) or !empty($each['awaiting'])) return false;
 		}
 		return ($now - $this->lastActivity) > $this->limits['idleSeconds'];
 	}

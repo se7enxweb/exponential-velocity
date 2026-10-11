@@ -1211,6 +1211,31 @@ class Q_WebServer
 
 			self::$pool->dispatch($conn->socket, $parsed, $scriptPath,
 				function ($resp) use ($key, $stream, $parsed) {
+					// A streaming response arrives in parts: its head, its
+					// pieces, its end (or a reset), and the pool asks now and
+					// then whether the stream is still open. false means the
+					// client is gone. Never stored in the cache.
+					if (is_array($resp) and isset($resp['_stream'])) {
+						$conn = Q_WebServer::$http2[$key] ?? null;
+						if (!$conn) return false;
+						switch ($resp['_stream']) {
+						case 'head':
+							$h = is_array($resp['headers'] ?? null) ? $resp['headers'] : array();
+							Q_WebServer_ResponseHeaders::apply($h, $parsed['headers']['host'] ?? '', true, true);
+							$resp['headers'] = $h;
+							return $conn->streamHead($stream, $resp);
+						case 'data':
+							return $conn->streamData($stream, (string) ($resp['body'] ?? ''));
+						case 'end':
+							return $conn->streamEnd($stream);
+						case 'reset':
+							$conn->streamReset($stream);
+							return false;
+						case 'probe':
+							return $conn->streamOpen($stream);
+						}
+						return false;
+					}
 					if (!isset(Q_WebServer::$http2[$key])) return;
 					if (!is_array($resp)
 						or (($resp['status'] ?? 200) >= 500 and ($resp['body'] ?? '') === '')

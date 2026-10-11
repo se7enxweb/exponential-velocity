@@ -216,18 +216,52 @@ class Q_WebServer_Pool
 
 	/**
 	 * Whether a request whose worker died without answering may be run again
-	 * on another worker: only methods that change nothing, and only once.
+	 * on another worker: only methods that change nothing, only once, only a
+	 * short one, and never a stream.
+	 *
+	 * A GET is idempotent by definition, not by what an application does with
+	 * it. One that held its worker for twenty seconds -- a long poll, a
+	 * report, an event stream -- has done real work by the time its worker
+	 * dies, and running it again does it twice; a stream has usually sent
+	 * part of its answer already, which no second run can continue. Only a
+	 * request that was lost within Q.webserver.retryWithin seconds (default
+	 * 10) of being handed to its worker is retried, which is the case the
+	 * retry exists for: a worker that died, was killed or ran out of memory
+	 * a moment before the request reached it.
 	 *
 	 * @method mayRetry
 	 * @static
 	 * @param {array} $parsed
+	 * @param {float} $elapsed seconds since the worker was given the request
+	 * @param {boolean} $started whether any of the answer was sent
 	 * @return {boolean}
 	 */
-	static function mayRetry($parsed)
+	static function mayRetry($parsed, $elapsed = 0.0, $started = false)
 	{
+		if ($started or self::isStreamRequest($parsed)) return false;
+		$within = class_exists('Q_Config', false)
+			? (float) Q_Config::get('Q', 'webserver', 'retryWithin', 10) : 10.0;
+		if ($within >= 0 and $elapsed > $within) return false;
 		$method = strtoupper((string) ($parsed['method'] ?? ''));
 		return in_array($method, array('GET', 'HEAD', 'OPTIONS'), true)
 			and (int) ($parsed['poolRetries'] ?? 0) < 1;
+	}
+
+	/**
+	 * Whether a request asks for an event stream (Accept: text/event-stream,
+	 * which EventSource always sends). Such a request is held to
+	 * Q.webserver.streamTimeout rather than requestTimeout from the start,
+	 * counts against the stream cap, and is never retried.
+	 *
+	 * @method isStreamRequest
+	 * @static
+	 * @param {array} $parsed
+	 * @return {boolean}
+	 */
+	static function isStreamRequest($parsed)
+	{
+		$accept = (string) ($parsed['headers']['accept'] ?? '');
+		return $accept !== '' and stripos($accept, 'text/event-stream') !== false;
 	}
 
 	/**
@@ -240,6 +274,7 @@ class Q_WebServer_Pool
 		if (isset($this->watchers[$index])) {
 			Q_Evented::cancel($this->watchers[$index]);
 		}
+		$this->forgetStream($index);
 		unset($this->workers[$index], $this->workerClients[$index],
 			$this->workerBuffers[$index], $this->workerRequestHeaders[$index],
 			$this->workerRequests[$index], $this->workerResponders[$index],
@@ -462,6 +497,12 @@ class Q_WebServer_Pool
 		$this->maxRequests = (int) Q_Config::get(
 			'Q', 'webserver', 'maxRequests', 1000
 		);
+		// Streaming responses: how long one may run, and how many workers
+		// streams may hold at once. See superviseStreams() and dispatch().
+		$this->streamTimeout = max(0, (int) Q_Config::get('Q', 'webserver', 'streamTimeout', 300));
+		$this->streamShare = min(1.0, max(0.0,
+			(float) Q_Config::get('Q', 'webserver', 'streamShare', 0.25)));
+		$this->maxStreams = max(0, (int) Q_Config::get('Q', 'webserver', 'maxStreams', 0));
 
 		// Compat on by default unless explicitly disabled, in either mode.
 		// It shims the lifecycle functions for shared-nothing safety, which
@@ -614,6 +655,11 @@ class Q_WebServer_Pool
 		Q_Evented::repeat(2.0, function () use ($pool) {
 			$pool->reapPending();
 			$pool->sweepDeadIdle();
+		});
+		// Streams: a client that left, and streams past streamTimeout. Every
+		// second, so a worker learns of a departed client within about one.
+		Q_Evented::repeat(1.0, function () use ($pool) {
+			$pool->superviseStreams();
 		});
 		if ($this->spareWorkers > 0) {
 			Q_Evented::repeat(min(10.0, max(1.0, $this->idleTimeout / 4)), function () use ($pool) {
@@ -1043,6 +1089,12 @@ class Q_WebServer_Pool
 			$json = self::readExact($socket, $len);
 			if ($json === false) break;
 			$req = json_decode($json, true);
+			if (is_array($req) and isset($req['_control'])) {
+				// A word from the server about a request that has already
+				// ended here -- the client of a stream left just as it
+				// finished. Nothing to answer.
+				continue;
+			}
 			if (!$req) {
 				self::writeMsg($socket, 500, 'Bad message', array());
 				if (!$octane) break;
@@ -1062,8 +1114,11 @@ class Q_WebServer_Pool
 			// the dashboard's live request list. Without the reset (PHP < 8.2)
 			// the peak would span the whole process, so nothing is reported.
 			$canPeak = function_exists('memory_reset_peak_usage');
+			// The socket, for a response that streams (onCaptureFlush()).
+			self::$requestSocket = $socket;
 			if ($canPeak) memory_reset_peak_usage();
 			$resp = self::executeScript($req);
+			self::$requestSocket = null;
 			self::writeMsg($socket, $resp['status'], $resp['body'],
 				$resp['headers'], $resp['cookies'] ?? array(),
 				$resp['recycle'] ?? '', $canPeak ? memory_get_peak_usage() : 0);
@@ -1395,6 +1450,13 @@ class Q_WebServer_Pool
 		// One capture buffer for the life of the worker, reused per request --
 		// see Q_WebServer_Capture for why it is not opened afresh each time.
 		Q_WebServer_Capture::begin();
+		// A response may stream: on each flush, once it has asked to (see
+		// onCaptureFlush()), what it printed goes to the server at once.
+		self::$inRequest = true;
+		self::$streamStarted = false;
+		self::$aborted = false;
+		self::$ignoreAbort = (int) ini_get('ignore_user_abort');
+		Q_WebServer_Capture::$onFlush = array(__CLASS__, 'onCaptureFlush');
 		$status = 200;
 		$headers = array();
 		// mod_php and fpm run a script with its own directory as the working
@@ -1410,6 +1472,9 @@ class Q_WebServer_Pool
 			@chdir($scriptDir);
 		}
 
+		// The script runs in this function's scope, so whatever it names $e is
+		// in scope here too; the failure is kept under a name of our own.
+		$__qPoolFailure = null;
 		try {
 			include($req['scriptFilename']);
 			// Collect headers from native header() (works in fpm, no-op in CLI)
@@ -1483,6 +1548,15 @@ class Q_WebServer_Pool
 				fwrite(STDERR, sprintf("  worker %d: uncaught %s at %s:%d\n",
 					getmypid(), get_class($e), $e->getFile(), $e->getLine()));
 			}
+			$__qPoolFailure = $e;
+		}
+		if ($__qPoolFailure !== null and self::$streamStarted) {
+			// The status line and part of the body are already with the
+			// client, so an error page can neither replace them nor follow
+			// them: the stream just ends here. The log has the reason.
+			Q_WebServer_Capture::discard();
+		} elseif ($__qPoolFailure !== null) {
+			$e = $__qPoolFailure;
 			// PHP hands an uncaught exception to the handler the application
 			// registered with set_exception_handler(), and so does this. The
 			// worker catches it first -- it must, to keep serving -- and used
@@ -1537,8 +1611,18 @@ class Q_WebServer_Pool
 			@chdir($prevCwd);
 		}
 
-		// Everything the script printed, including buffers it left open.
+		// Everything the script printed, including buffers it left open. The
+		// hook goes first: a response that has not started streaming by now is
+		// answered whole, with its length, even if it asked to stream; one that
+		// has gets the rest in its last frame.
+		Q_WebServer_Capture::$onFlush = null;
 		$body = Q_WebServer_Capture::end();
+		$streamed = self::$streamStarted;
+		self::$responseStreamed = $streamed;   // for writeMsg()
+		if ($streamed and self::$aborted) $body = '';
+		self::$inRequest = false;
+		self::$streamStarted = false;
+		self::$aborted = false;
 
 		// Health, checked on every request, so that nothing a script or the
 		// server itself holds on to can grow without bound. A worker whose
@@ -1571,7 +1655,226 @@ class Q_WebServer_Pool
 		and method_exists('Q_WebServer_State', 'cookieHeaders')) {
 			$cookies = (array) Q_WebServer_State::cookieHeaders();
 		}
-		return compact('status', 'body', 'headers', 'cookies', 'recycle');
+		return compact('status', 'body', 'headers', 'cookies', 'recycle', 'streamed');
+	}
+
+	// ── Streaming responses, worker side ─────────────────────────────
+	//
+	// A pooled worker captures what a script prints and sends it to the
+	// server in one message when the script ends. A response that streams --
+	// Server-Sent Events above all -- cannot wait for that: it is many small
+	// pieces over seconds or minutes, and the client needs each as it is
+	// written. So a response that asks to stream (Content-Type
+	// text/event-stream, X-Accel-Buffering: no, or
+	// Q_WebServer_State::setStreaming(true)) sends its status and headers on
+	// its first flush, and then everything it prints on each flush, as frames
+	// of their own: {"_stream":"head"}, {"_stream":"data"}, and finally the
+	// usual response message marked {"_stream":"end"}. The server writes them
+	// to the client as they arrive -- chunked over HTTP/1.1, DATA frames over
+	// HTTP/2 -- with no Content-Length and nothing stored in the cache.
+	//
+	// The server tells the worker when the client has gone with a control
+	// frame ({"_control":"abort"}) on the same socket. The worker looks for it
+	// at every flush and whenever the script asks connection_aborted(); with
+	// ignore_user_abort off, as under fpm, the next flush ends the request.
+
+	/** The socket to the server while a request runs; null between requests. */
+	protected static $requestSocket = null;
+
+	/** Whether a request is running in this worker. */
+	protected static $inRequest = false;
+
+	/** Whether this request's status and headers have gone out. */
+	protected static $streamStarted = false;
+
+	/** Whether the response writeMsg() sends next ends a stream. */
+	protected static $responseStreamed = false;
+
+	/** Whether the server said this request's client has gone. */
+	protected static $aborted = false;
+
+	/** ignore_user_abort() for this request. */
+	protected static $ignoreAbort = 0;
+
+	/**
+	 * Whether a request is running in this process as a pooled worker.
+	 * @method inRequest
+	 * @static
+	 * @return {boolean}
+	 */
+	static function inRequest()
+	{
+		return self::$inRequest;
+	}
+
+	/**
+	 * Called by the capture buffer after every flush during a request: once
+	 * the response streams, send what was flushed.
+	 *
+	 * @method onCaptureFlush
+	 * @static
+	 */
+	static function onCaptureFlush()
+	{
+		if (!self::$inRequest or !self::$requestSocket) return;
+		if (self::$aborted) {
+			Q_WebServer_Capture::take();   // nobody to send it to
+			return;
+		}
+		if (!self::$streamStarted) {
+			if (!class_exists('Q_WebServer_State', false)
+				or !Q_WebServer_State::isStreaming()) return;   // answered whole, at the end
+			self::$streamStarted = true;
+			$head = self::responseHead();
+			$head['_stream'] = 'head';
+			if (!self::writeFrame(self::$requestSocket, $head)) {
+				self::$aborted = true;
+				return;
+			}
+		}
+		$data = Q_WebServer_Capture::take();
+		if ($data !== '' and !self::writeFrame(self::$requestSocket,
+			array('_stream' => 'data', 'body' => $data))) {
+			self::$aborted = true;
+			return;
+		}
+		self::pollControl();
+	}
+
+	/**
+	 * flush() in a pooled request: push what the script printed to the
+	 * client if the response streams, then end the request if the client has
+	 * gone and the script does not ignore that.
+	 *
+	 * Only output that is in no buffer of the script's own leaves, as under
+	 * fpm: flush() never empties an application's ob_start() buffer.
+	 *
+	 * @method streamFlush
+	 * @static
+	 * @throws {Q_WebServer_ExitSignal} when the client is gone and
+	 *   ignore_user_abort is off
+	 */
+	static function streamFlush()
+	{
+		if (!self::$inRequest) return;
+		$level = Q_WebServer_Capture::level();
+		if ($level > 0 and ob_get_level() === $level) {
+			@ob_flush();
+		}
+		if (self::$streamStarted) self::pollControl();
+		if (self::$aborted and !self::$ignoreAbort) {
+			throw new Q_WebServer_ExitSignal(0);
+		}
+	}
+
+	/**
+	 * Whether the client of this request has gone, as connection_aborted().
+	 * @method clientAborted
+	 * @static
+	 * @return {boolean}
+	 */
+	static function clientAborted()
+	{
+		if (self::$streamStarted) self::pollControl();
+		return self::$aborted;
+	}
+
+	/**
+	 * ignore_user_abort() for this request.
+	 * @method ignoreUserAbort
+	 * @static
+	 * @param {boolean|null} $enable
+	 * @return {integer} the previous setting
+	 */
+	static function ignoreUserAbort($enable = null)
+	{
+		$was = self::$ignoreAbort;
+		if ($enable !== null) self::$ignoreAbort = $enable ? 1 : 0;
+		return $was;
+	}
+
+	/**
+	 * Read whatever the server has sent about the running request, without
+	 * waiting.
+	 */
+	protected static function pollControl()
+	{
+		$sock = self::$requestSocket;
+		if (!$sock or !is_resource($sock)) return;
+		for ($guard = 0; $guard < 8; ++$guard) {
+			$r = array($sock);
+			$w = $x = null;
+			if (@stream_select($r, $w, $x, 0, 0) < 1) return;
+			$hdr = self::readExact($sock, 4);
+			if ($hdr === false) {
+				// The server itself is gone.
+				self::$aborted = true;
+				return;
+			}
+			$len = unpack('N', $hdr)[1];
+			$json = $len > 0 ? self::readExact($sock, $len) : '';
+			if ($json === false) {
+				self::$aborted = true;
+				return;
+			}
+			$msg = json_decode((string) $json, true);
+			if (is_array($msg) and ($msg['_control'] ?? '') === 'abort') {
+				self::$aborted = true;
+			}
+		}
+	}
+
+	/** Status, headers and cookies of the running request, as set so far. */
+	protected static function responseHead()
+	{
+		$status = 200;
+		$headers = array();
+		foreach (headers_list() as $h) {
+			if (strpos($h, ':') !== false) {
+				list($k, $v) = explode(':', $h, 2);
+				$headers[trim($k)] = trim($v);
+			}
+		}
+		if (class_exists('Q_WebServer_State', false)) {
+			foreach (\Q_WebServer_State::getHeaders() as $k => $v) $headers[$k] = $v;
+			$stateCode = \Q_WebServer_State::getStatusCode();
+			if ($stateCode and $stateCode !== 200) $status = $stateCode;
+		}
+		$code = http_response_code();
+		if ($code and $code !== 200 and $status === 200) $status = $code;
+		$cookies = array();
+		if (class_exists('Q_WebServer_State', false)
+		and method_exists('Q_WebServer_State', 'cookieHeaders')) {
+			$cookies = (array) Q_WebServer_State::cookieHeaders();
+		}
+		return array('status' => $status, 'headers' => $headers, 'cookies' => $cookies);
+	}
+
+	/**
+	 * Write one length-prefixed JSON message, completely, on a blocking
+	 * socket. A body that is not valid UTF-8 travels base64-encoded, as in
+	 * writeMsg().
+	 *
+	 * @return {boolean} false when the other end is gone
+	 */
+	protected static function writeFrame($sock, $msg)
+	{
+		$j = json_encode($msg);
+		if ($j === false and isset($msg['body'])) {
+			$msg['body'] = base64_encode((string) $msg['body']);
+			$msg['b64'] = true;
+			$j = json_encode($msg);
+		}
+		if ($j === false) return false;
+		$packet = pack('N', strlen($j)) . $j;
+		$length = strlen($packet);
+		$written = 0;
+		while ($written < $length) {
+			$n = @fwrite($sock, substr($packet, $written));
+			if ($n === false or $n === 0) return false;
+			$written += $n;
+		}
+		return true;
 	}
 
 	/** Why the application asked for this worker to be replaced, or ''. */
@@ -1677,6 +1980,13 @@ class Q_WebServer_Pool
 	 */
 	function dispatch($client, $parsed, $scriptPath, $responder = null)
 	{
+		// A stream holds its worker for as long as it runs, so streams may
+		// hold only so many: past the cap an event stream is told to come back
+		// later, and the rest of the pool stays free for pages.
+		if (self::isStreamRequest($parsed) and $this->streamCount() >= $this->streamCap()) {
+			$this->refuseStream($client, $parsed, $responder);
+			return;
+		}
 		$idle = $this->findIdle();
 		if ($idle === null and $this->spareWorkers > 0
 			and count($this->workers) < $this->targetSize) {
@@ -1906,22 +2216,34 @@ class Q_WebServer_Pool
 			return;
 		}
 
-		$this->workerBuffers[$index] .= $chunk;
-		$buf = $this->workerBuffers[$index];
-		if (strlen($buf) < 4) return;
+		$this->workerBuffers[$index] = ($this->workerBuffers[$index] ?? '') . $chunk;
 
-		$len = unpack('N', substr($buf, 0, 4))[1];
-		if (strlen($buf) < 4 + $len) return;
-
-		// Got complete response
-		$json = substr($buf, 4, $len);
-		$response = json_decode($json, true);
-
-		// Binary bodies travel base64-encoded; see writeMsg().
-		if ($response and !empty($response['b64'])) {
-			$response['body'] = base64_decode($response['body']);
-			unset($response['b64']);
+		// A streaming response sends several messages -- its head, its
+		// pieces, then the usual last one -- and one read may carry several.
+		while (true) {
+			$buf = $this->workerBuffers[$index] ?? '';
+			if (strlen($buf) < 4) return;
+			$len = unpack('N', substr($buf, 0, 4))[1];
+			if (strlen($buf) < 4 + $len) return;
+			$json = substr($buf, 4, $len);
+			$response = json_decode($json, true);
+			// Binary bodies travel base64-encoded; see writeMsg().
+			if ($response and !empty($response['b64'])) {
+				$response['body'] = base64_decode($response['body']);
+				unset($response['b64']);
+			}
+			$kind = is_array($response) ? (string) ($response['_stream'] ?? '') : '';
+			if ($kind !== 'head' and $kind !== 'data') break;   // the last message
+			$this->workerBuffers[$index] = (string) substr($buf, 4 + $len);
+			if ($kind === 'head') {
+				$this->streamStart($index, $response);
+			} else {
+				$this->streamChunk($index, (string) ($response['body'] ?? ''));
+			}
 		}
+		$this->workerBuffers[$index] = (string) substr($buf, 4 + $len);
+		$streamEnd = isset($this->workerStreams[$index]);
+		if (is_array($response)) unset($response['_stream']);
 
 		// Check for cache messages piggybacked on the response
 		if ($response && !empty($response['_cacheMessages'])) {
@@ -1947,7 +2269,13 @@ class Q_WebServer_Pool
 
 		$client = $this->workerClients[$index] ?? null;
 		$reqHeaders = $this->workerRequestHeaders[$index] ?? [];
-		if ($response && $client && is_resource($client)) {
+		if ($streamEnd) {
+			// A stream: what is left of the body, then its end. Its head went
+			// out long ago, so nothing else in this message applies.
+			$this->streamFinish($index, is_array($response) ? $response : array(), $mem);
+			unset($this->workerClients[$index]);
+			$this->workerResponders[$index] = null;
+		} elseif ($response && $client && is_resource($client)) {
 			$reqHeaders['_keepAlive'] = false;
 			$this->workerRequestHeaders[$index] = $reqHeaders;
 			$this->sendHttp($client, $response, $index, $mem);
@@ -2024,13 +2352,26 @@ class Q_WebServer_Pool
 
 		// EOF with no response. The worker died holding this request without
 		// writing a byte of the answer.
-		if ($isEof && isset($this->workerClients[$index])
+		if ($isEof && isset($this->workerStreams[$index])) {
+			// A stream whose worker died part-way. Its head and some of its
+			// body are with the client, so there is no 502 to give and nothing
+			// that may be run again: the stream is cut short, which a client
+			// can tell from a clean end (HTTP/2 RST_STREAM; HTTP/1.1 closes
+			// without the last chunk).
+			fwrite(STDERR, sprintf("  worker %d died during a stream on %s %s; stream cut short\n",
+				(int) ($this->workers[$index]['pid'] ?? 0),
+				$this->workerRequests[$index]['method'] ?? '?', $this->workerRequests[$index]['uri'] ?? '?'));
+			$this->streamCut($index);
+			unset($this->workerClients[$index]);
+			$this->workerResponders[$index] = null;
+		} elseif ($isEof && isset($this->workerClients[$index])
 			&& empty($this->workerBuffers[$index])
 		) {
 			$c = $this->workerClients[$index];
 			$parsed = $this->workerRequests[$index] ?? null;
 			$responder = $this->workerResponders[$index] ?? null;
-			if ($parsed !== null and self::mayRetry($parsed)) {
+			$elapsed = microtime(true) - ($this->workerStarted[$index] ?? microtime(true));
+			if ($parsed !== null and self::mayRetry($parsed, $elapsed)) {
 				// A request that changes nothing can be run again, and the
 				// visitor never learns a worker was lost: the usual cause is a
 				// worker that was killed, ran out of memory or died idle a
@@ -2042,15 +2383,25 @@ class Q_WebServer_Pool
 					(int) ($this->workers[$index]['pid'] ?? 0), $parsed['method'] ?? '?', $parsed['uri'] ?? '?'));
 				array_unshift($this->pending, array($c, $parsed,
 					$this->workerScripts[$index] ?? '', $responder));
-			} elseif ($responder) {
-				// HTTP/2: the answer belongs on its stream, never as HTTP/1.1
-				// bytes written into the shared connection.
-				call_user_func($responder, array('status' => 502,
-					'headers' => array('Content-Type' => 'text/html; charset=utf-8'),
-					'body' => Q_WebServer::renderErrorPage(502)));
-			} elseif (is_resource($c)) {
-				Q_WebServer::sendResponse($c, 502, Q_WebServer::renderErrorPage(502), 'text/html; charset=utf-8');
-				if (is_resource($c)) @fclose($c);
+			} else {
+				if ($parsed !== null) {
+					fwrite(STDERR, sprintf("  worker %d died before answering %s %s after %.1fs; not run again (%s)\n",
+						(int) ($this->workers[$index]['pid'] ?? 0), $parsed['method'] ?? '?', $parsed['uri'] ?? '?',
+						$elapsed, self::isStreamRequest($parsed) ? 'an event stream'
+							: (in_array(strtoupper((string) ($parsed['method'] ?? '')), array('GET', 'HEAD', 'OPTIONS'), true)
+								? ((int) ($parsed['poolRetries'] ?? 0) > 0 ? 'already retried' : 'it ran too long')
+								: 'not idempotent')));
+				}
+				if ($responder) {
+					// HTTP/2: the answer belongs on its stream, never as HTTP/1.1
+					// bytes written into the shared connection.
+					call_user_func($responder, array('status' => 502,
+						'headers' => array('Content-Type' => 'text/html; charset=utf-8'),
+						'body' => Q_WebServer::renderErrorPage(502)));
+				} elseif (is_resource($c)) {
+					Q_WebServer::sendResponse($c, 502, Q_WebServer::renderErrorPage(502), 'text/html; charset=utf-8');
+					if (is_resource($c)) @fclose($c);
+				}
 			}
 		} elseif (isset($this->workerClients[$index])) {
 			$c = $this->workerClients[$index];
@@ -2171,6 +2522,468 @@ class Q_WebServer_Pool
 		// route() could only ever miss -- nothing was ever stored.
 		if (isset($this->workerRequests[$index])) {
 			Q_WebServer_Cache::put($this->workerRequests[$index], $resp);
+		}
+	}
+
+	// ── Streaming responses, server side ─────────────────────────────
+
+	/**
+	 * Streams in progress, by worker index: when the head went out, how many
+	 * body bytes followed, the status, how the client is reached and whether
+	 * it has gone. See onCaptureFlush() for the worker's side.
+	 * @property $workerStreams
+	 */
+	protected $workerStreams = array();
+
+	/** Q.webserver.streamTimeout: seconds a stream may run (0 = no limit). */
+	public $streamTimeout = 300;
+
+	/** Q.webserver.streamShare: the share of Workers streams may hold. */
+	public $streamShare = 0.25;
+
+	/** Q.webserver.maxStreams: an absolute cap instead of the share (0 = use the share). */
+	public $maxStreams = 0;
+
+	/**
+	 * How many workers event streams may hold at once.
+	 *
+	 * A stream holds a worker for its whole life. Without a cap a burst of
+	 * them -- every editor's browser tab, say -- takes the whole pool and the
+	 * site stops answering pages. The rest is kept for everything else.
+	 *
+	 * @method streamCap
+	 * @return {integer}
+	 */
+	function streamCap()
+	{
+		if ($this->maxStreams > 0) return $this->maxStreams;
+		if ($this->streamShare <= 0) return 0;
+		return max(1, (int) floor($this->targetSize * $this->streamShare));
+	}
+
+	/**
+	 * Workers holding a stream now, or a request for one that has not
+	 * started answering yet.
+	 *
+	 * @method streamCount
+	 * @return {integer}
+	 */
+	function streamCount()
+	{
+		$n = 0;
+		foreach ($this->workers as $index => $w) {
+			if (empty($w['busy']) or !empty($w['dying'])) continue;
+			if (isset($this->workerStreams[$index])
+				or self::isStreamRequest($this->workerRequests[$index] ?? array())) ++$n;
+		}
+		return $n;
+	}
+
+	/**
+	 * Answer an event stream that is over the cap: 503 with Retry-After, which
+	 * an EventSource reports as an error and a client can fall back from.
+	 */
+	protected function refuseStream($client, $parsed, $responder)
+	{
+		$cap = $this->streamCap();
+		fwrite(STDERR, sprintf("  stream refused on %s %s: %d of %d stream workers busy (streamShare/maxStreams)\n",
+			$parsed['method'] ?? '?', $parsed['uri'] ?? '?', $this->streamCount(), $cap));
+		$body = "Too many streams are open; try again shortly.\n";
+		$headers = array('Content-Type' => 'text/plain; charset=utf-8',
+			'Retry-After' => '5', 'Cache-Control' => 'no-store');
+		if ($responder) {
+			call_user_func($responder, array('status' => 503, 'headers' => $headers, 'body' => $body));
+			// HTTP/2 leaves recording to whoever answers; HTTP/1.1 records
+			// what sendResponse() sent on its own.
+			Q_WebServer::recordCompleted($parsed, 503, strlen($body), 0.0, true);
+		} elseif (is_resource($client)) {
+			Q_WebServer::sendResponse($client, 503, $body, $headers['Content-Type'],
+				array('Retry-After' => '5', 'Cache-Control' => 'no-store', 'Connection' => 'close'));
+			if (is_resource($client)) @fclose($client);
+		}
+	}
+
+	/**
+	 * A worker sent the head of a streaming response: send it to the client.
+	 *
+	 * @method streamStart
+	 * @param {integer} $index
+	 * @param {array} $head status, headers, cookies
+	 */
+	protected function streamStart($index, $head)
+	{
+		$client = $this->workerClients[$index] ?? null;
+		$responder = $this->workerResponders[$index] ?? null;
+		$parsed = $this->workerRequests[$index] ?? array();
+		$status = (int) ($head['status'] ?? 200);
+		$isHead = strtoupper((string) ($parsed['method'] ?? '')) === 'HEAD';
+		$this->workerStreams[$index] = array(
+			'since' => microtime(true), 'bytes' => 0, 'status' => $status,
+			'client' => $client, 'h2' => (bool) $responder, 'aborted' => false,
+			'chunked' => false, 'head' => $isHead, 'watcher' => null, 'recorded' => false,
+		);
+		if ($client === null and !$responder) {
+			// The client went before the answer began (a timeout, a refusal).
+			$this->abortStream($index, 'client gone before the stream began');
+			return;
+		}
+
+		$headers = is_array($head['headers'] ?? null) ? $head['headers'] : array();
+		// What a stream must not carry: a length (there is none), framing or
+		// connection fields of its own. Content-Encoding is left alone -- a
+		// script that compresses its own pieces knows what it does; this
+		// server never compresses a stream, since a compressor holds output
+		// back until it has enough to work with.
+		foreach (array_keys($headers) as $k) {
+			if (in_array(strtolower($k), array('content-length', 'transfer-encoding',
+				'connection', 'keep-alive'), true)) unset($headers[$k]);
+		}
+		if (!Q_WebServer_Headers::hasHeader($headers, 'Cache-Control')) {
+			$headers['Cache-Control'] = 'no-cache';
+		}
+		// For a proxy in front of this server (nginx honours it): pass each
+		// piece on as it comes.
+		if (!Q_WebServer_Headers::hasHeader($headers, 'X-Accel-Buffering')) {
+			$headers['X-Accel-Buffering'] = 'no';
+		}
+
+		if ($responder) {
+			$ok = call_user_func($responder, array('_stream' => 'head', 'status' => $status,
+				'headers' => $headers, 'cookies' => (array) ($head['cookies'] ?? array())));
+			if ($ok === false) $this->abortStream($index, 'stream reset by the client');
+			return;
+		}
+
+		if (!is_resource($client)) {
+			$this->abortStream($index, 'client gone before the stream began');
+			return;
+		}
+		$meta = @stream_get_meta_data($client);
+		$reqHeaders = $this->workerRequestHeaders[$index] ?? array();
+		Q_WebServer_ResponseHeaders::apply($headers, $reqHeaders['host'] ?? '', !empty($meta['crypto']), true);
+		$headers = Q_WebServer_Headers::stripInternal($headers);
+		if (!Q_WebServer_Headers::hasHeader($headers, 'X-Accel-Buffering')) {
+			$headers['X-Accel-Buffering'] = 'no';
+		}
+		if (!Q_WebServer_Headers::hasHeader($headers, 'Content-Type') and $status != 204 and $status != 304) {
+			$mime = (string) ini_get('default_mimetype');
+			$charset = (string) ini_get('default_charset');
+			$headers['Content-Type'] = ($mime === '' ? 'text/html' : $mime)
+				. ($charset === '' ? '' : '; charset=' . $charset);
+		}
+		$cookies = array();
+		foreach ($headers as $k => $v) {
+			if (strcasecmp($k, 'Set-Cookie') === 0) { $cookies[] = $v; unset($headers[$k]); }
+		}
+		$cookies = array_merge($cookies, (array) ($head['cookies'] ?? array()));
+		// HTTP/1.0 has no chunked encoding: the end of the connection is the
+		// end of the body, which a stream of this kind ends with anyway.
+		$chunked = (!$isHead && ($parsed['httpVersion'] ?? '1.1') !== '1.0');
+		$this->workerStreams[$index]['chunked'] = $chunked;
+		if ($chunked) $headers['Transfer-Encoding'] = 'chunked';
+		$headers['Connection'] = 'close';
+		$out = 'HTTP/1.1 ' . $status . ' ' . Q_WebServer::statusText($status) . "\r\n"
+			. Q_WebServer::headerLines($headers);
+		foreach ($cookies as $ch) {
+			if ($ch === '' or preg_match('/[\r\n]/', (string) $ch)) continue;
+			$out .= 'Set-Cookie: ' . $ch . "\r\n";
+		}
+		stream_set_blocking($client, false);
+		if (!$this->h1Write($client, $out . "\r\n")) {
+			$this->abortStream($index, 'client gone');
+			return;
+		}
+		// Hear about the client leaving: its end of the socket becomes
+		// readable at EOF. Nothing else is expected from it now.
+		$pool = $this;
+		$this->workerStreams[$index]['watcher'] = Q_Evented::onReadable($client,
+			function ($c) use ($pool, $index) { $pool->onStreamClient($index, $c); });
+	}
+
+	/**
+	 * Readable on the client socket of an HTTP/1.1 stream: it has gone, or it
+	 * sent something, which is read and dropped.
+	 *
+	 * @method onStreamClient
+	 * @param {integer} $index
+	 * @param {resource} $c
+	 */
+	function onStreamClient($index, $c)
+	{
+		$s = $this->workerStreams[$index] ?? null;
+		if (!$s or $s['client'] !== $c) return;
+		$data = @fread($c, 8192);
+		if (($data === false or $data === '') and (!is_resource($c) or feof($c))) {
+			$this->abortStream($index, 'client closed the connection');
+		}
+	}
+
+	/**
+	 * A piece of a streaming response from its worker: send it on.
+	 *
+	 * @method streamChunk
+	 * @param {integer} $index
+	 * @param {string} $data
+	 */
+	protected function streamChunk($index, $data)
+	{
+		$s = $this->workerStreams[$index] ?? null;
+		if (!$s or $s['aborted'] or $data === '') return;
+		$this->workerStreams[$index]['bytes'] += strlen($data);
+		if ($s['h2']) {
+			$responder = $this->workerResponders[$index] ?? null;
+			$ok = $responder ? call_user_func($responder, array('_stream' => 'data', 'body' => $data)) : false;
+			if ($ok === false) $this->abortStream($index, 'stream reset by the client');
+			return;
+		}
+		if ($s['head']) return;
+		$client = $s['client'];
+		$frame = $s['chunked'] ? dechex(strlen($data)) . "\r\n" . $data . "\r\n" : $data;
+		if (!is_resource($client) or !$this->h1Write($client, $frame)) {
+			$this->abortStream($index, 'client gone');
+		}
+	}
+
+	/**
+	 * The last message of a streaming response: the rest of its body, then
+	 * its end.
+	 *
+	 * @method streamFinish
+	 * @param {integer} $index
+	 * @param {array} $final
+	 * @param {integer} $mem
+	 */
+	protected function streamFinish($index, $final, $mem = 0)
+	{
+		if (!isset($this->workerStreams[$index])) return;
+		$this->streamChunk($index, (string) ($final['body'] ?? ''));
+		$this->streamEndToClient($index, $mem);
+		$this->forgetStream($index);
+	}
+
+	/**
+	 * End a stream cleanly: the last chunk over HTTP/1.1, END_STREAM over
+	 * HTTP/2. The stream itself stays recorded until forgetStream().
+	 *
+	 * @method streamEndToClient
+	 * @param {integer} $index
+	 * @param {integer} $mem
+	 */
+	protected function streamEndToClient($index, $mem = 0)
+	{
+		$s = $this->workerStreams[$index] ?? null;
+		if (!$s) return;
+		if (!$s['aborted']) {
+			if ($s['h2']) {
+				$responder = $this->workerResponders[$index] ?? null;
+				if ($responder) call_user_func($responder, array('_stream' => 'end'));
+			} elseif (is_resource($s['client'])) {
+				$this->h1Write($s['client'], $s['chunked'] ? "0\r\n\r\n" : '', true);
+			}
+		}
+		$this->streamRecord($index, $mem);
+	}
+
+	/**
+	 * End a stream as failed: RST_STREAM over HTTP/2, a close without the
+	 * last chunk over HTTP/1.1, so the client knows it is incomplete.
+	 *
+	 * @method streamCut
+	 * @param {integer} $index
+	 */
+	protected function streamCut($index)
+	{
+		$s = $this->workerStreams[$index] ?? null;
+		if (!$s) return;
+		if (!$s['aborted']) {
+			if ($s['h2']) {
+				$responder = $this->workerResponders[$index] ?? null;
+				if ($responder) call_user_func($responder, array('_stream' => 'reset'));
+			} elseif (is_resource($s['client'])) {
+				$this->h1Close($s['client']);
+			}
+		}
+		$this->streamRecord($index);
+		$this->forgetStream($index);
+	}
+
+	/**
+	 * The client of a stream has gone. Stop sending, release the client and
+	 * tell the worker, which ends the request at its next flush (or carries
+	 * on, if the script asked to with ignore_user_abort()).
+	 *
+	 * @method abortStream
+	 * @param {integer} $index
+	 * @param {string} $why
+	 */
+	function abortStream($index, $why)
+	{
+		$s = $this->workerStreams[$index] ?? null;
+		if (!$s or $s['aborted']) return;
+		$this->workerStreams[$index]['aborted'] = true;
+		if (!empty($s['watcher'])) {
+			Q_Evented::cancel($s['watcher']);
+			$this->workerStreams[$index]['watcher'] = null;
+		}
+		if ($s['h2']) {
+			$responder = $this->workerResponders[$index] ?? null;
+			if ($responder) call_user_func($responder, array('_stream' => 'reset'));
+		} elseif (is_resource($s['client'])) {
+			$this->h1Close($s['client']);
+		}
+		$this->workerStreams[$index]['client'] = null;
+		unset($this->workerClients[$index]);
+		$this->workerResponders[$index] = null;
+		$parsed = $this->workerRequests[$index] ?? array();
+		fwrite(STDERR, sprintf("  stream on %s %s ended after %.1fs, %d bytes: %s\n",
+			$parsed['method'] ?? '?', $parsed['uri'] ?? '?',
+			microtime(true) - ($this->workerStarted[$index] ?? microtime(true)),
+			(int) $s['bytes'], $why));
+		$sock = $this->workers[$index]['socket'] ?? null;
+		if (is_resource($sock)) {
+			$msg = json_encode(array('_control' => 'abort'));
+			Q_WebServer::writeFully($sock, pack('N', strlen($msg)) . $msg, 1.0);
+		}
+		$this->streamRecord($index);
+	}
+
+	/**
+	 * Bytes on their way to HTTP/1.1 stream clients, by socket: what the
+	 * socket would not take yet, whether to close it once it has, and the
+	 * writability watcher that sends the rest.
+	 *
+	 * A stream lives for minutes, and the parent serves every connection from
+	 * one loop. Writing with a blocking wait would let one slow reader hold up
+	 * the whole server for as long as it dawdles; so what does not fit waits
+	 * here, bounded by STREAM_WRITE_BUFFER, past which the client is treated
+	 * as gone.
+	 * @property $h1Out
+	 */
+	protected $h1Out = array();
+
+	/** Bytes a stream's client may leave unread before it is dropped. */
+	const STREAM_WRITE_BUFFER = 8388608;
+
+	/**
+	 * Queue bytes for an HTTP/1.1 stream client and send what the socket takes.
+	 *
+	 * @method h1Write
+	 * @param {resource} $sock
+	 * @param {string} $data
+	 * @param {boolean} $close close the socket once everything has gone
+	 * @return {boolean} false when the client is gone
+	 */
+	protected function h1Write($sock, $data, $close = false)
+	{
+		if (!is_resource($sock)) return false;
+		$k = (int) $sock;
+		if (!isset($this->h1Out[$k])) {
+			$this->h1Out[$k] = array('sock' => $sock, 'buf' => '', 'close' => false, 'watcher' => null);
+		}
+		$this->h1Out[$k]['buf'] .= $data;
+		if ($close) $this->h1Out[$k]['close'] = true;
+		if (strlen($this->h1Out[$k]['buf']) > self::STREAM_WRITE_BUFFER) {
+			$this->h1Drop($k);
+			return false;
+		}
+		return $this->h1Drain($k);
+	}
+
+	/**
+	 * Send what an HTTP/1.1 stream client will take now; close it when done
+	 * and asked to.
+	 *
+	 * @method h1Drain
+	 * @param {integer} $k
+	 * @return {boolean} false when the client is gone
+	 */
+	function h1Drain($k)
+	{
+		if (!isset($this->h1Out[$k])) return false;
+		$sock = $this->h1Out[$k]['sock'];
+		if (!is_resource($sock)) { $this->h1Drop($k); return false; }
+		while ($this->h1Out[$k]['buf'] !== '') {
+			$n = @fwrite($sock, $this->h1Out[$k]['buf']);
+			if ($n === false) { $this->h1Drop($k); return false; }
+			if ($n === 0) {
+				if ($this->h1Out[$k]['watcher'] === null) {
+					$pool = $this;
+					$this->h1Out[$k]['watcher'] = Q_Evented::onWritable($sock,
+						function () use ($pool, $k) { $pool->h1Drain($k); });
+				}
+				return true;
+			}
+			$this->h1Out[$k]['buf'] = (string) substr($this->h1Out[$k]['buf'], $n);
+		}
+		if ($this->h1Out[$k]['watcher'] !== null) {
+			Q_Evented::cancel($this->h1Out[$k]['watcher']);
+			$this->h1Out[$k]['watcher'] = null;
+		}
+		if ($this->h1Out[$k]['close']) {
+			@fclose($sock);
+			unset($this->h1Out[$k]);
+		}
+		return true;
+	}
+
+	/** Give up on an HTTP/1.1 stream client: forget what is queued and close it. */
+	protected function h1Drop($k)
+	{
+		if (!isset($this->h1Out[$k])) return;
+		if ($this->h1Out[$k]['watcher'] !== null) Q_Evented::cancel($this->h1Out[$k]['watcher']);
+		if (is_resource($this->h1Out[$k]['sock'])) @fclose($this->h1Out[$k]['sock']);
+		unset($this->h1Out[$k]);
+	}
+
+	/** Close an HTTP/1.1 stream client now, whatever is still queued. */
+	protected function h1Close($sock)
+	{
+		if (!is_resource($sock)) return;
+		if (isset($this->h1Out[(int) $sock])) { $this->h1Drop((int) $sock); return; }
+		@fclose($sock);
+	}
+
+	/** Record a stream once in the access log and the dashboard. */
+	protected function streamRecord($index, $mem = 0)
+	{
+		$s = $this->workerStreams[$index] ?? null;
+		if (!$s or $s['recorded']) return;
+		$this->workerStreams[$index]['recorded'] = true;
+		if (isset($this->workerRequests[$index])) {
+			Q_WebServer::recordCompleted($this->workerRequests[$index], $s['status'], $s['bytes'],
+				(microtime(true) - ($this->workerStarted[$index] ?? microtime(true))) * 1000, true, $mem);
+		}
+	}
+
+	/** Forget a stream: its watcher and its record. */
+	protected function forgetStream($index)
+	{
+		if (!isset($this->workerStreams[$index])) return;
+		if (!empty($this->workerStreams[$index]['watcher'])) {
+			Q_Evented::cancel($this->workerStreams[$index]['watcher']);
+		}
+		unset($this->workerStreams[$index]);
+	}
+
+	/**
+	 * Every second: ask each HTTP/2 stream whether its client is still there
+	 * (a reset stream or a closed connection says nothing to this side until
+	 * asked), and hold streams to streamTimeout when requestTimeout is off
+	 * (then nothing else calls killOverdue()).
+	 *
+	 * @method superviseStreams
+	 */
+	function superviseStreams()
+	{
+		foreach ($this->workerStreams as $index => $s) {
+			if ($s['aborted'] or !$s['h2']) continue;
+			$responder = $this->workerResponders[$index] ?? null;
+			if (!$responder or call_user_func($responder, array('_stream' => 'probe')) === false) {
+				$this->abortStream($index, 'client gone (HTTP/2)');
+			}
+		}
+		if ((int) Q_Config::get('Q', 'webserver', 'requestTimeout', 30) <= 0) {
+			$this->killOverdue(0);
 		}
 	}
 
@@ -2372,7 +3185,7 @@ class Q_WebServer_Pool
 	 */
 	function killOverdue($timeout, $grace = null)
 	{
-		if ($timeout <= 0) return 0;
+		if ($timeout <= 0 and $this->streamTimeout <= 0) return 0;
 		if ($grace === null) {
 			$grace = (float) Q_Config::get('Q', 'webserver', 'requestTimeoutGrace', 5);
 		}
@@ -2391,8 +3204,14 @@ class Q_WebServer_Pool
 			}
 			if (empty($w['busy']) or !empty($w['dying'])) continue;
 			$started = $this->workerStarted[$index] ?? null;
-			if ($started === null or $now - $started <= $timeout) continue;
 			$parsed = $this->workerRequests[$index] ?? array();
+			// A stream -- one that has started, or a request for an event
+			// stream that has not yet -- runs to streamTimeout instead:
+			// a stream that may last half a minute would otherwise be killed
+			// at requestTimeout with nothing sent.
+			$isStream = (isset($this->workerStreams[$index]) || self::isStreamRequest($parsed));
+			$limit = $isStream ? $this->streamTimeout : $timeout;
+			if ($limit <= 0 or $started === null or $now - $started <= $limit) continue;
 			$method = $parsed['method'] ?? 'GET';
 			$uri = $parsed['uri'] ?? '/';
 			$ms = round(($now - $started) * 1000, 1);
@@ -2400,6 +3219,14 @@ class Q_WebServer_Pool
 			$body = Q_WebServer::renderErrorPage(504);
 			$client = $this->workerClients[$index] ?? null;
 			$responder = $this->workerResponders[$index] ?? null;
+			if (isset($this->workerStreams[$index])) {
+				// The stream has been answering all along; it ends here,
+				// cleanly, and an EventSource simply reconnects.
+				$this->streamEndToClient($index);
+				$this->forgetStream($index);
+				$this->workerResponders[$index] = null;
+				$client = $responder = null;
+			}
 			if ($responder) {
 				call_user_func($responder, array('status' => 504,
 					'headers' => array('Content-Type' => 'text/html; charset=utf-8'),
@@ -2416,8 +3243,9 @@ class Q_WebServer_Pool
 			$pid = (int) ($w['pid'] ?? 0);
 			if ($pid > 0) @posix_kill($pid, $grace > 0 ? SIGTERM : SIGKILL);
 			if ($grace <= 0) $this->workers[$index]['killed'] = true;
-			fwrite(STDERR, sprintf("  worker %d killed after %.1fs on %s %s (requestTimeout %ss)\n",
-				$pid, $now - $started, $method, $uri, $timeout));
+			fwrite(STDERR, sprintf("  worker %d killed after %.1fs on %s %s (%s %ss)\n",
+				$pid, $now - $started, $method, $uri,
+				$isStream ? 'streamTimeout' : 'requestTimeout', $limit));
 			Q_WebServer_Dashboard::recordRequest($method, $uri, 504, $ms, 0, true);
 			if (class_exists('Q_WebServer_Metrics', false)) {
 				Q_WebServer_Metrics::recordRequest(504, $ms, $method, $uri, '', '', 0);
@@ -2770,6 +3598,9 @@ class Q_WebServer_Pool
 	protected static function writeMsg($sock, $status, $body, $headers,
 		$cookies = array(), $recycle = '', $mem = 0)
 	{
+		// Set by executeScript() for a response whose head has gone out.
+		$streamed = self::$responseStreamed;
+		self::$responseStreamed = false;
 		// json_encode() returns false on bytes that are not valid UTF-8, and
 		// strlen(false) is 0, so a binary body used to go out as a length
 		// prefix of zero and nothing else: the parent read an empty frame and
@@ -2791,6 +3622,13 @@ class Q_WebServer_Pool
 		if ($mem > 0) {
 			$_mem = (int) $mem;
 			$fields[] = '_mem';
+		}
+		// The last message of a response whose head and earlier output have
+		// already been sent: what is left of the body, and nothing else that
+		// still counts (status and headers are already with the client).
+		if ($streamed) {
+			$_stream = 'end';
+			$fields[] = '_stream';
 		}
 		$j = json_encode(compact($fields));
 		if ($j === false) {
