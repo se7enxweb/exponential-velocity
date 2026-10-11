@@ -65,11 +65,14 @@ edited down to what a reader actually needs.
 
 ---
 
-## Unreleased
+## v0.0.4.48 — the full Docker images load event after sockets
+
+2026-10-11
 
 ### Fixed
 
 - **The `full` Docker images load `event`, and PHP starts in them without a warning.** `docker-php-ext-enable` names an extension's ini file after it and PHP reads `conf.d` in name order, so `event` loaded before `sockets`, whose symbols it uses, and failed with `undefined symbol: socket_ce`. Every PHP command in the image began with that warning, which broke the image test that reads the first line of `vc-qshell --version`, and every `full` image failed its build test from v0.0.4.42 on. `event` is now enabled as `zz-docker-php-ext-event.ini`, after every `docker-php-ext-*.ini` (`loadAfter` in `packaging/docker/debian-build-deps.json`), and an extension is recorded as installed in `image-extensions.txt` only when PHP loads it: one that does not is left out, with its ini removed, instead of being listed as installed while `qbixctl ext:check` found it missing.
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.48.
 
 ## v0.0.4.47 — a key a script adds to $_SERVER ends with its request
 
