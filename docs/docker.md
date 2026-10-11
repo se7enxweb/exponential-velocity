@@ -89,6 +89,12 @@ docker run --rm ghcr.io/se7enxweb/exponential-velocity:php8.3-full \
   cat /usr/share/exponential-velocity/image-extensions.txt
 ```
 
+An extension counts as installed only when PHP then starts without a warning that
+it could not load it. One that links against another extension is enabled after
+it: `event` uses the symbols of `sockets`, so its ini file is
+`$PHP_INI_DIR/conf.d/zz-docker-php-ext-event.ini`, read after every
+`docker-php-ext-*.ini` (`loadAfter` in `packaging/docker/debian-build-deps.json`).
+
 The server, required and recommended tiers are never best effort: an image that
 misses any of them fails its build.
 

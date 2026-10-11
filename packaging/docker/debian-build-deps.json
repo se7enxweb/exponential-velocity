@@ -51,6 +51,10 @@
         "oci8": "--with-oci8=instantclient,/opt/oracle/instantclient",
         "pdo_oci": "--with-pdo-oci=instantclient,/opt/oracle/instantclient"
     },
+    "loadAfter": {
+        "description": "Extensions that link against another extension and so must be loaded after it. docker-php-ext-enable names an ini file after its extension and PHP reads conf.d in name order, so event (docker-php-ext-event.ini) would load before sockets and fail with an undefined symbol: socket_ce. Each extension listed here is enabled under an ini name that sorts after every docker-php-ext-*.ini.",
+        "event": ["sockets"]
+    },
     "odbcDrivers": {
         "description": "ODBC drivers the standard and full images carry, so odbc/pdo_odbc reach the common databases without another layer: PostgreSQL, MariaDB/MySQL, SQLite, and FreeTDS for Microsoft SQL Server and Sybase.",
         "packages": ["odbc-postgresql", "odbc-mariadb", "libsqliteodbc", "tdsodbc"]

@@ -47,6 +47,34 @@ if [ -n "$deps" ]; then
 fi
 
 fail_hard=0
+# An extension that links against another one (event uses sockets' symbols)
+# loads only after it. docker-php-ext-enable names the ini file after the
+# extension and PHP reads conf.d in name order, so such an extension, an
+# AFTER line in the plan, is enabled under a name that sorts after every
+# docker-php-ext-*.ini.
+enable_ext() { # name
+  local name="$1"
+  if printf '%s\n' "$plan" | awk -v n="$name" '$1=="AFTER" && $2==n {f=1} END {exit !f}'; then
+    docker-php-ext-enable --ini-name "zz-docker-php-ext-$name.ini" "$name" >/dev/null
+  else
+    docker-php-ext-enable "$name" >/dev/null
+  fi
+}
+
+# PHP starts without a warning that it could not load the extension. An
+# extension that is enabled but does not load is not installed: recording it
+# as installed would hide the failure until something runs PHP.
+loads() { # name
+  local out
+  out="$(php -m 2>&1)" || { printf '%s\n' "$out" | tail -3 | sed 's/^/    php: /'; return 1; }
+  if printf '%s\n' "$out" | grep -q "Unable to load dynamic library '$1'"; then
+    printf '%s\n' "$out" | grep -m1 "Unable to load dynamic library '$1'" | sed 's/^/    php: /'
+    # Not left in conf.d, where it would warn on every start of PHP.
+    rm -f "$PHP_INI_DIR/conf.d/docker-php-ext-$1.ini" "$PHP_INI_DIR/conf.d/zz-docker-php-ext-$1.ini"
+    return 1
+  fi
+}
+
 install_one() { # name tier how [configure...]
   local name="$1" tier="$2" how="$3"; shift 3
   local ok=0
@@ -60,14 +88,14 @@ install_one() { # name tier how [configure...]
         && docker-php-ext-install -j"$jobs" odbc >/dev/null && ok=1
     else
       if [ "$#" -gt 0 ]; then docker-php-ext-configure "$name" "$@" >/dev/null || true; fi
-      docker-php-ext-install -j"$jobs" "$name" >/dev/null && ok=1
+      docker-php-ext-install -j"$jobs" "$name" >/dev/null && loads "$name" && ok=1
     fi
   else
     # PECL asks questions for some packages; an empty answer takes the
     # default. A finite set of answers, not `yes`: under pipefail, yes dies of
     # SIGPIPE once pecl exits and the pipeline reported every install failed.
     if printf '\n\n\n\n\n\n\n\n\n\n' | pecl install -o -f "$name" > "/tmp/pecl-$name.log" 2>&1; then
-      docker-php-ext-enable "$name" >/dev/null && ok=1
+      enable_ext "$name" && loads "$name" && ok=1
     fi
   fi
   if [ "$ok" = 1 ]; then

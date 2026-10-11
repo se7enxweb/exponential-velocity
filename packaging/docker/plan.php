@@ -8,6 +8,7 @@
  *
  *   DEP <debian package>                 build-time package
  *   EXT <name> <tier> src|pecl [configure...]
+ *   AFTER <name> <extension...>          load <name> after these (its ini sorts last)
  *   ADDON <name> <how>                   add-on driver (oracle, firebird, odbc-drivers)
  *   HAVE <name>                          already in this PHP
  *   SKIP <name> <reason>                 left out here, with the baseline's reason
@@ -40,6 +41,7 @@ foreach ($r['include'] as $name) {
 		foreach ($deps['libs'][$lib] ?? array() as $p) $need[$p] = true;
 	}
 	echo "EXT $name {$e['tier']} $how", isset($deps['configure'][$name]) ? ' ' . $deps['configure'][$name] : '', "\n";
+	if (isset($deps['loadAfter'][$name])) echo "AFTER $name ", implode(' ', $deps['loadAfter'][$name]), "\n";
 }
 if ($addons) {
 	foreach (array_keys(baseline_addons()) as $name) {
