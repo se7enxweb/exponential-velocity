@@ -65,6 +65,16 @@ edited down to what a reader actually needs.
 
 ---
 
+## Unreleased
+
+### Updated
+
+- **A HEAD over HTTP/2 is answered with a single `HEADERS` frame carrying `END_STREAM`, and no `DATA`.** A HEAD for a page PHP rendered was sent its whole body as DATA frames, which a strict client rejects: curl with a current nghttp2 reported `Error in the HTTP2 framing layer` (or `stream 1 was not closed cleanly: PROTOCOL_ERROR`) for every rendered page, while older clients dropped the stray bytes silently. The connection now knows the request was a HEAD and drops the body itself, for a rendered page, a cached one, a static file, a streamed answer and the server's own error pages alike. The headers are the GET's: `Content-Length` and `Content-Encoding` included, computed from the body exactly as for the GET (a large static file states its size, or nothing when the GET would compress it).
+- **A HEAD over HTTP/2 is answered from the response cache**, from the GET's entry, as over HTTP/1.1. It was never asked, so a monitor sending HEAD rendered the page every time. The application's cache (`Q.web.appCache`) is asked for a HEAD as the GET it stands for, so its answer states the GET's length instead of an empty body's.
+- **A streamed answer to a HEAD ends at its head**, over HTTP/1.1 and HTTP/2, and the worker is told to stop as for a client that left. It ran the script to its end only to drop every piece, holding a stream slot (`maxStreams`) all the while; for an event stream, until `streamTimeout`. A fork-per-request child no longer writes chunks after the head of a HEAD either.
+- **The server's own HTTP/1.1 answers to a HEAD carry no body**: the 403 for a type not served, a 404, and the pool's 502, 503 and 504 pages.
+- **A stop drains gracefully.** Each HTTP/2 connection is sent `GOAWAY` with `NO_ERROR` and its last stream; the streams up to it are answered in full, a stream opened after it is refused with `REFUSED_STREAM` so the client retries it elsewhere, and the connection closes as soon as it is done. An idle HTTP/1.1 keep-alive connection is closed at once. A stop used to wait out the whole drain timeout (five seconds) whenever a browser held a connection open for reuse, with the listener already closed, and then closed those connections without a word, failing every request multiplexed on them together. Measured on a test server with one request in flight: exit after 1.4 s instead of 5.2 s, and the connection ended by GOAWAY instead of cut.
+
 ## v0.0.4.49 — streaming responses from persistent pool workers
 
 2026-10-12

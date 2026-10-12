@@ -157,6 +157,12 @@ class Q_WebServer_Http2_Connection
 	/** @var boolean set once GOAWAY has been sent */
 	public $closed = false;
 
+	/**
+	 * @var integer|null the last stream a graceful GOAWAY promised to answer
+	 *   (goawayGraceful()); null until one is sent
+	 */
+	public $goawayLast = null;
+
 	/** @var callable given a request array, returns a response array */
 	public $handler;
 
@@ -569,6 +575,16 @@ class Q_WebServer_Http2_Connection
 		$this->streams[$stream]['headers'] = $list;
 		$this->streams[$stream]['headerBlock'] = '';
 
+		// Opened after a graceful GOAWAY, which named the last stream that
+		// will be answered: refused, unprocessed, so the client sends it again
+		// on a new connection (RFC 9113 section 6.8). Decoded first all the
+		// same, because the header table is shared by every block.
+		if ($this->goawayLast !== null and $stream > $this->goawayLast) {
+			unset($this->streams[$stream]);
+			$this->write($F::build($F::RST_STREAM, 0, $stream, $F::uint32(0x7)));   // REFUSED_STREAM
+			return true;
+		}
+
 		if ($this->streams[$stream]['endStream']) {
 			return $this->dispatch($stream);
 		}
@@ -735,6 +751,14 @@ class Q_WebServer_Http2_Connection
 			$this->streams[$stream]['accept'] = $request['headers']['accept-encoding'];
 		}
 
+		// Kept so the answer can be written without a body. Whoever produces
+		// it -- a worker, the response cache, a static file -- writes what a
+		// GET would get, and this connection is the one place that knows the
+		// request was a HEAD. A HEAD answered with DATA frames is a protocol
+		// error to a strict peer (nghttp2 resets the stream, curl reports an
+		// error in the HTTP/2 framing layer), whatever the headers said.
+		$this->streams[$stream]['head'] = strtoupper((string) $request['method']) === 'HEAD';
+
 		try {
 			$response = call_user_func($this->handler, $request);
 		} catch (\Throwable $e) {
@@ -848,7 +872,23 @@ class Q_WebServer_Http2_Connection
 				? $headers['vary'] . ', Accept-Encoding' : 'Accept-Encoding';
 		}
 
-		$list = $this->headerList($status, $headers, $body, $response);
+		// A HEAD is the GET without its body (RFC 9110 section 9.3.2): the same
+		// header fields, the length included -- the body was compressed above
+		// exactly as for the GET, so the length is the one the GET states --
+		// and then END_STREAM on the HEADERS, with no DATA frame at all.
+		$head = !empty($this->streams[$stream]['head']);
+		$length = null;
+		if ($head) {
+			if ($body !== '') {
+				$length = strlen($body);
+			} elseif (isset($response['_length']) and is_int($response['_length'])) {
+				// Stated by a writer that left a large file unread.
+				$length = $response['_length'];
+			}
+			$body = '';
+		}
+
+		$list = $this->headerList($status, $headers, $body, $response, $length);
 
 		$block = $this->outbound->encode($list);
 
@@ -867,6 +907,11 @@ class Q_WebServer_Http2_Connection
 		}
 
 		if ($body === '') {
+			// A refusal sent while the client was still sending: with no
+			// DATA to carry the end, tell it to stop now.
+			if (!empty($this->streams[$stream]['resetWhenSent'])) {
+				$this->write($F::build($F::RST_STREAM, 0, $stream, $F::uint32(0)));
+			}
 			unset($this->streams[$stream]);
 			return;
 		}
@@ -890,9 +935,11 @@ class Q_WebServer_Http2_Connection
 	 * @param {array} $headers
 	 * @param {string} $body '' for none, or a stream (no length is stated)
 	 * @param {array} $response for its cookies
+	 * @param {integer|null} [$length] the length to state instead of the
+	 *   body's: a HEAD sends no body and states the GET's length
 	 * @return {array} list of [name, value]
 	 */
-	protected function headerList($status, $headers, $body, $response)
+	protected function headerList($status, $headers, $body, $response, $length = null)
 	{
 		$list = array(array(':status', (string) $status));
 
@@ -928,7 +975,9 @@ class Q_WebServer_Http2_Connection
 				$list[] = array($name, (string) $v);
 			}
 		}
-		if ($body !== '') {
+		if ($length !== null) {
+			$list[] = array('content-length', (string) (int) $length);
+		} elseif ($body !== '') {
 			$list[] = array('content-length', (string) strlen($body));
 		}
 
@@ -996,9 +1045,16 @@ class Q_WebServer_Http2_Connection
 		$status = isset($response['status']) ? (int) $response['status'] : 200;
 		$headers = (array) (isset($response['headers']) ? $response['headers'] : array());
 		$block = $this->outbound->encode($this->headerList($status, $headers, '', $response));
+		// A HEAD: the head is the whole answer, so END_STREAM goes on it, and
+		// what the script goes on writing is dropped (headOnly) until the pool
+		// ends the stream -- as the HTTP/1.1 path drops it. The entry stays so
+		// the pool's calls find the stream open and the worker is not told the
+		// client left; 'finished' keeps it out of the open-stream count.
+		$head = !empty($this->streams[$stream]['head']);
 		$first = substr($block, 0, $this->maxFrameSize);
 		$rest = substr($block, $this->maxFrameSize);
-		if (!$this->write($F::build($F::HEADERS, $rest === '' ? $F::FLAG_END_HEADERS : 0, $stream, $first))) {
+		$endStream = ($head and $rest === '') ? $F::FLAG_END_STREAM : 0;
+		if (!$this->write($F::build($F::HEADERS, ($rest === '' ? $F::FLAG_END_HEADERS : 0) | $endStream, $stream, $first))) {
 			return false;
 		}
 		while ($rest !== '') {
@@ -1006,11 +1062,16 @@ class Q_WebServer_Http2_Connection
 			$rest = substr($rest, $this->maxFrameSize);
 			$this->write($F::build($F::CONTINUATION, $rest === '' ? $F::FLAG_END_HEADERS : 0, $stream, $chunk));
 		}
+		if ($head and !$endStream) {
+			// END_STREAM cannot ride on CONTINUATION: an empty DATA frame ends it.
+			$this->write($F::build($F::DATA, $F::FLAG_END_STREAM, $stream, ''));
+		}
 		$this->streams[$stream]['awaiting'] = false;
 		$this->streams[$stream]['streaming'] = true;
-		$this->streams[$stream]['ended'] = false;
+		$this->streams[$stream]['headOnly'] = $head;
+		$this->streams[$stream]['ended'] = $head;
 		$this->streams[$stream]['pending'] = '';
-		$this->streams[$stream]['finished'] = false;
+		$this->streams[$stream]['finished'] = $head;
 		return true;
 	}
 
@@ -1025,7 +1086,7 @@ class Q_WebServer_Http2_Connection
 	function streamData($stream, $data)
 	{
 		if (!$this->streamOpen($stream) or empty($this->streams[$stream]['streaming'])) return false;
-		if ($data === '') return true;
+		if ($data === '' or !empty($this->streams[$stream]['headOnly'])) return true;
 		$this->streams[$stream]['pending'] .= $data;
 		if (strlen($this->streams[$stream]['pending']) > $this->limits['writeBuffer']) {
 			$this->streamReset($stream);
@@ -1046,6 +1107,11 @@ class Q_WebServer_Http2_Connection
 	{
 		$F = 'Q_WebServer_Http2_Frame';
 		if (!$this->streamOpen($stream)) return false;
+		if (!empty($this->streams[$stream]['headOnly'])) {
+			// Ended already, with its HEADERS.
+			unset($this->streams[$stream]);
+			return true;
+		}
 		$this->streams[$stream]['ended'] = true;
 		if ($this->streams[$stream]['pending'] === '') {
 			$this->write($F::build($F::DATA, $F::FLAG_END_STREAM, $stream, ''));
@@ -1067,8 +1133,11 @@ class Q_WebServer_Http2_Connection
 	{
 		$F = 'Q_WebServer_Http2_Frame';
 		if (!isset($this->streams[$stream])) return;
+		$complete = !empty($this->streams[$stream]['headOnly']);
 		unset($this->streams[$stream]);
-		if (!$this->closed and is_resource($this->socket)) {
+		// A HEAD's answer is complete once its HEADERS are out; resetting the
+		// closed stream would tell the peer otherwise.
+		if (!$complete and !$this->closed and is_resource($this->socket)) {
 			$this->write($F::build($F::RST_STREAM, 0, $stream, $F::uint32($error)));
 		}
 	}
@@ -1206,6 +1275,43 @@ class Q_WebServer_Http2_Connection
 		$F = 'Q_WebServer_Http2_Frame';
 		$this->write($F::build($F::GOAWAY, 0, 0,
 			$F::uint32($this->lastStream) . $F::uint32($error)));
+	}
+
+	/**
+	 * Tell the peer this connection is going away, with no error: GOAWAY with
+	 * NO_ERROR and the last stream it opened, which -- and every stream before
+	 * it -- is still answered in full. A stream it opens after this is refused
+	 * (REFUSED_STREAM), so it is sent again on a new connection rather than
+	 * lost. The connection stays open until drained() says it is done.
+	 *
+	 * For a server that stops: closing a connection a browser holds open for
+	 * reuse, without a word, fails whatever it sent on it at that moment --
+	 * "Failed to fetch" and error pages for every multiplexed request at once.
+	 *
+	 * @method goawayGraceful
+	 */
+	function goawayGraceful()
+	{
+		if ($this->closed or $this->goawayLast !== null) return;
+		$F = 'Q_WebServer_Http2_Frame';
+		$this->goawayLast = $this->lastStream;
+		$this->write($F::build($F::GOAWAY, 0, 0,
+			$F::uint32($this->lastStream) . $F::uint32(0)));
+	}
+
+	/**
+	 * Whether a connection that was sent a graceful GOAWAY has nothing left to
+	 * do: no stream still being received or answered, nothing left to write.
+	 * A connection closed for cause is done as well.
+	 *
+	 * @method drained
+	 * @return {boolean}
+	 */
+	function drained()
+	{
+		if ($this->closed or !is_resource($this->socket)) return true;
+		if ($this->goawayLast === null) return false;
+		return !$this->streams and $this->outBuffer === '';
 	}
 
 	/**

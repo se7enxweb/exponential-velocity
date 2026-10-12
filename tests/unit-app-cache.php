@@ -4,7 +4,9 @@
  * worker, with the visitor's cookies, and serves its answer as it is.
  *
  *   - not configured, a missing file or a class without fromDir(): not asked;
- *   - a hit comes back as a response array, HEAD without the body;
+ *   - a hit comes back as a response array; a HEAD is asked as the GET it
+ *     stands for and keeps the GET's body, from which the writer states the
+ *     length (it never sends a HEAD's body);
  *   - what the class is given: scheme, host, uri with query, cookies (from
  *     the header when the request has not parsed them), accept-encoding,
  *     if-none-match, every request header (a load balancer's
@@ -111,7 +113,8 @@ check('a new object per request', TestAppCache::$made, $made + 1);
 $head = $get;
 $head['method'] = 'HEAD';
 $r = $A::get($head);
-check('HEAD: no body', $r['body'] ?? null, '');
+check('HEAD: asked as the GET', TestAppCache::$last['method'] ?? null, 'GET');
+check('HEAD: the GET\'s body, for its length', $r['body'] ?? null, 'page');
 
 $post = $get;
 $post['method'] = 'POST';

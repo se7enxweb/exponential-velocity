@@ -333,6 +333,15 @@ listening sockets are closed first, open connections are given up to five second
 to finish, and the workers are asked to stop and given three seconds before they are
 ended. The new server forks a new pool from the new code and configuration.
 
+Only what is in flight is waited for. Each HTTP/2 connection is sent `GOAWAY`
+with `NO_ERROR` and the last stream its client opened: the streams up to it are
+answered in full, a stream opened after it is refused with `REFUSED_STREAM` (so
+the client sends it again on a new connection), and the connection is closed as
+soon as it has nothing left. An HTTP/1.1 connection waiting for its next request
+is closed at once. A stop with nothing in flight therefore takes a moment, not
+the five seconds, and no client finds the connection it reuses cut under a
+request it has just sent.
+
 The control panel's Workers tab can recycle one worker or all of them without a
 reload: an idle worker is replaced at once, a busy one after its current request.
 

@@ -2182,7 +2182,8 @@ class Q_WebServer_Pool
 					'headers' => array('Content-Type' => 'text/html; charset=utf-8'),
 					'body' => Q_WebServer::renderErrorPage(502)));
 			} elseif (is_resource($client)) {
-				Q_WebServer::sendResponse($client, 502, Q_WebServer::renderErrorPage(502), 'text/html; charset=utf-8');
+				Q_WebServer::sendResponse($client, 502, Q_WebServer::renderErrorPage(502), 'text/html; charset=utf-8',
+					array(), self::isHead($parsed));
 				if (is_resource($client)) @fclose($client);
 			}
 			$this->recycle($index, true);
@@ -2399,7 +2400,8 @@ class Q_WebServer_Pool
 						'headers' => array('Content-Type' => 'text/html; charset=utf-8'),
 						'body' => Q_WebServer::renderErrorPage(502)));
 				} elseif (is_resource($c)) {
-					Q_WebServer::sendResponse($c, 502, Q_WebServer::renderErrorPage(502), 'text/html; charset=utf-8');
+					Q_WebServer::sendResponse($c, 502, Q_WebServer::renderErrorPage(502), 'text/html; charset=utf-8',
+						array(), self::isHead($parsed));
 					if (is_resource($c)) @fclose($c);
 				}
 			}
@@ -2598,7 +2600,8 @@ class Q_WebServer_Pool
 			Q_WebServer::recordCompleted($parsed, 503, strlen($body), 0.0, true);
 		} elseif (is_resource($client)) {
 			Q_WebServer::sendResponse($client, 503, $body, $headers['Content-Type'],
-				array('Retry-After' => '5', 'Cache-Control' => 'no-store', 'Connection' => 'close'));
+				array('Retry-After' => '5', 'Cache-Control' => 'no-store', 'Connection' => 'close'),
+				self::isHead($parsed));
 			if (is_resource($client)) @fclose($client);
 		}
 	}
@@ -2651,6 +2654,7 @@ class Q_WebServer_Pool
 			$ok = call_user_func($responder, array('_stream' => 'head', 'status' => $status,
 				'headers' => $headers, 'cookies' => (array) ($head['cookies'] ?? array())));
 			if ($ok === false) $this->abortStream($index, 'stream reset by the client');
+			elseif ($isHead) $this->endHeadStream($index);
 			return;
 		}
 
@@ -2693,11 +2697,58 @@ class Q_WebServer_Pool
 			$this->abortStream($index, 'client gone');
 			return;
 		}
+		if ($isHead) {
+			$this->endHeadStream($index);
+			return;
+		}
 		// Hear about the client leaving: its end of the socket becomes
 		// readable at EOF. Nothing else is expected from it now.
 		$pool = $this;
 		$this->workerStreams[$index]['watcher'] = Q_Evented::onReadable($client,
 			function ($c) use ($pool, $index) { $pool->onStreamClient($index, $c); });
+	}
+
+	/**
+	 * Whether a request is a HEAD, whose answer is written without its body.
+	 *
+	 * @method isHead
+	 * @static
+	 * @param {array} $parsed
+	 * @return {boolean}
+	 */
+	static function isHead($parsed)
+	{
+		return strtoupper((string) ($parsed['method'] ?? '')) === 'HEAD';
+	}
+
+	/**
+	 * A HEAD answered as a stream is complete once its head is out: end it
+	 * there -- the HTTP/2 stream ended with its HEADERS, the HTTP/1.1
+	 * connection closes once the head has gone -- record it, and tell the
+	 * worker to stop, as for a client that has left.
+	 *
+	 * Without this the worker went on running the script to its end only for
+	 * every piece to be dropped, holding a stream slot (maxStreams) all the
+	 * while; for an event stream that never ends, until streamTimeout. A
+	 * monitor sending HEAD to such an address took a stream worker per probe.
+	 *
+	 * @method endHeadStream
+	 * @param {integer} $index
+	 */
+	protected function endHeadStream($index)
+	{
+		$s = $this->workerStreams[$index] ?? null;
+		if (!$s or $s['aborted']) return;
+		$this->streamEndToClient($index);
+		$this->workerStreams[$index]['aborted'] = true;
+		$this->workerStreams[$index]['client'] = null;
+		unset($this->workerClients[$index]);
+		$this->workerResponders[$index] = null;
+		$sock = $this->workers[$index]['socket'] ?? null;
+		if (is_resource($sock)) {
+			$msg = json_encode(array('_control' => 'abort'));
+			Q_WebServer::writeFully($sock, pack('N', strlen($msg)) . $msg, 1.0);
+		}
 	}
 
 	/**
@@ -3232,7 +3283,7 @@ class Q_WebServer_Pool
 					'headers' => array('Content-Type' => 'text/html; charset=utf-8'),
 					'body' => $body));
 			} elseif ($client and is_resource($client)) {
-				Q_WebServer::sendResponse($client, 504, $body, 'text/html; charset=utf-8');
+				Q_WebServer::sendResponse($client, 504, $body, 'text/html; charset=utf-8', array(), self::isHead($parsed));
 				Q_WebServer::closeClient((int) $client);
 				if (is_resource($client)) @fclose($client);
 			}

@@ -609,8 +609,9 @@ class Q_WebServer_Cache
 	 * @static
 	 * @param {array} $parsed Parsed request
 	 * @param {boolean} [$allowHead=false] answer a HEAD from the GET's entry.
-	 *   Only for a caller that then sends the headers without the body; the
-	 *   HTTP/2 and route() paths hand the entry on whole, so they leave it off.
+	 *   Only for a caller that then sends the headers without the body: the
+	 *   HTTP/1.1 path, and HTTP/2, whose connection drops the body of a HEAD's
+	 *   answer. route() hands the entry on whole, so it leaves it off.
 	 * @return {array|null} [status, headers, body] or null
 	 */
 	static function get($parsed, $allowHead = false)

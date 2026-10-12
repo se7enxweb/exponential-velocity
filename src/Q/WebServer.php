@@ -16,6 +16,11 @@
  */
 class Q_WebServer
 {
+	/**
+	 * The largest static file a HEAD over HTTP/2 reads in order to state the
+	 * GET's length (and coding): past it the size is stated, or nothing.
+	 */
+	const HEAD_READ_LIMIT = 8388608;
 
 	/**
 	 * Write a string to a stream socket in full, looping over partial writes.
@@ -1089,9 +1094,22 @@ class Q_WebServer
 					return self::http2Error(403, 'Forbidden');
 				}
 				if ($ext !== 'php') {
+					// A HEAD states what the GET sends, so it is built as the
+					// GET and the connection drops the body (it knows the
+					// request was a HEAD). Built as a HEAD it carried no
+					// length at all. A large file is not read for that: its
+					// size is the length when the GET would send it as it is,
+					// and nothing is stated when the GET would compress it.
+					$asGet = ($request['method'] === 'HEAD'
+						&& (int) @filesize($fsPath) <= self::HEAD_READ_LIMIT);
 					$built = self::buildFileResponse(
-						$fsPath, $ext, $request['method'], $request['headers']
+						$fsPath, $ext, $asGet ? 'GET' : $request['method'], $request['headers']
 					);
+					if (is_array($built) and $request['method'] === 'HEAD' and !$asGet
+						and !Q_WebServer_Http2_Connection::compressible(self::mimeType($ext), 1 << 20)
+					) {
+						$built['_length'] = (int) @filesize($fsPath);
+					}
 					if (is_array($built)) return $built;
 				}
 			}
@@ -1196,7 +1214,10 @@ class Q_WebServer
 			// The cache is on by default in this server and honours the response's
 			// own Cache-Control, so a page that says it may be held is held, and a
 			// request carrying a session cookie bypasses it.
-			$cached = Q_WebServer_Cache::get($parsed);
+			// A HEAD too, from the GET's entry: the connection writes the
+			// answer without its body, so a monitor's HEAD costs a lookup
+			// instead of a render (it was BYPASS, and rendered every time).
+			$cached = Q_WebServer_Cache::get($parsed, true);
 			if ($cached !== null) {
 				// A returning visitor who already holds this gets told so, rather
 				// than being sent it again. The body is the part that scales with
@@ -1616,9 +1637,26 @@ class Q_WebServer
 			self::$udsPath = null;
 		}
 
-		// 2. Wait for in-flight connections to drain (up to timeout)
+		// 2. Let what is in flight finish (up to the timeout), and nothing else.
+		//
+		// Each HTTP/2 connection is told it is going away -- GOAWAY, NO_ERROR,
+		// naming its last stream -- so its client sends nothing more on it and
+		// what it has sent is answered; a stream opened after that is refused
+		// unprocessed, to be sent again on a new connection. A connection is
+		// closed as soon as it has nothing left, and an HTTP/1.1 connection
+		// that is only waiting for its next request is closed now.
+		//
+		// This waited for every client to go away by itself, which an idle
+		// connection a browser keeps for reuse never does: every stop took the
+		// whole drain timeout with the listener already closed, and then cut
+		// the connections held open, without a word, whatever their clients
+		// had just sent on them -- every request multiplexed on the one
+		// connection failed together.
+		foreach (self::$http2 as $conn) $conn->goawayGraceful();
 		$deadline = microtime(true) + $drainTimeout;
-		while (!empty(self::$clients) && microtime(true) < $deadline) {
+		while (true) {
+			self::closeDrainedClients();
+			if (empty(self::$clients) or microtime(true) >= $deadline) break;
 			Q_Evented::tick(0.1); // process pending I/O briefly
 		}
 
@@ -1638,6 +1676,28 @@ class Q_WebServer
 
 		// 5. Gracefully shut down worker pool (SIGTERM → wait → SIGKILL)
 		if (self::$pool) { self::$pool->shutdown(); self::$pool = null; }
+	}
+
+	/**
+	 * While stopping: close every connection with nothing left to do -- an
+	 * HTTP/2 connection drained after its GOAWAY, an HTTP/1.1 connection idle
+	 * between requests (kept alive, nothing buffered). Ones still receiving a
+	 * request or waiting for an answer are left to finish.
+	 *
+	 * @method closeDrainedClients
+	 * @static
+	 */
+	static function closeDrainedClients()
+	{
+		foreach (array_keys(self::$http2) as $key) {
+			if (self::$http2[$key]->drained()) self::closeHttp2($key);
+		}
+		foreach (array_keys(self::$clients) as $key) {
+			if (isset(self::$http2[$key])) continue;
+			if ((self::$timerKind[$key] ?? null) === 'keepalive' and (self::$buffers[$key] ?? '') === '') {
+				self::closeClient($key);
+			}
+		}
 	}
 
 	/**
@@ -2654,6 +2714,10 @@ class Q_WebServer
 		// parsed request in hand. Reset in the finally below, so a response
 		// written later from a callback keeps the old default.
 		self::$requestKeepAlive = $parsed['_keepAlive'];
+		// Likewise whether it is a HEAD: the server's own answers (a 403 for a
+		// type not served, a 404, an error page) are written without the
+		// request in hand, and sent their body to a HEAD.
+		self::$requestHead = strtoupper((string) ($parsed['method'] ?? '')) === 'HEAD';
 
 		try {
 			$savedRoot = self::$rootDir;
@@ -2679,6 +2743,7 @@ class Q_WebServer
 			return;
 		} finally {
 			self::$requestKeepAlive = true;
+			self::$requestHead = false;
 			// Restore rootDir after vhost override
 			if (self::$rootDir !== $savedRoot) {
 				self::$rootDir = $savedRoot;
@@ -5585,6 +5650,12 @@ WORKER;
 					$out .= "\r\n";
 					Q_WebServer::writeAll($_streamingClient, $out);
 				}
+				// A HEAD: the head is the whole answer. The pieces are consumed
+				// and dropped, the last chunk too -- a HEAD's response ends at
+				// its blank line whatever its Transfer-Encoding says.
+				if (strtoupper((string) ($parsed['method'] ?? '')) === 'HEAD') {
+					return '';
+				}
 				// Chunked framing states a length and then supplies exactly
 				// that many bytes. A short write leaves the client reading the
 				// next chunk's header as body, and nothing downstream can
@@ -6331,6 +6402,7 @@ WORKER;
 		self::$lastStatus = $status;
 		self::$lastBody = $body;
 		$body = (string) $body;
+		if (self::$requestHead) $headOnly = true;
 		$conn = $extra['Connection'] ?? self::connectionHeader(self::$requestKeepAlive, $status);
 		unset($extra['Connection']);
 		if (!is_array($extra)) $extra = array();
@@ -7247,6 +7319,7 @@ WORKER;
 	private static $lastBody = '';
 	private static $lastBytes = 0;
 	private static $requestKeepAlive = true;   // the current request's keep-alive decision, for sendResponse()
+	private static $requestHead = false;       // whether the current request is a HEAD, for sendResponse()
 
 	// ── Response state (internal — not Q_Response, to avoid Platform collision) ──
 

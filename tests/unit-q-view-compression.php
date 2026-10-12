@@ -78,7 +78,7 @@ foreach (array('sendResponse', 'connectionHeader', 'http1Head', 'headerLines') a
 	$methods .= $m[0];
 }
 eval('class Q_WS_Copy { static $lastStatus; static $lastBody; static $lastBytes; static $compressFor = null;
-	static $requestKeepAlive = true;
+	static $requestKeepAlive = true; static $requestHead = false;
 	static function writeAll($c, $d) { return fwrite($c, $d) === strlen($d); }' . $methods . '}');
 
 function send($compressFor, $status, $body, $type, $extra = array())

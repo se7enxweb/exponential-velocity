@@ -107,7 +107,12 @@ class Q_WebServer_AppCache
 					|| ($parsed['httpVersion'] ?? '') === '2' ? 'https' : 'http',
 				'host' => (string) ($headers['host'] ?? ''),
 				'uri' => (string) $uri,
-				'method' => $method,
+				// Asked as the GET a HEAD stands for: the answer then carries
+				// the GET's body, from which the writer states the length and
+				// which it never sends (both writers drop a HEAD's body). Asked
+				// as a HEAD it came back empty, and an empty body is a
+				// Content-Length of 0 -- not what the GET would send.
+				'method' => 'GET',
 				'cookies' => $cookies,
 				'acceptEncoding' => (string) ($headers['accept-encoding'] ?? ''),
 				'ifNoneMatch' => isset($headers['if-none-match']) ? (string) $headers['if-none-match'] : null,
@@ -132,7 +137,7 @@ class Q_WebServer_AppCache
 		return array(
 			'status' => (int) $status,
 			'headers' => is_array($responseHeaders) ? $responseHeaders : array(),
-			'body' => $method === 'HEAD' ? '' : (string) $body,
+			'body' => (string) $body,
 		);
 	}
 

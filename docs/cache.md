@@ -73,8 +73,10 @@ A response is stored only when all of these hold:
 
 A cached page is served only to a request that could have produced it: a `GET`
 with no `Authorization` header and no skip cookie. A `HEAD` for a cached page is
-answered from the same entry over HTTP/1.1, with the headers the `GET` gets and no
-body; a `HEAD` is never stored. A skip cookie matches any cookie
+answered from the same entry, over HTTP/1.1 and HTTP/2, with the headers the `GET`
+gets -- its `Content-Length` and `Content-Encoding` included -- and no body; a
+`HEAD` is never stored. Over HTTP/2 that is a single `HEADERS` frame carrying
+`END_STREAM`. A skip cookie matches any cookie
 whose name begins with it, so `PHPSESSID` also covers a name with a suffix added.
 
 The key is the host, the path, the query string and the coding the stored body is
@@ -271,8 +273,9 @@ hit never wakes a worker — for signed-in visitors too:
 the application has switched its cache off), whose `serve(array $request)`
 returns `[status, headers, body]` for a hit and `null` otherwise. `$request`
 holds `scheme`, `host`, `uri` (with the query), `method`, `cookies`,
-`acceptEncoding` and `ifNoneMatch`. Only GET and HEAD are asked about; HEAD is
-answered without the body.
+`acceptEncoding` and `ifNoneMatch`. Only GET and HEAD are asked about. A HEAD is
+asked as the GET it stands for (`method` is `GET`), so the answer states the
+GET's length; the server then writes it without the body.
 
 A new object is made for every request, so a purge or a switched-off cache is
 seen at once. A class that throws is logged and not asked for ten seconds.
