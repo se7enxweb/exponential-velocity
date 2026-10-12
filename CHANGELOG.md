@@ -65,7 +65,9 @@ edited down to what a reader actually needs.
 
 ---
 
-## Unreleased
+## v0.0.4.49 — streaming responses from persistent pool workers
+
+2026-10-12
 
 ### Added
 
@@ -81,6 +83,7 @@ edited down to what a reader actually needs.
 - **An HTTP/2 connection with a stream in progress, or a request still with its worker, is not closed as idle** after `Q.web.http2.limits.idleSeconds`, however quiet the socket.
 - **An HTTP/2 request answered at once by the pool (a refusal) no longer leaves a half-made stream behind**, which every later `WINDOW_UPDATE` for it tripped over with PHP warnings.
 - **`Q_WebServer_State::isStreaming()` reads the header names case-insensitively**, so `header('content-type: text/event-stream')` opts in like `Content-Type`.
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.49.
 
 ## v0.0.4.48 — the full Docker images load event after sockets
 
