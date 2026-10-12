@@ -65,7 +65,9 @@ edited down to what a reader actually needs.
 
 ---
 
-## Unreleased
+## v0.0.4.50 — a HEAD over HTTP/2 is its headers only, and a stop drains its connections
+
+2026-10-12
 
 ### Updated
 
@@ -74,6 +76,7 @@ edited down to what a reader actually needs.
 - **A streamed answer to a HEAD ends at its head**, over HTTP/1.1 and HTTP/2, and the worker is told to stop as for a client that left. It ran the script to its end only to drop every piece, holding a stream slot (`maxStreams`) all the while; for an event stream, until `streamTimeout`. A fork-per-request child no longer writes chunks after the head of a HEAD either.
 - **The server's own HTTP/1.1 answers to a HEAD carry no body**: the 403 for a type not served, a 404, and the pool's 502, 503 and 504 pages.
 - **A stop drains gracefully.** Each HTTP/2 connection is sent `GOAWAY` with `NO_ERROR` and its last stream; the streams up to it are answered in full, a stream opened after it is refused with `REFUSED_STREAM` so the client retries it elsewhere, and the connection closes as soon as it is done. An idle HTTP/1.1 keep-alive connection is closed at once. A stop used to wait out the whole drain timeout (five seconds) whenever a browser held a connection open for reuse, with the listener already closed, and then closed those connections without a word, failing every request multiplexed on them together. Measured on a test server with one request in flight: exit after 1.4 s instead of 5.2 s, and the connection ended by GOAWAY instead of cut.
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.50.
 
 ## v0.0.4.49 — streaming responses from persistent pool workers
 
