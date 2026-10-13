@@ -40,7 +40,39 @@ file_put_contents("$base/acl/panel.json", json_encode(array(
 	'passwordHash' => password_hash($password, PASSWORD_BCRYPT, array('cost' => 10)))));
 chmod("$base/acl/panel.json", 0600);
 
+// TLS with HTTP/2 too, when curl speaks it: a page served over HTTP/2 asks
+// its status check over HTTP/2, where /Q/ws used to be the application's 404.
+$h2 = function_exists('curl_init') and defined('CURL_HTTP_VERSION_2TLS') and function_exists('openssl_pkey_new')
+	and (curl_version()['features'] & CURL_VERSION_HTTP2);
+$web = array();
+$tls = 0;
+if ($h2) {
+	$key = openssl_pkey_new(array('private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA));
+	$crt = openssl_csr_sign(openssl_csr_new(array('commonName' => '127.0.0.1'), $key, array('digest_alg' => 'sha256')), null, $key, 1, array('digest_alg' => 'sha256'));
+	openssl_x509_export($crt, $crtPem); openssl_pkey_export($key, $keyPem);
+	file_put_contents("$base/fullchain.pem", $crtPem); file_put_contents("$base/privkey.pem", $keyPem);
+	$tls = rh_free_port();
+	$web = array('https' => array('mode' => 'manual', 'port' => $tls, 'cert' => "$base/fullchain.pem",
+		'key' => "$base/privkey.pem", 'certsDir' => $base), 'http2' => array('enabled' => true));
+	$GLOBALS['rh_extra_args'] = array('--https-port=' . $tls);
+}
+
+/** GET over HTTP/2 (TLS); array(status, body, http version). */
+function h2status($tls, $path, $headers)
+{
+	$ch = curl_init("https://127.0.0.1:$tls$path");
+	$hl = array();
+	foreach ($headers as $k => $v) $hl[] = "$k: $v";
+	curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2TLS,
+		CURLOPT_SSL_VERIFYPEER => false, CURLOPT_SSL_VERIFYHOST => 0, CURLOPT_HTTPHEADER => $hl, CURLOPT_TIMEOUT => 15));
+	$body = (string) curl_exec($ch);
+	$r = array((int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE), $body, curl_getinfo($ch, CURLINFO_HTTP_VERSION));
+	curl_close($ch);
+	return $r;
+}
+
 $port = rh_start('dash', array('Q' => array(
+	'web' => $web,
 	'webserver' => array('proxy' => array('trusted' => array('127.0.0.1', '::1'))),
 	'panel' => array('aclDir' => "$base/acl", 'sessionsDir' => "$base/sessions", 'bcryptCost' => 10),
 	'dashboard' => array('token' => $static),
@@ -138,6 +170,16 @@ $cookie1 = array('Cookie' => 'Q_panel_token=' . $t1);
 
 $r = rh_get($port, '/Q/ws', 10, 'GET', '', $REMOTE + $cookie1);
 check('signed in: the plain GET of /Q/ws says ok', array($r['status'], json_decode($r['body'], true)), array(200, array('ok' => true)));
+
+if ($h2) {
+	list($st, $b, $v) = h2status($tls, '/Q/ws', $REMOTE + $cookie1);
+	check('HTTP/2: the status check is answered by the server, not the application (ok)',
+		array($st, json_decode($b, true), $v), array(200, array('ok' => true), CURL_HTTP_VERSION_2_0));
+	list($st, $b) = h2status($tls, '/Q/ws', $REMOTE);
+	check('HTTP/2: ...and says signed out without a session', array($st, json_decode($b, true)['reason'] ?? null), array(403, 'signed-out'));
+} else {
+	printf("  skip  HTTP/2 half: no HTTP/2 in curl, or no openssl extension\n");
+}
 
 $r = rh_get($port, '/Q/dashboard', 15, 'GET', '', $REMOTE + $cookie1 + array('Accept' => 'text/html'));
 check('signed in: the dashboard is served', $r['status'], 200);

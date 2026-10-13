@@ -3069,6 +3069,18 @@ class Q_WebServer
 				'headers' => array('Content-Type' => 'text/html; charset=utf-8', 'Cache-Control' => 'no-store'));
 		}
 
+		// The dashboard's "would this browser be let in?" check (see
+		// wsStatusAnswer()). A page served over HTTP/2 asks it over HTTP/2,
+		// and it used to fall through to the application's 404 here, which
+		// the page took for a server that is away rather than "Signed out".
+		// The WebSocket itself is always HTTP/1.1 (no extended CONNECT).
+		if ($path === '/Q/ws') {
+			if (Q_Config::get('Q', 'dashboard', null) === false) {
+				return array('status' => 404, 'body' => 'Not found');
+			}
+			return self::wsStatusAnswer($parsed);
+		}
+
 		if ($path === '/Q/dashboard' || $path === '/Q/dashboard/') {
 			if (Q_Config::get('Q', 'dashboard', null) === false) {
 				return array('status' => 404, 'body' => 'Not found');
@@ -3661,11 +3673,8 @@ class Q_WebServer
 				// connect, and says "Signed out" with a sign-in link instead of
 				// retrying a dead credential as "Connecting" for ever.
 				if (strtolower((string) ($parsed['headers']['upgrade'] ?? '')) !== 'websocket') {
-					$body = $authed ? array('ok' => true)
-						: array('ok' => false, 'reason' => 'signed-out', 'signIn' => self::loginRedirectUrl(
-							array('path' => '/Q/dashboard', 'query' => '')));
-					self::sendResponse($client, $authed ? 200 : 403, json_encode($body, JSON_UNESCAPED_SLASHES),
-						'application/json', array('Cache-Control' => 'no-store'));
+					$a = self::wsStatusAnswer($parsed);
+					self::sendResponse($client, $a['status'], $a['body'], 'application/json', array('Cache-Control' => 'no-store'));
 					return false;
 				}
 				if (!$authed) {
@@ -6691,6 +6700,28 @@ WORKER;
 		if (self::isLocalRequest($parsed)) return null;
 		$c = self::adminCredential($parsed);
 		return $c === false ? null : $c['session'];
+	}
+
+	/**
+	 * GET /Q/ws without Upgrade: whether this browser would be let in to the
+	 * dashboard's WebSocket, as JSON -- 200 {"ok":true}, or 403 with
+	 * "signed-out" and the sign-in page that returns to the dashboard. A page
+	 * is never told why a handshake failed; this is how it tells "Signed out"
+	 * from a server that is away. The same answer over HTTP/1.1 and HTTP/2.
+	 *
+	 * @method wsStatusAnswer
+	 * @static
+	 * @param {array} $parsed
+	 * @return {array} status, body, headers
+	 */
+	static function wsStatusAnswer($parsed)
+	{
+		$authed = self::adminAllowed($parsed);
+		$body = $authed ? array('ok' => true)
+			: array('ok' => false, 'reason' => 'signed-out', 'signIn' => self::loginRedirectUrl(
+				array('path' => '/Q/dashboard', 'query' => '')));
+		return array('status' => $authed ? 200 : 403, 'body' => json_encode($body, JSON_UNESCAPED_SLASHES),
+			'headers' => array('Content-Type' => 'application/json', 'Cache-Control' => 'no-store'));
 	}
 
 	/**
