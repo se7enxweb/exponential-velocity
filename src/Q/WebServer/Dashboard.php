@@ -30,10 +30,50 @@ class Q_WebServer_Dashboard
 		// even when no requests are coming in
 		Q_Evented::repeat(2.0, function () {
 			if (empty(Q_WebSocket::$channels['dashboard'])) return;
+			Q_WebServer_Dashboard::closeEndedSessions();
+			if (empty(Q_WebSocket::$channels['dashboard'])) return;
 			Q_WebSocket::broadcastTo('dashboard', array(
 				'type' => 'heartbeat', 'stats' => Q_WebServer_Dashboard::getStats()
 			));
 		});
+	}
+
+	/** WebSocket close code for "the session that opened this has ended". */
+	const CLOSE_SIGNED_OUT = 4401;
+
+	/**
+	 * Close every dashboard WebSocket whose control panel session has ended
+	 * (expired after Q_WebServer_Panel_Auth::SESSION_SECONDS, signed out,
+	 * revoked by a password change), telling the page so first.
+	 *
+	 * The session was only checked at the handshake. A dashboard left open
+	 * stayed green on a session that had ended days before, until the next
+	 * restart closed the socket; then every reconnect was refused with a 403
+	 * the page cannot see, and it showed a red "Connecting" for good (alpha:
+	 * 255 refusals over three days from one tab, 2026-10-01..04, and again
+	 * 2026-10-12). Now the page hears it the moment it happens, says
+	 * "Signed out" with a sign-in link, and comes back by itself once the
+	 * browser holds a live session again.
+	 *
+	 * One stat of one small file per open dashboard every two seconds.
+	 *
+	 * @method closeEndedSessions
+	 * @static
+	 * @return {integer} how many were closed
+	 */
+	static function closeEndedSessions()
+	{
+		$closed = 0;
+		foreach (array_keys(Q_WebSocket::$channels['dashboard'] ?? array()) as $sk) {
+			$session = Q_WebSocket::$clients[$sk]['adminSession'] ?? null;
+			if ($session === null or Q_WebServer_Panel_Auth::validateToken($session)) continue;
+			$socket = Q_WebSocket::$clients[$sk]['socket'];
+			Q_WebSocket::encodeAndSend($socket, 0x1, json_encode(array('type' => 'auth', 'ok' => false, 'reason' => 'signed-out')));
+			Q_WebSocket::encodeAndSend($socket, 0x8, pack('n', self::CLOSE_SIGNED_OUT) . 'signed out');
+			Q_WebSocket::disconnect($sk);
+			$closed++;
+		}
+		return $closed;
 	}
 
 	/**
@@ -684,10 +724,16 @@ class Q_WebServer_Dashboard
 		$sysramDetailHtml = $ramSrv ? self::ramDetailHtml($ramSrv) : '&#8212;';
 		$recent = json_encode(array_reverse(array_slice(self::$recentRequests, -50)), $jsonFlags);
 
-		// Get auth token for WebSocket connection
+		// The WebSocket's credential. A session the browser holds as the
+		// Q_panel_token cookie is not written into the page: the handshake
+		// carries the cookie itself, so every reconnect presents the browser's
+		// current session -- one signed in again in another tab included. The
+		// page used to bake the token in at load time and present that one for
+		// as long as the tab stayed open, after the session had ended too
+		// (and wrote it into every access log line of /Q/ws).
 		$wsToken = '';
 		$ps = Q_WebServer_Panel_Auth::sessionFromRequest($parsed);
-		if ($ps !== null && !$ps['mustChange']) {
+		if ($ps !== null && !$ps['mustChange'] && strncmp((string) $ps['from'], 'cookie', 6) !== 0) {
 			$wsToken = $ps['token'];
 		}
 		if (!$wsToken) {

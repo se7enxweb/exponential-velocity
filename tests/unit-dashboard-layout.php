@@ -87,22 +87,25 @@ check('...and U() writes one <div> per item',
 check('...not the dotted single line',
 	strpos($dash, "' idle \\u00B7 '"), false);
 
-// ── Header: OS · PHP · Live/Connecting · Up ─────────────────────
+// ── Header: OS · PHP · live status · Up ─────────────────────────
 
-check('the header starts with the OS, then PHP',
-	strpos($dash, "el('sub',(S.os||'')+' \\u00B7 PHP '+(S.php||'')+' \\u00B7 <span class=\"ws\">") !== false, true);
-check('...the status reads Live / Connecting, capitalised',
-	strpos($dash, "(wsLive?'Live':'Connecting')") !== false, true);
-check('...and it ends with the ticking Up after the status',
-	strpos($dash, "(wsLive?'Live':'Connecting')+'</span></span> \\u00B7 Up '+fmtUp(upSec))") !== false, true);
+check('the header starts with the OS, then PHP, then the status badge',
+	strpos($dash, "el('sub',(S.os||'')+' \\u00B7 PHP '+(S.php||'')+' \\u00B7 '+wsBadge()+' \\u00B7 Up '+fmtUp(upSec))") !== false, true);
+check('...the status words are capitalised, one per state',
+	strpos($dash, "WSL={live:'Live',connecting:'Connecting',reconnecting:'Reconnecting',signedout:'Signed out',offline:'Offline'}") !== false, true);
 check('the lowercase status is gone',
 	strpos($dash, "(wsLive?'live':'connecting')"), false);
 check('the lowercase uptime label is gone',
 	strpos($dash, "\\u00B7 up '+fmtUp") === false && strpos($dash, "'up '+fmtUp") === false, true);
 check('the older orders are gone',
 	strpos($dash, "el('sub','PHP '") === false && strpos($dash, "el('sub','up '") === false, true);
-check('the status dot still turns green when live',
-	strpos($dash, "<span class=\"wd'+(wsLive?' on':'')+'\" id=\"wd\">") !== false, true);
+check('the status dot is green when live, amber while connecting, red otherwise',
+	strpos($dash, "var c=wsState==='live'?' on':(wsState==='connecting'||wsState==='reconnecting'?' wait':'')") !== false
+	&& strpos($dash, '.wd.on{background:var(--grn)}.wd.wait{background:var(--yel)}') !== false, true);
+check('...and the state is on the badge for scripts and tests (data-state)',
+	strpos($dash, 'data-state="\'+wsState+\'"') !== false, true);
+check('signed out offers a sign-in link',
+	strpos($dash, "(wsState==='signedout'?' <a id=\"wsin\" href=\"'+wsSignIn+'\">Sign in</a>':'')") !== false, true);
 
 // ── Still usable at phone width ─────────────────────────────────
 

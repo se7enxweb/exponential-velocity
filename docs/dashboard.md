@@ -87,6 +87,44 @@ access log, `/Q/metrics` and the traffic figures per domain still record every
 request. A path that merely contains `/Q/` further in (`/blog/Q/notes`) is the
 site's and is still shown. Off by default.
 
+### The live status in the header
+
+The header reads *OS · PHP · status · Up*. The status is the dashboard's
+WebSocket (`/Q/ws`), and it says what is going on:
+
+| Status | Dot | Means |
+|---|---|---|
+| **Live** | green | connected; heartbeats arrive every 2 seconds |
+| **Connecting** / **Reconnecting** | amber | the first try, or the server is restarting; it is retried after 1 s, doubling to at most 10 s |
+| **Signed out** · *Sign in* | red | this browser holds no live control panel session (it expired seven days after sign-in, was signed out, or ended with a password change) |
+| **Offline** | red | the server has not answered for several tries; still retried every 10 s |
+
+It is never given up on and comes back by itself: after a restart within a
+second or two of the server answering, and after **Signed out** once the
+browser holds a live session again -- a sign-in in any tab will do, because
+every reconnect presents the browser's current `Q_panel_token` cookie. A tab
+that is shown again, comes back from the back-forward cache or gets its
+network back reconnects at once rather than after its throttled background
+timer. Ten seconds without a heartbeat counts as a dead connection (a laptop
+that slept, a changed network) and it is replaced.
+
+The server checks the session at the handshake and again every two seconds
+while the socket is open: when the session ends, the page is told
+(`{"type":"auth","ok":false}`) and the socket is closed with code 4401. A
+socket opened with `Q.dashboard.token` or from this machine has no session to
+end and stays open.
+
+A browser is never told why a WebSocket handshake failed, so after a failed
+connect the page asks `GET /Q/ws` without `Upgrade`. That answers whether this
+browser would be let in, as JSON: `200 {"ok":true}`, or
+`403 {"ok":false,"reason":"signed-out","signIn":"/Q/panel/(next)/..."}`.
+
+The page no longer writes the session's token into its WebSocket URL; only a
+`?token=` given in the dashboard's own address is passed on. The token baked in
+at load time was what kept a dashboard red for days: it was presented on every
+reconnect after the session had ended, a sign-in in another tab
+notwithstanding, and it was written into every access-log line of `/Q/ws`.
+
 ---
 
 ## ⚙️ Control Panel

@@ -3654,13 +3654,35 @@ class Q_WebServer
 				// even with a dashboard token configured, and compared the
 				// token with === rather than in constant time.
 				$authed = self::adminAllowed($parsed);
+				// A plain GET (no Upgrade) asks whether this browser would be
+				// let in, as JSON. A browser is never told why a WebSocket
+				// handshake failed -- a 403 and an unreachable server look the
+				// same to the page -- so the dashboard asks here after a failed
+				// connect, and says "Signed out" with a sign-in link instead of
+				// retrying a dead credential as "Connecting" for ever.
+				if (strtolower((string) ($parsed['headers']['upgrade'] ?? '')) !== 'websocket') {
+					$body = $authed ? array('ok' => true)
+						: array('ok' => false, 'reason' => 'signed-out', 'signIn' => self::loginRedirectUrl(
+							array('path' => '/Q/dashboard', 'query' => '')));
+					self::sendResponse($client, $authed ? 200 : 403, json_encode($body, JSON_UNESCAPED_SLASHES),
+						'application/json', array('Cache-Control' => 'no-store'));
+					return false;
+				}
 				if (!$authed) {
 					self::sendResponse($client, 403, 'Forbidden — token required');
 					return false;
 				}
+				// The session that let it in, kept with the socket: the
+				// dashboard closes the socket when that session ends
+				// (Q_WebServer_Dashboard::closeEndedSessions()). Taken before
+				// the upgrade, which registers the client.
+				$session = self::adminSession($parsed);
 				$upgraded = Q_WebSocket::upgrade(
 					$client, $parsed['headers'], null, 'dashboard'
 				);
+				if ($upgraded and isset(Q_WebSocket::$clients[(int) $client])) {
+					Q_WebSocket::$clients[(int) $client]['adminSession'] = $session;
+				}
 				return $upgraded; // true = keep open
 			}
 			// Documentation viewer
@@ -6605,6 +6627,31 @@ WORKER;
 	 */
 	static function hasAdminCredential($parsed)
 	{
+		return self::adminCredential($parsed) !== false;
+	}
+
+	/**
+	 * The admin credential a request carries, and whether it can end: false
+	 * when there is none; otherwise array('session' => the control panel
+	 * session token that admits it), with 'session' null for the static
+	 * Q.dashboard.token, which does not expire.
+	 *
+	 * A session admits only while it is live, its default key has been
+	 * changed and its second factor, if any, has been given: the rule of
+	 * Q_WebServer_Panel_Auth::validateToken(). A session still waiting for its
+	 * code (two-factor) used to be let in here through the cookie, so the
+	 * password alone opened the dashboard and phpinfo.
+	 *
+	 * The dashboard's WebSocket keeps the session that admitted it and is
+	 * closed when that session ends (Q_WebServer_Dashboard::closeEndedSessions()).
+	 *
+	 * @method adminCredential
+	 * @static
+	 * @param {array} $parsed
+	 * @return {array|false}
+	 */
+	static function adminCredential($parsed)
+	{
 		$qp = array();
 		if (!empty($parsed['query'])) parse_str((string) $parsed['query'], $qp);
 		$auth = (string) ($parsed['headers']['authorization'] ?? '');
@@ -6615,14 +6662,35 @@ WORKER;
 		);
 		// A control panel session, wherever the request carries it -- the same
 		// answer the panel and the shell get (Q_WebServer_Panel_Auth::sessionFromRequest).
-		if (class_exists('Q_WebServer_Panel_Auth') && ($ps = Q_WebServer_Panel_Auth::sessionFromRequest($parsed)) !== null && !$ps['mustChange']) return true;
+		if (class_exists('Q_WebServer_Panel_Auth') && ($ps = Q_WebServer_Panel_Auth::sessionFromRequest($parsed)) !== null
+			&& !$ps['mustChange'] && empty($ps['twoFactorPending'])) {
+			return array('session' => $ps['token']);
+		}
 		$static = Q_Config::get('Q', 'dashboard', 'token', null);
 		foreach ($given as $t) {
 			if ($t === '') continue;
-			if (is_string($static) and $static !== '' and hash_equals($static, $t)) return true;
-			if (Q_WebServer_Panel::validateToken($t)) return true;
+			if (is_string($static) and $static !== '' and hash_equals($static, $t)) return array('session' => null);
+			if (Q_WebServer_Panel::validateToken($t)) return array('session' => $t);
 		}
 		return false;
+	}
+
+	/**
+	 * The control panel session that admits a request to the admin surface,
+	 * or null when what admits it does not end: this machine, the static
+	 * token, a server with no credential configured and Q.dashboard.remote on.
+	 * Only meaningful for a request adminAllowed() lets in.
+	 *
+	 * @method adminSession
+	 * @static
+	 * @param {array} $parsed
+	 * @return {string|null}
+	 */
+	static function adminSession($parsed)
+	{
+		if (self::isLocalRequest($parsed)) return null;
+		$c = self::adminCredential($parsed);
+		return $c === false ? null : $c['session'];
 	}
 
 	/**

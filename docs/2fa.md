@@ -59,6 +59,9 @@ never returned again, and never put in an error message.
 
 With enforcement on, a correct password no longer opens the panel by itself: it
 gives a **pending** session that can do nothing but present a code or sign out.
+That holds for the server's other views too: a pending session opens neither
+`/Q/dashboard` nor its WebSocket, `/Q/stats`, `/Q/metrics` or `/Q/phpinfo` (it
+used to, through the `Q_panel_token` cookie, before v0.0.4.52).
 The page then asks for the 6-digit code (with a "use a recovery code instead"
 link). A valid code — or a recovery code — completes the sign-in and opens the
 panel. A bookmarked deep link still works: after the code, you land where you

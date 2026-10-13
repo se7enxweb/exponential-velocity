@@ -86,7 +86,8 @@ transition:background .1s}
 .tp .p{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',monospace}
 .tp .c{min-width:50px;text-align:right;color:var(--ac);white-space:nowrap;flex-shrink:0}.tp .a{min-width:72px;text-align:right;color:var(--dim);white-space:nowrap;flex-shrink:0}
 .ws{display:inline-flex;align-items:center;gap:6px;font-size:12px}
-.wd{width:6px;height:6px;border-radius:50%;background:var(--red)}.wd.on{background:var(--grn)}
+.wd{width:6px;height:6px;border-radius:50%;background:var(--red)}.wd.on{background:var(--grn)}.wd.wait{background:var(--yel)}
+.ws a{color:inherit;text-decoration:underline}
 .room{display:flex;justify-content:space-between;padding:4px 0;font-size:12px}
 .room .n{font-family:'SF Mono',monospace;color:var(--pur)}
 .log-wrap{max-height:50vh;overflow-y:auto;overflow-anchor:none}.le.lh{font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.04em;font-size:12px;border-bottom:1px solid rgba(128,128,128,.22);position:sticky;top:0;background:var(--bg,#111);z-index:1}.le.lh span{color:inherit}
@@ -178,8 +179,15 @@ if(h>0)return h+'h '+m+'m '+ss+'s';
 return m+'m '+ss+'s';
 }
 // OS, then PHP, then the Live/Connecting status, uptime last.
-function tickUp(){upSec++;el('sub',(S.os||'')+' \u00B7 PHP '+(S.php||'')+' \u00B7 <span class="ws"><span class="wd'+(wsLive?' on':'')+'" id="wd"></span><span id="wl">'+(wsLive?'Live':'Connecting')+'</span></span> \u00B7 Up '+fmtUp(upSec))}
-var wsLive=false;
+function tickUp(){upSec++;el('sub',(S.os||'')+' \u00B7 PHP '+(S.php||'')+' \u00B7 '+wsBadge()+' \u00B7 Up '+fmtUp(upSec))}
+// The live channel's state, shown as a dot and a word: live (green),
+// connecting / reconnecting (amber: the first try, or a restart under way),
+// signedout (red, with a sign-in link) and offline (red: still unreachable
+// after several tries). data-state carries it for scripts and tests.
+var wsLive=false,wsState='connecting',WSL={live:'Live',connecting:'Connecting',reconnecting:'Reconnecting',signedout:'Signed out',offline:'Offline'};
+function wsBadge(){var c=wsState==='live'?' on':(wsState==='connecting'||wsState==='reconnecting'?' wait':'');
+return '<span class="ws" id="ws" data-state="'+wsState+'"><span class="wd'+c+'" id="wd"></span><span id="wl">'+WSL[wsState]+'</span>'
++(wsState==='signedout'?' <a id="wsin" href="'+wsSignIn+'">Sign in</a>':'')+'</span>'}
 
 // Sparkline ticker — shift left every second even when idle
 var spData=new Array(60).fill(0),spDirty=false;
@@ -412,10 +420,42 @@ setInterval(function(){tickUp();tickSpark()},1000);
 tickUp();
 
 var wsUrl=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/Q/ws?token=abc';
-var ws;function C(){ws=new WebSocket(wsUrl);
-ws.onopen=function(){wsLive=true;tickUp()};
-ws.onmessage=function(e){var m=JSON.parse(e.data);if(m.type==='request'){A(m.entry);if(m.stats)U(m.stats)}else if(m.type==='heartbeat'){U(m.stats)}};
-ws.onclose=function(){wsLive=false;tickUp();setTimeout(C,2000)}}
+// The connection. It is never given up: a refused or lost socket is retried
+// with a backoff (1 s doubling to 10 s), and at once when the tab is shown
+// again, comes back from the back-forward cache or the network returns.
+// A browser is never told why a handshake failed, so after a failed connect
+// the page asks /Q/ws with a plain GET: a 403 there means this browser holds
+// no live session, shown as "Signed out" rather than "Connecting" for ever;
+// it heals by itself once a sign-in (in any tab) gives the browser a live
+// session cookie. The server closes an open socket whose session ends (code
+// 4401). Heartbeats come every 2 s, so 10 s of silence is a dead connection
+// that never said so (a laptop asleep, a changed network): it is replaced.
+var wsStatusUrl=location.origin+'/Q/ws?token=abc',
+wsSignIn='/Q/panel/(next)/'+btoa(location.pathname).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''),
+ws=null,wsTries=0,wsTimer=null,wsLast=0,wsGen=0;
+function wsSet(st){wsState=st;wsLive=st==='live';upSec--;tickUp()}
+function wsLater(ms){clearTimeout(wsTimer);wsTimer=setTimeout(C,ms)}
+function wsBackoff(){return Math.min(1000*Math.pow(2,Math.max(wsTries-1,0)),10000)}
+function wsFailed(){wsTries++;var gen=wsGen;
+var after=function(st){if(gen!==wsGen)return;wsSet(st);wsLater(st==='signedout'?Math.max(wsBackoff(),5000):wsBackoff())};
+if(!window.fetch){after(wsTries>4?'offline':'reconnecting');return}
+fetch(wsStatusUrl,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}}).then(function(r){
+if(r.status===401||r.status===403){return r.json().then(function(j){if(j&&j.signIn)wsSignIn=j.signIn},function(){}).then(function(){after('signedout')})}
+after(wsTries>4?'offline':'reconnecting')},function(){after(wsTries>4?'offline':'reconnecting')})}
+function C(){clearTimeout(wsTimer);var gen=++wsGen;
+if(ws){var old=ws;ws=null;old.onclose=old.onmessage=old.onopen=null;try{old.close()}catch(e){}}
+var opened=false,sk;try{sk=new WebSocket(wsUrl)}catch(e){wsFailed();return}ws=sk;
+sk.onopen=function(){if(gen!==wsGen)return;opened=true;wsTries=0;wsLast=Date.now();wsSet('live')};
+sk.onmessage=function(e){if(gen!==wsGen)return;wsLast=Date.now();var m=JSON.parse(e.data);if(m.type==='request'){A(m.entry);if(m.stats)U(m.stats)}else if(m.type==='heartbeat'){U(m.stats)}else if(m.type==='auth'&&m.ok===false){wsSet('signedout')}};
+sk.onclose=function(e){if(gen!==wsGen)return;ws=null;
+if(e&&e.code===4401){wsTries++;wsSet('signedout');wsLater(5000);return}
+if(opened){wsTries=1;wsSet('reconnecting');wsLater(1000);return}
+wsFailed()}}
+setInterval(function(){if(wsState==='live'&&Date.now()-wsLast>10000){wsSet('reconnecting');C()}},2000);
+function wsNow(){if(wsState!=='live')C()}
+document.addEventListener('visibilitychange',function(){if(!document.hidden)wsNow()});
+window.addEventListener('online',wsNow);
+window.addEventListener('pageshow',function(e){if(e.persisted)C()});
 C();
 // Section tabs, as in the control panel: the one in view is marked.
 (function(){var tabs=[].slice.call(document.querySelectorAll('.tabs .tab'));if(!tabs.length||!window.IntersectionObserver)return;
