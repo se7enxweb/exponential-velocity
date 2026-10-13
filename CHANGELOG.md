@@ -65,6 +65,22 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.52 — the dashboard's live status follows the browser's session
+
+2026-10-12
+
+### Fixed
+
+- **The dashboard no longer sits on a red "Connecting" after its session has ended.** The page wrote the session token it was loaded with into its WebSocket URL, and the server checked the session only at the handshake. A dashboard left open stayed green on a session that had ended (seven days after sign-in, a sign-out, a password change) until the next restart closed the socket; from then on every reconnect presented the dead token, was refused with a 403 the page cannot see, and was retried every two seconds without end, even after signing in again in another tab. The page now leaves the cookie session's token out of the URL, so each reconnect presents the browser's current `Q_panel_token` cookie, and the session token no longer appears in the access log lines of `/Q/ws`.
+- **A session still waiting for its second factor opens nothing on the admin surface.** Through the cookie it opened `/Q/dashboard` and its WebSocket, `/Q/stats`, `/Q/metrics` and `/Q/phpinfo` with the password alone. `Q_WebServer::adminCredential()` now applies the rule of `Q_WebServer_Panel_Auth::validateToken()` to every credential.
+
+### Updated
+
+- **An open dashboard socket is closed when its session ends.** The two-second heartbeat checks the session that admitted each socket; the page is told (`{"type":"auth","ok":false}`) and the socket closed with code 4401. Sockets opened with `Q.dashboard.token` or from this machine stay open.
+- **`GET /Q/ws` without `Upgrade` says whether this browser would be let in**, as JSON: 200 `{"ok":true}`, or 403 with the sign-in page that returns to the dashboard. Answered over HTTP/1.1 and HTTP/2 alike (over HTTP/2 the path used to fall through to the application's 404).
+- **The header status says what is going on and recovers by itself**: Live (green), Connecting or Reconnecting (amber), Signed out with a sign-in link, or Offline (red). Retried with a backoff of 1 s doubling to 10 s and never given up; at once when the tab is shown again, comes back from the back-forward cache or the network returns; a connection without a heartbeat for ten seconds is replaced. See docs/dashboard.md, "The live status in the header".
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.52.
+
 ## v0.0.4.51 — the warm-up's request ends before the pool forks
 
 2026-10-12
