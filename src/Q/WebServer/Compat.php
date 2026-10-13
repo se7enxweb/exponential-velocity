@@ -489,6 +489,83 @@ class Q_WebServer_Compat
 			if (file_exists($path)) @unlink($path);
 		}
 
+		self::resetRequestState();
+
+		@stream_wrapper_restore('file');
+	}
+
+	/**
+	 * End the parent's warm-up as a request ends, without running what it
+	 * registered.
+	 *
+	 * The warm-up script runs in the parent before the pool forks, and for
+	 * an application it is a request: a render through the front controller.
+	 * Nothing ended that request. What it registered stayed in this class --
+	 * which the statics snapshot leaves alone, because it manages its own
+	 * state -- and every worker forked afterwards inherited it:
+	 *
+	 *   - its shutdown functions, which the worker's first request then ran
+	 *     beside its own, and with a fresh worker per request
+	 *     (forkPerRequest) every request did: the warm-up's clean-up, its
+	 *     session write, its log flush, once per visitor;
+	 *   - the headers and response code it set, which went out with a
+	 *     worker's first response (every response, forked per request), as
+	 *     the snapshot's restore does not reach them and the worker clears
+	 *     them only after a request;
+	 *   - its error and exception handlers, still installed in a request
+	 *     that never set them;
+	 *   - a session it opened, with the session file's lock held by every
+	 *     worker, and its $_SESSION;
+	 *   - the ini values and environment it changed, restored only at the
+	 *     end of a worker's first request.
+	 *
+	 * The shutdown functions are dropped, not run: they belong to a render
+	 * whose response nobody received, and running them in the parent would
+	 * do on the parent what was meant for a request (a session write, a
+	 * database flush on a connection the warm-up must not keep). A session
+	 * the warm-up opened is released without being written for the same
+	 * reason. Output buffers are the caller's to discard, as only it knows
+	 * the level the warm-up started from.
+	 *
+	 * The file wrapper stays installed: the server keeps compiling through
+	 * it. Returns what was undone, for the log.
+	 *
+	 * @method endWarmup
+	 * @static
+	 * @return {array} 'shutdown' => functions dropped, 'headers' => headers dropped,
+	 *   'session' => whether a session was open
+	 */
+	static function endWarmup()
+	{
+		$done = array('shutdown' => count(self::$shutdownCallbacks), 'headers' => 0, 'session' => false);
+		if (!self::$enabled) return $done;
+		self::$shutdownCallbacks = array();
+
+		if (class_exists('Q_WebServer_State', false)) {
+			$done['headers'] = count(\Q_WebServer_State::getHeaders());
+		}
+
+		if (self::$sessionActive) {
+			$done['session'] = true;
+			if (self::$sessionFp) {
+				@flock(self::$sessionFp, LOCK_UN);
+				@fclose(self::$sessionFp);
+				self::$sessionFp = null;
+			}
+			self::$sessionActive = false;
+		}
+
+		self::resetRequestState();
+		return $done;
+	}
+
+	/**
+	 * Put back what one request changed and the next must not see. Shared by
+	 * shutdown(), at the end of every request, and endWarmup(), at the end
+	 * of the parent's warm-up.
+	 */
+	private static function resetRequestState()
+	{
 		// ── Restore error/exception handlers to boot state ──
 		//
 		// By popping, never by pushing. PHP keeps every handler that
@@ -584,7 +661,12 @@ class Q_WebServer_Compat
 		self::$sessionCookieParams = null;
 		self::$requestHeaders = array();
 
-		@stream_wrapper_restore('file');
+		// The session array is the request's, as it is under PHP-FPM, where
+		// a request that has not started a session has no $_SESSION at all.
+		// Superglobals are not part of the statics snapshot and the worker
+		// does not rebuild this one, so it used to stay: a request that did
+		// not start a session saw the previous visitor's session data in it.
+		unset($GLOBALS['_SESSION']);
 	}
 
 	/**
@@ -2033,6 +2115,8 @@ class Q_WebServer_Compat
 	 * Collects callbacks; Compat::shutdown() fires them at request end.
 	 * In fork-per-request mode this behaves identically to PHP's native
 	 * version because the process exits after the request anyway.
+	 * Those the parent's warm-up registers are dropped by endWarmup()
+	 * before the pool forks, so no worker inherits them.
 	 */
 	static function _register_shutdown_function($callback)
 	{

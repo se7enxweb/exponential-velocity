@@ -564,6 +564,7 @@ class Q_WebServer_Pool
 		$warmup = Q_Config::get('Q', 'webserver', 'warmup', null);
 		if (is_string($warmup) && $warmup !== '' && is_file($warmup)) {
 			$before = memory_get_usage(true);
+			$obLevel = ob_get_level();
 			$__run = static function ($__warmupFile) {
 				require $__warmupFile;
 			};
@@ -623,6 +624,13 @@ class Q_WebServer_Pool
 				fwrite(STDERR, '  warm-up ' . basename($warmup) . ' FAILED, its state was undone and workers warm lazily: '
 					. $e->getMessage() . "\n");
 			}
+			// Either way the warm-up was a request, and nothing else ends it.
+			$ended = self::endWarmupRequest($obLevel);
+			if ($ended['shutdown'] or $ended['headers'] or $ended['buffers'] or $ended['session']) {
+				fwrite(STDERR, sprintf("  warm-up %s ended: %d shutdown functions dropped unrun,"
+					. " %d headers, %d output buffers%s\n", basename($warmup), $ended['shutdown'],
+					$ended['headers'], $ended['buffers'], $ended['session'] ? ', an open session released' : ''));
+			}
 		}
 
 		if ($this->octane) {
@@ -666,6 +674,43 @@ class Q_WebServer_Pool
 				$pool->retireIdleExtras();
 			});
 		}
+	}
+
+	/**
+	 * End the parent's warm-up as a worker ends a request, before the statics
+	 * snapshot is taken and before any worker is forked.
+	 *
+	 * Nothing else ends it. What it left was inherited by every worker, and
+	 * some of it by every request: the shutdown functions it registered ran
+	 * in each worker's first request (in every request with a fresh worker
+	 * per request), and the headers it set were in the snapshot each worker
+	 * restores before a request. See Q_WebServer_Compat::endWarmup() for the
+	 * compat layer's part; the output buffers it left open above $obLevel,
+	 * the last error and the Platform's response state are dropped here.
+	 *
+	 * @method endWarmupRequest
+	 * @static
+	 * @param {integer} $obLevel ob_get_level() before the warm-up ran
+	 * @return {array} 'shutdown', 'headers', 'session' as endWarmup() reports them, and 'buffers'
+	 */
+	static function endWarmupRequest($obLevel)
+	{
+		$done = array('shutdown' => 0, 'headers' => 0, 'session' => false, 'buffers' => 0);
+		if (class_exists('Q_WebServer_Compat', false)) {
+			$done = Q_WebServer_Compat::endWarmup() + $done;
+		}
+		while (ob_get_level() > $obLevel) {
+			if (!@ob_end_clean()) break;
+			$done['buffers']++;
+		}
+		error_clear_last();
+		if (class_exists('Q_WebServer_State', false)) {
+			Q_WebServer_State::clear();
+		}
+		if (class_exists('Q_Response', false) && method_exists('Q_Response', 'clear')) {
+			try { Q_Response::clear(); } catch (\Throwable $e) { /* non-fatal */ }
+		}
+		return $done;
 	}
 
 	/**

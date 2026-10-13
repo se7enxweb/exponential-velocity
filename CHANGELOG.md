@@ -65,6 +65,13 @@ edited down to what a reader actually needs.
 
 ---
 
+## Unreleased
+
+### Updated
+
+- **The warm-up's request ends before the pool forks.** The script named by `Q.webserver.warmup` runs in the parent, and for an application it is a request -- Exponential's renders the front page through its kernel -- but nothing ended it, and what it registered lives in the compatibility layer, which the statics snapshot leaves alone. Every worker inherited it: the shutdown functions the warm-up registered ran in each worker's first request beside the request's own, and with a fresh worker per request (`forkPerRequest`) in every request; the headers and response code it set went out with those responses (with persistent workers they were in the snapshot, so in every response); its error and exception handlers were installed in requests that never set them; a session it opened kept its file locked in every worker; its ini and environment changes stood until a worker's first request ended. The pool now ends that request after the warm-up, succeeded or failed, before the snapshot and the first fork: the shutdown functions are dropped without running (they belong to a render nobody received), headers, response code and the Platform's response state are cleared, handlers are unwound to the boot ones, a session is released unwritten, ini values and environment are put back, and the output buffers it left open are discarded. The startup log says what was dropped. See [reset.md](docs/reset.md#warming-the-pool-in-the-parent-and-the-one-trap-in-it). `tests/unit-warmup-request-does-not-reach-workers.php` covers both worker modes; it fails on v0.0.4.50.
+- **A request's `$_SESSION` ends with the request**, as under PHP-FPM. Superglobals are not part of the statics snapshot and the worker did not rebuild this one, so a later request in the same persistent worker that started no session still saw the previous visitor's session data in it.
+
 ## v0.0.4.50 — a HEAD over HTTP/2 is its headers only, and a stop drains its connections
 
 2026-10-12

@@ -217,6 +217,21 @@ registries in the skip-list; resetting those too makes every request rebuild
 them (slow, and the memory returns), and keeping the template or content caches
 lets request state leak straight back.
 
+What the render registered and set *as a request* is the server's to end, and
+it does, before the snapshot and before the first fork, whether the warm-up
+succeeded or threw (`Q_WebServer_Pool::endWarmupRequest()`,
+`Q_WebServer_Compat::endWarmup()`): the shutdown functions it registered are
+dropped without running, its headers and response code are cleared, its error
+and exception handlers are unwound to the boot ones, a session it opened is
+released unwritten and `$_SESSION` removed, its ini and environment changes are
+put back, and the output buffers it left open are discarded. The startup log
+says what was dropped. Before, a worker's first request ran the warm-up's
+shutdown functions beside its own and went out with its headers -- with a fresh
+worker per request (`forkPerRequest`), every request did -- because none of that
+lives in a class static the snapshot puts back. A request's `$_SESSION` also
+ends with it now, as under PHP-FPM, so a request that starts no session never
+sees the previous one's.
+
 Verify a warm-up by behaviour, with the pair that exposes a frozen route or
 node: **several distinct URLs must return distinct content, each must carry a
 resolving stylesheet.** A single URL never shows a reset bug — it appears only on
