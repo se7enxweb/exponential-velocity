@@ -271,6 +271,10 @@ class Q_WebServer_Headers
 		if (!self::hasHeader($headers, 'Cache-Control')) {
 			$headers['Cache-Control'] = Q_WebServer::staticCacheControl();
 		}
+		// An SVG runs nothing and loads nothing when opened directly.
+		foreach (Q_WebServer_ResponseHeaders::forFile($ext) as $name => $value) {
+			if (!self::hasHeader($headers, $name)) $headers[$name] = $value;
+		}
 
 		// ETag / Last-Modified
 		$etag = '"' . dechex($mtime) . '-' . dechex($size) . '"';

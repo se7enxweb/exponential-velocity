@@ -84,6 +84,56 @@ class Q_WebServer_ResponseHeaders
 		return $out;
 	}
 
+	/** The Content-Security-Policy an SVG file is served with */
+	const SVG_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
+
+	/**
+	 * Headers a static file is served with because of its type, name =>
+	 * value: an SVG (.svg, .svgz) is a document a browser runs script from
+	 * when it is opened directly, so it goes out with
+	 * Content-Security-Policy: sandbox (no script, no request, inline style
+	 * only) and X-Content-Type-Options: nosniff. Shown with <img> or from a
+	 * style sheet it renders as before. Q.webserver.svgSandbox false turns
+	 * it off.
+	 *
+	 * @method forFile
+	 * @static
+	 * @param {string} $ext the file's extension, lower case
+	 * @return {array}
+	 */
+	static function forFile($ext)
+	{
+		if ($ext !== 'svg' and $ext !== 'svgz') return array();
+		if (class_exists('Q_Config', false)) {
+			$v = Q_Config::get('Q', 'webserver', 'svgSandbox', true);
+			if ($v === false or $v === 0 or $v === '0'
+				or (is_string($v) and in_array(strtolower(trim($v)), array('false', 'no', 'off', 'disabled'), true))) {
+				return array();
+			}
+		}
+		return array(
+			'Content-Security-Policy' => self::SVG_CSP,
+			'X-Content-Type-Options' => 'nosniff',
+		);
+	}
+
+	/**
+	 * forFile() as response lines ("Name: value\r\n").
+	 *
+	 * @method forFileLines
+	 * @static
+	 * @param {string} $ext
+	 * @return {string}
+	 */
+	static function forFileLines($ext)
+	{
+		$out = '';
+		foreach (self::forFile($ext) as $name => $value) {
+			$out .= $name . ': ' . $value . "\r\n";
+		}
+		return $out;
+	}
+
 	/**
 	 * Whether the configured headers also go on a script's response.
 	 *

@@ -208,6 +208,26 @@ a typo in the configuration cannot write a header of its own into every
 response. `tests/unit-response-headers.php` checks each kind of response over
 HTTP/1.1, HTTP/1.1 with TLS and HTTP/2.
 
+### SVG files
+
+An SVG is a document a browser runs script from when it is opened directly
+(its URL in the address bar, an `<object>` or an `<iframe>`), from the origin
+it was served from. Every `.svg` and `.svgz` file the server sends as a static
+file therefore goes out with
+
+```
+Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'
+X-Content-Type-Options: nosniff
+```
+
+so it runs nothing and loads nothing; shown with `<img>` or from a style sheet
+it renders as before. The headers are added over HTTP/1.1 and HTTP/2, in the
+in-memory copy and for an `X-Accel-Redirect` answer; `Q.webserver.headers`
+naming one of them does not send it twice. This is a second line of defence
+for applications that store uploaded SVG images (Exponential sanitizes them on
+upload). `Q.webserver.svgSandbox: false` turns it off.
+`tests/unit-svg-sandbox-headers.php` covers it.
+
 ---
 
 ## The control panel's password

@@ -3411,6 +3411,8 @@ class Q_WebServer
 			'Last-Modified' => gmdate('D, d M Y H:i:s', $mtime) . ' GMT',
 			'Cache-Control' => self::staticCacheControl($fsPath)
 		);
+		// An SVG runs nothing and loads nothing when opened directly.
+		$headers += Q_WebServer_ResponseHeaders::forFile($ext);
 		if ($method === 'HEAD') {
 			$body = '';
 		} else {
@@ -5023,10 +5025,14 @@ WORKER;
 			. "Last-Modified: " . gmdate('D, d M Y H:i:s', $mtime) . " GMT\r\n"
 			. "Cache-Control: " . self::staticCacheControl($fsPath) . "\r\n";
 		if ($hsts !== null) $baseHeaders .= "Strict-Transport-Security: $hsts\r\n";
+		// An SVG runs nothing and loads nothing when opened directly.
+		$typeHeaders = Q_WebServer_ResponseHeaders::forFile($ext);
+		$baseHeaders .= Q_WebServer_ResponseHeaders::forFileLines($ext);
 		// Q.webserver.headers. The same for every file this process serves,
 		// so the in-memory copy below may keep them.
 		$baseHeaders .= Q_WebServer_ResponseHeaders::lines(
-			array('content-type', 'etag', 'last-modified', 'cache-control')
+			array_merge(array('content-type', 'etag', 'last-modified', 'cache-control'),
+				array_map('strtolower', array_keys($typeHeaders)))
 		);
 
 		// ── Large file fork ──
