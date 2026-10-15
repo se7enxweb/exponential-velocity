@@ -65,6 +65,18 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.53 — SVG files are served sandboxed
+
+2026-10-15
+
+### Added
+
+- **SVG files go out with `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'` and `X-Content-Type-Options: nosniff`.** An SVG opened directly (its URL in the address bar, an `<object>`, an `<iframe>`) is a document of the origin it came from, and a browser runs its script. Every `.svg` and `.svgz` the server sends as a static file now runs nothing and loads nothing that way; shown with `<img>` or from a style sheet it renders as before. Over HTTP/1.1 and HTTP/2, from the in-memory copy, and for an `X-Accel-Redirect` answer; a header `Q.webserver.headers` already names is not sent twice. A second line of defence for applications that store uploaded SVG images (Exponential sanitizes them on upload). `Q.webserver.svgSandbox: false` turns it off. See [security.md](docs/security.md#svg-files); `tests/unit-svg-sandbox-headers.php` covers it.
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.53.
+
 ## v0.0.4.52 — the dashboard's live status follows the browser's session
 
 2026-10-12
