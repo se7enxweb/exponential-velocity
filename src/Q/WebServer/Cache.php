@@ -129,6 +129,26 @@ class Q_WebServer_Cache
 	static $negativeTtl = 0;
 
 	/**
+	 * Whether a request's own Cache-Control: no-cache (or Pragma: no-cache,
+	 * when it sends no Cache-Control) is honoured as RFC 9111 means it: the
+	 * stored copy may not be used without asking the origin, so the request
+	 * goes to the application, and the answer it gets is stored again by
+	 * put() as a refresh would be. Off (false) keeps the old behaviour
+	 * exactly, where only the refresh header reads past the cache.
+	 *
+	 * Why an application asks for it: every request answered here never
+	 * reaches the application, so whatever the application does per request
+	 * -- logging, intrusion detection, counting -- does not see it. A client
+	 * that asks for an answer from the origin should get one, as it does
+	 * from a server without this cache in front. It opens no new way past
+	 * the cache: a client could always add a query parameter of its own.
+	 * Q.web.cache.honorRequestNoCache
+	 * @property $honorRequestNoCache
+	 * @type {boolean}
+	 */
+	static $honorRequestNoCache = false;
+
+	/**
 	 * Whether to collapse insignificant whitespace in cached HTML.
 	 * Off unless asked for, like everything else that changes what is sent.
 	 * @property $minifyHtml
@@ -287,6 +307,7 @@ class Q_WebServer_Cache
 		self::$staleWhileRevalidate = (int) Q::ifset($config, 'staleWhileRevalidate', 0);
 		self::$revalidateLockSeconds = (int) Q::ifset($config, 'revalidateLockSeconds', 30);
 		self::$negativeTtl = (int) Q::ifset($config, 'negativeTtl', 0);
+		self::$honorRequestNoCache = (bool) Q::ifset($config, 'honorRequestNoCache', false);
 		self::$minifyHtml = (bool) Q::ifset($config, 'minifyHtml', false);
 		self::$middleOut = (bool) Q::ifset($config, 'middleOut', false);
 		self::$dictionary = null;   // reloaded lazily
@@ -620,6 +641,11 @@ class Q_WebServer_Cache
 		// application does -- a site in maintenance shows its maintenance page,
 		// not the pages stored before it went offline.
 		if (self::paused()) return null;
+		// The client asked for an answer from the origin (honorRequestNoCache):
+		// neither cache answers. Before both, because the application's cache
+		// answering would not be the application either.
+		if (self::$honorRequestNoCache
+		and self::isNoCacheRequest($parsed['headers'] ?? array())) return null;
 		// The application's own cache (Q.web.appCache) knows who the visitor
 		// is, so it answers the requests with a session cookie that this cache
 		// skips: asked first for those. For the rest this cache answers first
@@ -709,7 +735,9 @@ class Q_WebServer_Cache
 		// Cache-Control: no-cache. Browsers send that on a plain reload, and
 		// honouring it would let any client, or a crawler, bypass the cache at
 		// will and make the server render on demand. This one is only sent by
-		// something that has been told to send it.
+		// something that has been told to send it. An installation that wants
+		// the standard header honoured switches on honorRequestNoCache, which
+		// get() checks before this.
 		if (self::isRefreshRequest($parsed['headers'])) return null;
 
 		$key = self::cacheKey($parsed);
@@ -1856,6 +1884,39 @@ class Q_WebServer_Cache
 		}
 		if ($name === '') return false;
 		return !empty($headers[$name]);
+	}
+
+	/**
+	 * Does the request forbid answering it from a stored copy?
+	 *
+	 * Cache-Control: no-cache (a directive of its own, not a no-cache="..."
+	 * on a response), or, when the request has no Cache-Control at all,
+	 * Pragma: no-cache, which RFC 9111 has a cache treat the same way.
+	 * max-age=0 -- what a browser sends on an ordinary reload -- is not
+	 * included: a reload is answered from here as before.
+	 *
+	 * @method isNoCacheRequest
+	 * @static
+	 * @param {array} $headers lower-case request header names
+	 * @return {boolean}
+	 */
+	static function isNoCacheRequest($headers)
+	{
+		if (!is_array($headers)) return false;
+		$cc = $headers['cache-control'] ?? null;
+		if (is_array($cc)) $cc = implode(',', $cc);
+		if ($cc !== null and trim((string) $cc) !== '') {
+			foreach (explode(',', strtolower((string) $cc)) as $directive) {
+				if (trim($directive) === 'no-cache') return true;
+			}
+			return false;
+		}
+		$pragma = $headers['pragma'] ?? '';
+		if (is_array($pragma)) $pragma = implode(',', $pragma);
+		foreach (explode(',', strtolower((string) $pragma)) as $directive) {
+			if (trim($directive) === 'no-cache') return true;
+		}
+		return false;
 	}
 
 	static function hasSkipCookie($headers)

@@ -79,6 +79,14 @@ gets -- its `Content-Length` and `Content-Encoding` included -- and no body; a
 `END_STREAM`. A skip cookie matches any cookie
 whose name begins with it, so `PHPSESSID` also covers a name with a suffix added.
 
+With `honorRequestNoCache` on, a request that says `Cache-Control: no-cache`
+(or `Pragma: no-cache` without a `Cache-Control`) is not answered from either
+cache: it goes to the application, as it would without this cache in front, and
+the answer is stored again as a refresh would be. An application that logs or
+inspects every request (intrusion detection, a security log) sees those requests
+too. `max-age=0`, which a browser sends on an ordinary reload, is still answered
+from the cache. Off by default, where only `refreshHeader` reads past the cache.
+
 The key is the host, the path, the query string and the coding the stored body is
 in: gzip for a client that accepts it, otherwise the body as rendered. A browser
 that also offers `br` shares the gzip entry, since gzip is what the cache stores.
@@ -238,6 +246,7 @@ Every setting, with its default. All are under `Q.web.cache`.
 | `revalidateLockSeconds` | `30` | After this long, a request rendering a stale page is presumed gone and another may take over. |
 | `negativeTtl` | `0` | Seconds to keep `404` and `410` answers. `0` keeps none. |
 | `refreshHeader` | `"x-cache-refresh"` | A request header that renders and stores the page again. |
+| `honorRequestNoCache` | `false` | Send a request carrying `Cache-Control: no-cache` (or `Pragma: no-cache`) to the application instead of answering it from the cache; its answer is stored again. |
 | `generationFile` | `<dir>/.generation` | The generation marker. |
 | `apcu.enabled` | when APCu is usable | Keep small entries in APCu as well as on disk. Usable means `apcu_enabled()`, so `apc.enable_cli=1` under the CLI. `true` when it is not usable warns and stays off. |
 | `apcu.maxSize` | `65536` | Largest body, in bytes, kept in APCu. |
