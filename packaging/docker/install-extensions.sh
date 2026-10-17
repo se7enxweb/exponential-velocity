@@ -94,9 +94,21 @@ install_one() { # name tier how [configure...]
     # PECL asks questions for some packages; an empty answer takes the
     # default. A finite set of answers, not `yes`: under pipefail, yes dies of
     # SIGPIPE once pecl exits and the pipeline reported every install failed.
-    if printf '\n\n\n\n\n\n\n\n\n\n' | pecl install -o -f "$name" > "/tmp/pecl-$name.log" 2>&1; then
-      enable_ext "$name" && loads "$name" && ok=1
-    fi
+    # A download cut short (pecl: "unable to unpack", a partial .tgz) or a
+    # connection the network dropped is tried again, up to three times; a
+    # build error is not, it would fail the same way.
+    local try
+    for try in 1 2 3; do
+      if printf '\n\n\n\n\n\n\n\n\n\n' | pecl install -o -f "$name" > "/tmp/pecl-$name.log" 2>&1; then
+        enable_ext "$name" && loads "$name" && ok=1
+        break
+      fi
+      grep -qiE 'unable to unpack|download failed|could not download|connection (refused|reset|timed out)|timed out|temporary failure in name resolution' "/tmp/pecl-$name.log" || break
+      [ "$try" = 3 ] && break
+      echo "  note: $name: the download failed (try $try of 3), trying again"
+      rm -rf /tmp/pear/download /tmp/pear/cache
+      sleep $((try * 10))
+    done
   fi
   if [ "$ok" = 1 ]; then
     note "installed  $name ($tier, $how)"
