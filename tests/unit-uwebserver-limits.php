@@ -29,6 +29,12 @@ fclose($fh);
 function closed_after($port, $send, $max, $tls = false, $slow = null)
 {
 	$ctx = stream_context_create(array('ssl' => array('verify_peer' => false, 'verify_peer_name' => false)));
+	// The server keeps its deadlines in whole seconds (now + N at the second it
+	// saw the connection), so a connection opened late in a second is closed up
+	// to a second early. Opened just after a second begins, it is closed after
+	// N seconds, as the checks expect, however busy the machine was before.
+	$f = microtime(true) - floor(microtime(true));
+	if ($f > 0.05) usleep((int) ((1.05 - $f) * 1000000));
 	$fp = @stream_socket_client("tcp://127.0.0.1:$port", $e, $es, 2, STREAM_CLIENT_CONNECT, $ctx);
 	if (!$fp) return -1;
 	$t = microtime(true);
@@ -68,7 +74,7 @@ check('the server starts', $srv !== null);
 $t = closed_after($port, '', 6);
 check('a connection that sends nothing: closed at --header-timeout (2 s)', $t >= 1.5 && $t < 4, true);
 $t = closed_after($port, "GET / HTTP/1.1\r\n", 8, false, "X-Slow: 1\r\n");
-check('a head sent slowly, a line every 0.4 s: closed at --header-timeout, however it trickles', $t >= 1.5 && $t < 4.5, true);
+check('a head sent slowly, a line every 0.4 s: closed at --header-timeout, however it trickles', $t >= 1.5 && $t < 4.5 ? true : sprintf('closed after %.2f s', $t), true);
 $t = closed_after($port, "GET / HTTP/1.1\r\nHost: l\r\n\r\n", 6);
 check('an idle connection after a request: closed at --keepalive-timeout (1 s)', $t >= 0.5 && $t < 3, true);
 $t = closed_after($port, "GET / HTTP/1.1\r\nHost: l\r\nContent-Length: 100\r\n\r\n0123456789", 6);
