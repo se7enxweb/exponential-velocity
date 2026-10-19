@@ -56,12 +56,16 @@ $http2 = function_exists('curl_init') && defined('CURL_HTTP_VERSION_2TLS')
 	&& (curl_version()['features'] & CURL_VERSION_HTTP2)
 	&& function_exists('openssl_pkey_new');
 
-function freePort()
+/** A port the OS reports free; $not excludes a port already handed out. */
+function freePort($not = 0)
 {
 	for ($i = 0; $i < 40; ++$i) {
-		$p = 19100 + random_int(0, 1400);
-		$probe = @stream_socket_server("tcp://127.0.0.1:$p", $e1, $e2);
-		if ($probe) { fclose($probe); return $p; }
+		$s = @stream_socket_server('tcp://127.0.0.1:0', $e1, $e2);
+		if (!$s) { continue; }
+		$name = stream_socket_get_name($s, false);
+		fclose($s);
+		$p = (int) substr($name, strrpos($name, ':') + 1);
+		if ($p > 0 and $p !== $not) { return $p; }
 	}
 	return 0;
 }
@@ -165,7 +169,7 @@ function run($server, $forkPerRequest, $http2)
 	));');
 
 	$port = freePort();
-	$tlsPort = freePort();
+	$tlsPort = freePort($port);
 	if (!$port or !$tlsPort or $port === $tlsPort) { check("$mode: free ports", 0, 1); return; }
 
 	$config = array('webserver' => array(
