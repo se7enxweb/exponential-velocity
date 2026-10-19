@@ -721,6 +721,10 @@ class Q_WebServer_Compat
 			if ($cached !== null) return $cached === false ? $source : $cached;
 		}
 
+		if (self::cannotNeedTransform($source)) {
+			return $source;
+		}
+
 		$tokens = token_get_all($source);
 		$count = count($tokens);
 		$out = '';
@@ -848,6 +852,70 @@ class Q_WebServer_Compat
 
 		return $result;
 	}
+
+	/**
+	 * Whether a source certainly needs no transform, found without
+	 * tokenizing it.
+	 *
+	 * The transform tokenizes the whole file and walks every token in PHP,
+	 * which costs about a second per million tokens. Applications write
+	 * large data files and include them -- a 14 MB var_export() of a search
+	 * index is 2.8 million tokens -- and a worker meets each new version of
+	 * such a file once, so every worker paid several seconds on its first
+	 * request after the file changed. Those files hold no code at all; the
+	 * words the transform looks for (exit, header ...) only occur inside
+	 * their string literals.
+	 *
+	 * So the string literals and comments are dropped with one regular
+	 * expression, and what is left -- the code -- is searched for any of
+	 * those words. None there: the transform would return the source
+	 * unchanged. Anything the expression cannot be sure of answers false,
+	 * and the file is tokenized as before:
+	 *   - not starting with "<?php" and white space (inline text first);
+	 *   - "<<<" anywhere (heredoc and nowdoc, whose bodies hold code);
+	 *   - "?>" left in the code (inline text after it can hold quotes);
+	 *   - double-quoted and backtick strings stay in the code that is
+	 *     searched, since {$...} in them is code;
+	 *   - a regular expression error (backtracking or JIT limits).
+	 * A line comment ends at "?>" for PHP as well, so it is cut there and
+	 * the "?>" is left in the code, which then answers false. "#[" opens
+	 * an attribute, not a comment. The words are searched for anywhere,
+	 * case-insensitively, whatever follows them: a variable or a method
+	 * of the same name only costs the full transform, never a missed one.
+	 *
+	 * @method cannotNeedTransform
+	 * @static
+	 * @param {string} $source
+	 * @return {boolean} true: the transform would change nothing
+	 */
+	static function cannotNeedTransform($source)
+	{
+		if (!preg_match('~\A<\?php\s~i', $source) or strpos($source, '<<<') !== false) {
+			return false;
+		}
+		$code = preg_replace(
+			'~\'[^\'\\\\]*+(?:\\\\.[^\'\\\\]*+)*+\''              // 'single-quoted'
+			. '|/\*.*?\*/'                                           // /* block */
+			. '|(?://|#(?!\[))[^\r\n?]*+(?:\?(?!>)[^\r\n?]*+)*+'     // line comment, to the end of the line or a closing tag
+			. '|("[^"\\\\]*+(?:\\\\.[^"\\\\]*+)*+"'                  // "double", kept
+			. '|`[^`\\\\]*+(?:\\\\.[^`\\\\]*+)*+`)~s',               // `backtick`, kept
+			'$1', $source);
+		if (!is_string($code) or strpos($code, '?>') !== false) {
+			return false;
+		}
+		if (self::$needleRegex === null) {
+			$words = array('exit', 'die');
+			foreach (array_keys(self::$replacements) as $name) {
+				$words[] = preg_quote($name, '~');
+			}
+			self::$needleRegex = '~\b(?:' . implode('|', $words) . ')\b~i';
+		}
+		$found = preg_match(self::$needleRegex, $code);
+		return $found === 0;
+	}
+
+	/** @var string|null cannotNeedTransform()'s search for the words the transform changes */
+	private static $needleRegex = null;
 
 	/**
 	 * Replacement for exit / die.
