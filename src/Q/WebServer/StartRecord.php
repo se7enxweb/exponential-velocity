@@ -65,7 +65,7 @@ class Q_WebServer_StartRecord
 			'command' => $command,
 			'args' => $args,
 			'cwd' => (string) getcwd(),
-			'env' => self::environment(getenv()),
+			'env' => self::environment(self::withoutExported(getenv())),
 			'log' => self::outputFile('/proc/self/fd/1'),
 			'started' => time(),
 		);
@@ -244,6 +244,24 @@ class Q_WebServer_StartRecord
 		'keep-globals', 'conf-dir', 'distribution', 'deploy', 'signer', 'm', 'user', 'group');
 
 	/** The variables of an environment a restart carries over. */
+	/**
+	 * An environment without what the server itself exported from envvars
+	 * (Q_WebServer_Layout::$exported): a restart reads the file again, so a
+	 * value taken from it must not come back as if the caller had set it.
+	 * @method withoutExported
+	 * @static
+	 * @param {array} $env
+	 * @return {array}
+	 */
+	static function withoutExported(array $env)
+	{
+		if (!class_exists('Q_WebServer_Layout', false)) return $env;
+		foreach (Q_WebServer_Layout::$exported as $k => $v) {
+			if (isset($env[$k]) and (string) $env[$k] === (string) $v) unset($env[$k]);
+		}
+		return $env;
+	}
+
 	static function environment(array $env)
 	{
 		$out = array();

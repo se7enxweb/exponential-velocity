@@ -65,6 +65,12 @@ edited down to what a reader actually needs.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **`envvars` reaches the server's environment, as Debian's `/etc/apache2/envvars` does.** At start-up the server reads the `envvars` file of every tree in its stack (base first, the top overlay winning) and exports what it sets before anything is forked, so every worker sees it with `getenv()` (and in `$_ENV` and `$_SERVER`) — whichever shell started or restarted the server, and whatever that shell had set. Until now only the `*_RUN_*` settings were read from it. The file is still read, never run: a value only a shell could work out (`$X`, `` `cmd` ``, a backslash, a bare value with a space) is not exported, and a variable the server was started with is kept. Names that change how programs are loaded or found, who the process is, or that collide with request headers are refused with a line on standard error: `PATH`, `LD_*`, `DYLD_*`, `MALLOC_*`, `HTTP_*`, `PHPRC`, `PHP_INI_SCAN_DIR`, `GLIBC_TUNABLES`, `HOME`, `USER` and the others listed in [layout.md](docs/layout.md#envvars-the-servers-environment). `--layout` lists the refused lines under `envvarsRefused`. The start record a restart reuses leaves out what came from the file, so a changed value is taken at the next restart. `tests/unit-envvars-export.php` covers it, end to end through a pool worker.
+
 ## v0.0.4.53 — SVG files are served sandboxed
 
 2026-10-15

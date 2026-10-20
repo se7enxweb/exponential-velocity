@@ -761,6 +761,16 @@ if ($opts['conf-dir'] !== null and $opts['conf-dir'] !== 'none' and $confDir ===
 foreach ($confDirs as $d) {
 	Q_WebServer_Layout::load($d);
 }
+// envvars, as Apache's: what it sets goes into this process's environment,
+// before anything is forked, so every worker inherits it (getenv()). Read,
+// never run; loader and shell variables are refused (Q_WebServer_Layout).
+if ($confDirs) {
+	$envvars = Q_WebServer_Layout::exportEnvvars($confDirs);
+	foreach ($envvars['refused'] as $name => $why) {
+		fwrite(STDERR, "  envvars: $name not exported ($why)\n");
+	}
+	unset($envvars);
+}
 // Remembered for what reads the trees later: the server's own page designs
 // are looked up in their designs/, overlay first (Q_WebServer_Design).
 if ($confDirs) {

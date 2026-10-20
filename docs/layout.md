@@ -44,6 +44,54 @@ Apache's file names. `envvars` holds `export NAME=value` lines, as Apache's does
 the server reads it, and never runs it as a script. `QBIX_RUN_USER` and
 `QBIX_RUN_GROUP` there set the workers' user and group, as `APACHE_RUN_USER` and
 `APACHE_RUN_GROUP` do (see [workers.md](workers.md#the-user-the-workers-run-as)).
+Every other variable it sets is exported into the server's environment — see
+[envvars](#envvars-the-servers-environment) below.
+
+---
+
+### envvars: the server's environment
+
+As `/etc/apache2/envvars` is sourced before `apache2` starts, the server reads the
+`envvars` file of every tree in its stack at start-up (base tree first, the top
+overlay winning) and puts what it sets into its own environment, before anything
+is forked. Every worker inherits it, so the application sees it with `getenv()`
+(and in `$_ENV` and `$_SERVER`), whoever started or restarted the server and
+whatever that shell had set:
+
+```sh
+# /etc/qbix/envvars
+export APP_FEATURE_X=1
+APP_REGION="eu west"
+APP_TEMPLATE='$literal'     # single quotes: taken as written
+```
+
+- **Read, never run.** One `NAME=value` or `export NAME=value` per line; `#`
+  comments; a value in single or double quotes, or a bare word, which ends at an
+  unquoted ` #`. `unset`, `if`, `.` and any other shell line are skipped. A value
+  only a shell could work out — `$OTHER`, `${X:-y}`, `` `cmd` ``, a backslash, or
+  a bare value with a space — is **not exported**; put it in single quotes to mean
+  it literally.
+- **The environment the server was started with wins.** A variable already set
+  there is kept, as for `QBIX_RUN_USER` (the command line beats the file). The
+  start record a restart reuses leaves out what came from the file, so after a
+  change to `envvars` a restart takes the new value.
+- **Refused names.** The file cannot set what changes how programs are found and
+  loaded, who the process is, or what collides with request headers. These are
+  skipped, with a line on standard error at start-up
+  (`envvars: NAME not exported (...)`), and `--layout` lists them under
+  `envvarsRefused`:
+
+  | Refused | Why |
+  |---|---|
+  | `LD_*`, `DYLD_*` | the dynamic loader (`LD_PRELOAD`, `LD_LIBRARY_PATH`, ...) |
+  | `MALLOC_*`, `GLIBC_TUNABLES`, `GCONV_PATH`, `GETCONF_DIR`, `LOCPATH`, `NLSPATH`, `NIS_PATH`, `TZDIR`, `HOSTALIASES`, `LOCALDOMAIN`, `RES_OPTIONS`, `RESOLV_HOST_CONF` | glibc reads them to load files or change behaviour; it ignores them itself in privileged programs |
+  | `PATH`, `IFS`, `PS4`, `ENV`, `BASH_ENV`, `SHELLOPTS`, `BASHOPTS`, `CDPATH`, `GLOBIGNORE`, `SHELL` | how commands the application runs are found and interpreted |
+  | `PHPRC`, `PHP_INI_SCAN_DIR` | which `php.ini` a PHP the application starts reads |
+  | `PERL5LIB`, `PERL5OPT`, `PYTHONPATH`, `PYTHONHOME`, `PYTHONSTARTUP`, `NODE_OPTIONS`, `RUBYOPT` | code other interpreters load first |
+  | `HOME`, `USER`, `LOGNAME`, `PWD`, `OLDPWD` | set by the server itself when the workers change user |
+  | `HTTP_*` | the names request headers have in `$_SERVER` |
+
+  The list is `Q_WebServer_Layout::$envDenied` and `$envDeniedPrefixes`.
 
 Only `*.conf` and `*.json` files in an `-enabled` directory are loaded, as Apache
 includes only `*.conf`, so an editor's backup file is never read as a setting. A

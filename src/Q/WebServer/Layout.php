@@ -26,7 +26,9 @@
  * qbixserver.php, --distribution).
  *
  * Files hold JSON objects -- the engine's configuration format -- under
- * Apache's names; envvars holds "export NAME=value" lines, as Apache's does.
+ * Apache's names; envvars holds "export NAME=value" lines, as Apache's does,
+ * and the server exports what it sets into its own environment, which every
+ * worker inherits (exportEnvvars()). It is read, never run.
  * They are merged in the order apache2.conf includes them, later winning:
  * the base file, ports.conf, mods-enabled, conf-enabled, and then the
  * --config file, which is normally a sites-enabled file.
@@ -364,7 +366,8 @@ class Q_WebServer_Layout
 	/**
 	 * The environment envvars sets: "export NAME=value" or "NAME=value" per
 	 * line, # comments, optional single or double quotes. No expansion --
-	 * the file is read, not executed.
+	 * the file is read, not executed. What the server exports from it, and
+	 * what it refuses, is exportEnvvars().
 	 * @method envvars
 	 * @static
 	 * @param {string|null} $dir
@@ -373,18 +376,131 @@ class Q_WebServer_Layout
 	static function envvars($dir)
 	{
 		$vars = array();
+		foreach (self::envvarsLines($dir) as $name => $entry) $vars[$name] = $entry[0];
+		return $vars;
+	}
+
+	/**
+	 * envvars parsed with how each value was written: name => array(value,
+	 * quote), quote being "'", '"' or '' (bare). A bare value ends at an
+	 * unquoted " #", as in a shell. Later lines win.
+	 * @method envvarsLines
+	 * @static
+	 * @param {string|null} $dir
+	 * @return {array}
+	 */
+	static function envvarsLines($dir)
+	{
+		$vars = array();
 		if ($dir === null or !is_file("$dir/envvars")) return $vars;
 		foreach (file("$dir/envvars", FILE_IGNORE_NEW_LINES) ?: array() as $line) {
 			$line = trim($line);
 			if ($line === '' or $line[0] === '#') continue;
 			if (!preg_match('/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/', $line, $m)) continue;
 			$value = trim($m[2]);
+			$quote = '';
 			if (strlen($value) >= 2 and ($value[0] === '"' or $value[0] === "'") and substr($value, -1) === $value[0]) {
+				$quote = $value[0];
 				$value = substr($value, 1, -1);
+			} else {
+				$value = (string) preg_replace('/\s+#.*$/', '', $value);
 			}
-			$vars[$m[1]] = $value;
+			$vars[$m[1]] = array($value, $quote);
 		}
 		return $vars;
+	}
+
+	/**
+	 * Names envvars may never put into the server's environment: they change
+	 * how programs are found and loaded (the dynamic loader, the shell, PHP's
+	 * own ini search, glibc's locale and resolver files), who the process is
+	 * (RunAs sets USER, LOGNAME and HOME itself), or they collide with request
+	 * headers in $_SERVER (HTTP_*). Apache's envvars has no business setting
+	 * any of them either. A refused line is reported at start-up and skipped.
+	 * @property $envDenied
+	 */
+	static $envDenied = array(
+		'PATH', 'IFS', 'PS4', 'ENV', 'BASH_ENV', 'SHELLOPTS', 'BASHOPTS', 'CDPATH', 'GLOBIGNORE',
+		'SHELL', 'HOME', 'USER', 'LOGNAME', 'PWD', 'OLDPWD',
+		'PHPRC', 'PHP_INI_SCAN_DIR',
+		'GCONV_PATH', 'GETCONF_DIR', 'GLIBC_TUNABLES', 'HOSTALIASES', 'LOCALDOMAIN', 'LOCPATH',
+		'NIS_PATH', 'NLSPATH', 'RESOLV_HOST_CONF', 'RES_OPTIONS', 'TZDIR',
+		'PERL5LIB', 'PERL5OPT', 'PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP', 'NODE_OPTIONS', 'RUBYOPT',
+	);
+
+	/** Name prefixes refused the same way: LD_* and DYLD_* (the loader), MALLOC_* (glibc), HTTP_* (request headers). */
+	static $envDeniedPrefixes = array('LD_', 'DYLD_', 'MALLOC_', 'HTTP_');
+
+	/**
+	 * What exportEnvvars() put into this process's environment: name => value.
+	 * A restart must not carry these over as if the caller had set them
+	 * (Q_WebServer_StartRecord leaves them out), or a later change to the file
+	 * would never be seen.
+	 * @property $exported
+	 */
+	static $exported = array();
+
+	/**
+	 * Why envvars may not set a name to a value, or null when it may.
+	 * @method envRefusal
+	 * @static
+	 * @param {string} $name
+	 * @param {string} $value
+	 * @param {string} $quote "'", '"' or ''
+	 * @return {string|null}
+	 */
+	static function envRefusal($name, $value, $quote = "'")
+	{
+		if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', (string) $name)) return 'not a valid name';
+		$upper = strtoupper($name);
+		if (in_array($upper, self::$envDenied, true)) return 'never taken from envvars';
+		foreach (self::$envDeniedPrefixes as $p) {
+			if (strncmp($upper, $p, strlen($p)) === 0) return "$p* is never taken from envvars";
+		}
+		if (strpos($value, "\0") !== false) return 'holds a NUL byte';
+		// The file is read, not run: a value only a shell could work out
+		// ($OTHER, `cmd`, \-escapes, or words after a space) is not guessed at.
+		if ($quote !== "'" and preg_match('/[$`\\\\]/', $value)) return 'needs a shell to expand (quote it in single quotes to mean it literally)';
+		if ($quote === '' and preg_match('/\s/', $value)) return 'has an unquoted space (quote the value)';
+		return null;
+	}
+
+	/**
+	 * Put what the envvars files of a tree stack set into this process's
+	 * environment, as Apache's envvars is sourced before apache2 starts: every
+	 * worker forked later inherits it, so getenv('EXP_SOMETHING') sees it.
+	 *
+	 * The trees are read in stack order, so the top overlay wins. A variable
+	 * already in the environment is kept: what the server was started with
+	 * beats the file, as it does for the *_RUN_* settings (Q_WebServer_RunAs).
+	 * Names in $envDenied and $envDeniedPrefixes, and values only a shell
+	 * could work out, are refused. Nothing is ever executed.
+	 * @method exportEnvvars
+	 * @static
+	 * @param {array} $dirs the stack, base first
+	 * @return {array} array('exported' => name => value, 'kept' => names,
+	 *   'refused' => name => reason)
+	 */
+	static function exportEnvvars(array $dirs)
+	{
+		$want = array();
+		foreach ($dirs as $dir) {
+			foreach (self::envvarsLines($dir) as $name => $entry) $want[$name] = $entry + array(2 => "$dir/envvars");
+		}
+		$result = array('exported' => array(), 'kept' => array(), 'refused' => array());
+		foreach ($want as $name => $entry) {
+			list($value, $quote, $file) = $entry;
+			$why = self::envRefusal($name, $value, $quote);
+			if ($why !== null) { $result['refused'][$name] = "$file: $why"; continue; }
+			$now = getenv($name);
+			if ($now !== false and !array_key_exists($name, self::$exported)) { $result['kept'][] = $name; continue; }
+			putenv("$name=$value");
+			$_ENV[$name] = $value;
+			$_SERVER[$name] = $value;
+			self::$exported[$name] = $value;
+			$result['exported'][$name] = $value;
+		}
+		return $result;
 	}
 
 	/**
@@ -414,6 +530,14 @@ class Q_WebServer_Layout
 			'site'     => $configFile,
 			'pairs'    => $pairs,
 			'envvars'  => array_keys(self::envvars($dir)),
+			'envvarsRefused' => (function ($dir) {
+				$r = array();
+				foreach (self::envvarsLines($dir) as $n => $e) {
+					$why = self::envRefusal($n, $e[0], $e[1]);
+					if ($why !== null) $r[$n] = $why;
+				}
+				return $r;
+			})($dir),
 			'designs'  => ($dir !== null and is_dir("$dir/designs")) ? "$dir/designs" : null,
 		);
 	}

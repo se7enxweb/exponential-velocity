@@ -417,6 +417,11 @@ A distribution may add its own names ahead of `QBIX_` (Exponential Velocity read
 `VC_RUN_USER`/`VC_RUN_GROUP` first). Names or numbers (`#1000`) are accepted; with
 a user and no group, the user's primary group is used.
 
+The rest of `envvars` reaches the workers too: the server exports every variable it
+sets into its own environment before forking, so the application reads it with
+`getenv()` (see [layout.md](layout.md#envvars-the-servers-environment), which also
+lists the names it refuses, such as `PATH` and `LD_*`).
+
 - A user or group that does not exist stops the server at start, with the reason.
 - `root` is refused unless `Q.webserver.allowRootWorkers` is `true`
   (`--allow-root-workers`, `QBIX_RUN_ALLOW_ROOT=1`).
