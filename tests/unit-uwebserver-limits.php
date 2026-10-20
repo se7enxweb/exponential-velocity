@@ -173,11 +173,15 @@ $port = uw_free_port();
 $srv = uw_start($bin, array_merge(uw_root_args(), array("--port=$port", '--workers=2', "--error-log=$d/wk.log")), $port);
 $killed = 0;
 $t = microtime(true);
-while (microtime(true) - $t < 6 && proc_get_status($srv['proc'])['running']) {
+// One status read per pass, kept: before PHP 8.3 proc_get_status() reports the
+// exit code only to the first call after the process ended, so asking again
+// for it below would read -1.
+$st = proc_get_status($srv['proc']);
+while (microtime(true) - $t < 6 && $st['running']) {
 	foreach (array_filter(array_map('intval', preg_split('/\s+/', trim((string) @file_get_contents("/proc/{$srv['pid']}/task/{$srv['pid']}/children"))))) as $k) { posix_kill($k, 9); $killed++; }
 	usleep(50000);
+	$st = proc_get_status($srv['proc']);
 }
-$st = proc_get_status($srv['proc']);
 check('workers killed again and again: the parent stops', $st['running'], false);
 check('...with exit status 1', $st['exitcode'], 1);
 check('...and says why', strpos((string) @file_get_contents("$d/wk.log"), 'workers keep ending; stopping') !== false);
