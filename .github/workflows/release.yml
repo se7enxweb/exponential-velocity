@@ -655,6 +655,13 @@ jobs:
       - name: Install and check in ${{ matrix.distro }}
         run: bash packaging/ci/test-package.sh '${{ matrix.distro }}' dist/exponential-velocity* dist-former/qbix-webserver*
 
+      # The takeover above runs EL 9 on the php:8.2 stream the former package
+      # needed. A fresh install takes the distribution's default, PHP 8.0 from
+      # AppStream: the oldest PHP the server supports.
+      - name: Install fresh on EL 9's default PHP 8.0
+        if: matrix.distro == 'el-9'
+        run: bash packaging/ci/test-package.sh el-9 dist/exponential-velocity*
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:

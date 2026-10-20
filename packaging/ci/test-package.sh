@@ -46,7 +46,10 @@ docker run --rm -v "$PWD/$(dirname "$pkg"):/pkgs:ro" "${oldmount[@]}" "$image" s
   }
   installed() { case '$distro' in debian-*|ubuntu-*) dpkg-query -W -f='\${Status}' \"\$1\" 2>/dev/null | grep -q 'install ok installed' ;; el-*) rpm -q \"\$1\" >/dev/null 2>&1 ;; esac; }
   # EL 9 installs its default PHP, 8.0 from AppStream: the oldest PHP the
-  # server supports, so this is where 8.0 is proven on a real distribution.
+  # server supports, so a fresh install is where 8.0 is proven on a real
+  # distribution. The former package needs 8.1 or later, so the takeover runs
+  # on the php:8.2 stream its users had to enable.
+  [ '$distro' = el-9 ] && [ -n '$oldfile' ] && dnf -y -q module enable php:8.2
 
   if [ -n '$oldfile' ]; then
     echo '== the former package, qbix-webserver'
