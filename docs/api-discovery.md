@@ -177,7 +177,7 @@ All the server's features — response cache, X-Accel-Redirect, component cache 
 
 ### When to use which
 
-**Built-in (default):** Zero dependencies. Works on any PHP 8.1+ installation. Good for development, small-to-medium sites, and environments where you can't install Composer packages.
+**Built-in (default):** Zero dependencies. Works on any PHP 8.0+ installation. Good for development, small-to-medium sites, and environments where you can't install Composer packages.
 
 **amphp:** Better performance under high concurrency thanks to `epoll`/`kqueue`. HTTP/2 multiplexing reduces connection overhead for asset-heavy pages. Required if you need server push or HTTP/2-only clients.
 

@@ -1,6 +1,6 @@
 ## 📦 Three Ways to Run
 
-### 1. From source (needs PHP 8.1+)
+### 1. From source (needs PHP 8.0+)
 
 ```bash
 php sbin/qbixserver.php
@@ -119,7 +119,7 @@ The full Platform includes additional server scripts like `static.php` for CDN-s
 
 **Linux / macOS (recommended):**
 
-- PHP 8.1 or later
+- PHP 8.0 or later (8.0 to 8.5; on Red Hat Enterprise Linux see [rhel.md](rhel.md))
 - Extensions: `sockets`, `pcntl` (for signals + workers), `openssl` (for HTTPS)
 
 ```bash
@@ -128,6 +128,9 @@ php -m | grep -E 'sockets|pcntl|openssl'
 
 # Install on Ubuntu/Debian
 sudo apt install php-cli php-sockets
+
+# Install on RHEL, AlmaLinux, Rocky 9 (PHP 8.0 from AppStream)
+sudo dnf install php-cli php-common php-process php-mbstring php-pdo php-xml
 ```
 
 **For the static binary:**

@@ -22,7 +22,7 @@ distribution's own PHP -- whose extensions it pulls in as package dependencies.
 | Debian 13 (trixie) | `exponential-velocity_<release>-1+deb13_all.deb` | 8.4 |
 | Ubuntu 22.04 | `exponential-velocity_<release>-1+ubuntu22.04_all.deb` | 8.1 |
 | Ubuntu 24.04 | `exponential-velocity_<release>-1+ubuntu24.04_all.deb` | 8.3 |
-| EL 9 | `exponential-velocity-<release>-1.el9.noarch.rpm` | 8.2 (module stream) |
+| EL 9 | `exponential-velocity-<release>-1.el9.noarch.rpm` | 8.0 (AppStream default), or any later stream |
 | EL 10 | `exponential-velocity-<release>-1.el10.noarch.rpm` | 8.4 |
 
 The packages are architecture-independent: the server is PHP, so the same package
@@ -46,13 +46,14 @@ EL 10:
 sudo dnf install ./exponential-velocity-<release>-1.el10.noarch.rpm
 ```
 
-EL 9 ships PHP 8.0 by default and the server needs 8.1 or later, so enable a newer
-PHP stream first:
+EL 9 -- on its default PHP, 8.0 from AppStream, which the server supports from
+v0.0.4.54; a newer stream (`dnf module enable -y php:8.2` first) works the same:
 
 ```bash
-sudo dnf module enable -y php:8.2
 sudo dnf install ./exponential-velocity-<release>-1.el9.noarch.rpm
 ```
+
+RHEL 8, SELinux, Remi's PHP and the rest: [PHP 8.0 and Red Hat Enterprise Linux](rhel.md).
 
 Some recommended extensions (`mongodb`, `redis`, `memcached`) come from EPEL or
 Remi on EL; without those repositories they are simply not installed, and

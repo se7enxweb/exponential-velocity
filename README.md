@@ -129,6 +129,7 @@ You can also package your entire app — code, assets, SQLite database — into 
 | 🗂️ | [Configuration Layout](docs/layout.md) | `/etc/qbix` laid out like `/etc/apache2`, load order, overlays, distributions |
 | ⌨️ | [Console & Command Line](docs/console.md) | `qbixserver.php` options, `qbixconsole` commands, `qbixctl`, option styles |
 | 📦 | [Running & Building](docs/running.md) | Source, phar, binary. Building static binaries. Requirements |
+| 🎩 | [PHP 8.0 & Red Hat Enterprise Linux](docs/rhel.md) | PHP 8.0 to 8.5: why 8.0 works, what differs there, installing on RHEL 8 and 9, extensions, systemd, SELinux, verifying |
 | 📀 | [Binaries & Signing](docs/binaries.md) | Pack apps, manage like zip, ECDSA M-of-N signing, Rekor, platform signing |
 | 🏗️ | [Architecture](docs/architecture.md) | Persistent workers, COW, execution model, mental model, benchmarks |
 | 🏭 | [Workers & Pool](docs/workers.md) | Pool size, static and dynamic pools, when a worker is replaced, reload |
@@ -181,7 +182,7 @@ qbixserver-windows-x64.exe
 ### Or run the phar, anywhere PHP runs
 
 The binaries exist for convenience, not necessity. `qbixserver.phar` is the
-same server and needs nothing but a PHP 8.1 or later interpreter, which is why
+same server and needs nothing but a PHP 8.0 or later interpreter, which is why
 it runs on far more than the handful of platforms we can build binaries for.
 
 ```bash
@@ -306,7 +307,7 @@ PHP is C with a great many statically linked dependencies and does not
 cross-compile the way a Go program does.
 
 The **phar** is the same server in one file and carries no PHP of its own, so
-the only question it asks of a platform is whether PHP 8.1 or later runs there.
+the only question it asks of a platform is whether PHP 8.0 or later runs there.
 That is a far longer list, and it is the reason the table below is as wide as
 it is.
 
@@ -319,7 +320,7 @@ it is.
 | **macOS** arm64 &middot; Apple Silicon | [`qbixserver-macos-arm64`](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-macos-arm64) | shipped |
 | **Windows** x64 | — | does not build yet |
 
-### The phar — anywhere PHP 8.1+ runs
+### The phar — anywhere PHP 8.0+ runs
 
 [`qbixserver.phar`](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver.phar)
 
@@ -353,7 +354,7 @@ aarch64 binary; a Pi 2, 3 or Zero 2 runs the phar on armv7. **IBM Z** is s390x
 and **IBM Power** is ppc64le, both proven above; an IBM xSeries is ordinary
 x86_64.
 
-**Expected, not yet proven.** These have a maintained PHP 8.1+ and no reason not
+**Expected, not yet proven.** These have a maintained PHP 8.0+ and no reason not
 to work, but nothing here has watched them do it, so they are listed as what
 they are:
 
@@ -372,7 +373,7 @@ The test for any of them is one line on the machine in question:
 php -v
 ```
 
-If that says 8.1 or later, download the phar and run it. That really is the
+If that says 8.0 or later, download the phar and run it. That really is the
 whole requirement, and if it works we would like to hear so we can move the row
 up a table.
 
@@ -392,11 +393,11 @@ This question gets asked seriously, so here is a serious answer. AmigaOS 4,
 MorphOS and AROS are real pre-emptive multitasking systems, a modern machine
 running one has gigabytes of memory, and **memory has never been the
 constraint.** The gap is simply that PHP on those systems stopped at 5.x, and
-the distance from there to 8.1 is library work.
+the distance from there to 8.0 is library work.
 
 The encouraging part is where that work stops. **Nothing in it is about this
 server.** The phar has no architecture and no C library of its own, so the day a
-PHP 8.1 exists for one of these systems is the day Velocity can run on it,
+PHP 8.0 exists for one of these systems is the day Velocity can run on it,
 with no port of our code at all. One person finishing a PHP port unlocks the
 whole thing.
 
@@ -442,7 +443,7 @@ at some point, and the Amiga community has closed longer ones.
 php -v
 ```
 
-If it reports 8.1 or later, then `php qbixserver.phar --root=./web` should
+If it reports 8.0 or later, then `php qbixserver.phar --root=./web` should
 simply work. Send word that it serves a page and the row moves into the proven
 table the same day — and it would be the most interesting entry in it.
 

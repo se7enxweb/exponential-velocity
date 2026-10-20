@@ -90,7 +90,7 @@ GD reads only the first frame of a GIF. The server detects animated GIFs and, wh
 
 - **GD** for everything. Without it the pipeline declines and the original file is served.
 - **WebP output and input** need GD built with WebP support (standard in most PHP builds).
-- **AVIF output** needs `imageavif()`, available from PHP 8.1 when GD is built with libavif. Without it, negotiation stops at WebP.
+- **AVIF output** needs `imageavif()`, available from PHP 8.1 when GD is built with libavif. Without it (and always on PHP 8.0), negotiation stops at WebP.
 - **BMP input** needs `imagecreatefrombmp()` (PHP 7.2+).
 
 Check with `php -r 'print_r(gd_info());'`.

@@ -257,7 +257,7 @@ Nothing to configure. On PHP 8.6+, the server detects `Io\Poll\Context` at start
 │  I/O:       epoll/kqueue (PHP 8.6 Io\Poll)│
 ```
 
-For PHP 8.1–8.5, the Symfony polyfill (`composer require symfony/polyfill-io-poll`) provides the same API backed by `stream_select` — useful for code compatibility testing but no performance gain.
+For PHP 8.0–8.5, the Symfony polyfill (`composer require symfony/polyfill-io-poll`) provides the same API backed by `stream_select` — useful for code compatibility testing but no performance gain.
 
 ### Driver priority
 

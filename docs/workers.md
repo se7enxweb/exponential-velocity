@@ -158,9 +158,9 @@ stops the zygote.
 another process with `SCM_RIGHTS`. Before **PHP 8.4**, a `Socket` object put in
 that message arrives as a different socket, so a worker forked from the zygote
 would talk into a dead end and every request after the first would be a 502. A
-stream resource arrives intact, on PHP 8.1 and later, so the server hands the
-worker's connection over as the stream it is, and the zygote runs on PHP 8.2,
-8.3, 8.4 and 8.5 alike. It still tries a hand-off to itself at start and uses
+stream resource arrives intact, on PHP 8.0 and later, so the server hands the
+worker's connection over as the stream it is, and the zygote runs on PHP 8.0,
+8.1, 8.2, 8.3, 8.4 and 8.5 alike. It still tries a hand-off to itself at start and uses
 the zygote only when the socket arrives intact; where it does not, workers are
 forked from the server, as with `zygote: false`, and the log says so:
 

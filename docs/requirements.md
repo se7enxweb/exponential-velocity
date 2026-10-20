@@ -20,15 +20,17 @@ check a machine, plan a build and install what is missing.
 ### PHP versions
 
 The static binaries are built for **PHP 8.2, 8.3, 8.4 and 8.5**. 8.3 is the default.
-The phar, Composer package, Docker image and OS packages run on any PHP from **8.1**.
+The phar, Composer package, Docker image and OS packages run on any PHP from **8.0**
+to 8.5 ([PHP 8.0 and Red Hat Enterprise Linux](rhel.md)).
 
 | Version | Note |
 |---|---|
+| 8.0 | The default PHP of RHEL 9 (AppStream). No static binary is built for it. AVIF images and the dashboard's per-request memory peak need 8.1 and 8.2; see [rhel.md](rhel.md#what-is-different-on-80). |
 | 8.4 | `imap`, `oci8` and `pdo_oci` are no longer bundled with PHP; they build from PECL. |
 | 8.5 | `opcache` is always compiled in and cannot be left out. |
 
 Always-present parts of PHP are not listed below, since no build can lack them:
-Core, `date`, `hash`, `json`, `pcre`, `random`, `Reflection`, `SPL` and `standard`.
+Core, `date`, `hash`, `json`, `pcre`, `random` (from PHP 8.2), `Reflection`, `SPL` and `standard`.
 
 ### Tiers
 

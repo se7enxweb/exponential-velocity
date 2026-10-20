@@ -69,6 +69,9 @@ It detects the package manager and names the packages for this PHP version:
 | macOS | the OS | `brew install shivammathur/extensions/redis@8.3` |
 | Windows | the OS | `extension=intl` in php.ini; PECL DLLs from pecl.php.net |
 
+On RHEL 8 and 9, including AppStream's PHP 8.0, which EL package carries which
+extension is listed in [rhel.md](rhel.md#the-php-extensions-it-needs).
+
 Force another system with `--manager=apt` (or dnf, dnf-scl, plesk, apk, pkg, brew,
 windows) and another PHP with `--php=8.4`. Several extensions share a package on some
 systems (`dom`, `xml`, `xsl` are `php8.3-xml` on Debian), and the command lists each

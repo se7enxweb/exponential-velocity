@@ -7,7 +7,7 @@ name: Platforms
 # dependencies, and it does not cross-compile the way a Go program does. That
 # ceiling is real and no amount of matrix entries moves it.
 #
-# The phar has no such ceiling. It is PHP, so it runs wherever PHP 8.1 or later
+# The phar has no such ceiling. It is PHP, so it runs wherever PHP 8.0 or later
 # runs, and that is a far longer list than five. This workflow boots those
 # platforms and watches the phar serve a page on each, so the support table in
 # the README is a record of something observed rather than an assumption.
