@@ -152,6 +152,8 @@ check('...with --workers=3 instead of --workers=2 and everything else as it was'
 	array(true, false, true));
 check('...still listening on the same ports', Q_WebServer_Ctl::portsOf($pid4), $ports1);
 exec("$ctl stop --pid=" . escapeshellarg($pidFile) . ' 2>&1', $o5, $c5);
+// Another process removed them: PHP before 8.3 would answer from its stat cache.
+clearstatcache();
 check('stop removes the pid file and the record with it', array($c5, is_file($pidFile), is_file($R::file($pidFile))), array(0, false, false));
 
 // ── 4. Started by hand, without a pid file: from the process table ──────

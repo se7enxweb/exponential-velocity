@@ -24,10 +24,10 @@ require_once __DIR__ . '/../src/Q/WebServer/Pool.php';
 $works = function_exists('socket_recvmsg') ? Q_WebServer_Pool::socketPassingWorks() : false;
 printf("  note  PHP %s: sockets passed intact between processes: %s\n", PHP_VERSION, $works ? 'yes' : 'no');
 check('no zygote where sockets are not passed intact', Q_WebServer_Pool::zygoteSupported() && !$works, false);
-// Sent as a stream resource, the socket arrives intact on 8.1 and later: the
+// Sent as a stream resource, the socket arrives intact on 8.0 and later: the
 // Socket-object path was what PHP before 8.4 got wrong.
-if (PHP_VERSION_ID >= 80100 && function_exists('socket_recvmsg')) {
-	check('sockets are passed intact on PHP 8.1 and later (sent as a stream)', $works, true);
+if (PHP_VERSION_ID >= 80000 && function_exists('socket_recvmsg')) {
+	check('sockets are passed intact on PHP 8.0 and later (sent as a stream)', $works, true);
 }
 check('the self-test answers the same the second time', function_exists('socket_recvmsg') ? Q_WebServer_Pool::socketPassingWorks() : false, $works);
 

@@ -233,6 +233,7 @@ if (!function_exists('pcntl_fork') || !is_dir('/proc/self')) {
 	$r = run(array_merge($ctlOld, array('status', "--pid=$pidFile")), '', $env);
 	check('qbixctl.php status (the former path) sees it running', array($r[0], strpos($r[1], (string) $pid2) !== false), array(0, true));
 	$r = run(array_merge($ctlNew, array('stop', "--pid=$pidFile")), '', $env);
+	clearstatcache();   // the pid file went in another process; PHP before 8.3 answers from its stat cache
 	check('...and sbin/qbixctl.php stops it', array($r[0], is_file($pidFile)), array(0, false));
 
 	// b. Started by qbixctl (sbin/qbixserver.php), restarted by the former qbixctl.php path.

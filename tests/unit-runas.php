@@ -100,6 +100,8 @@ if (!$root) {
 	check('root-owned document root, nothing configured: root as before, with a warning',
 		array($p['error'], $p['switch'], strpos((string) $p['warning'], 'belongs to root') !== false), array(null, false, true));
 	chown("$base/doc", $nobody['uid']);
+	// PHP before 8.3 keeps the owner it read before the chown() in its stat cache.
+	clearstatcache();
 
 	// drop() in a child: the worker user, its groups, and no way back.
 	reset_all();
