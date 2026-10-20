@@ -3331,13 +3331,27 @@ class Q_WebServer_CompatFileWrapper
 
 	/**
 	 * Record the mtime a path is being served at, and drop the opcode
-	 * cache's compile of it if the file has changed since.
+	 * cache's compile of it if the file has changed since -- only when the
+	 * cache would not see the change itself (opcacheTrustsItsCopy()).
+	 *
+	 * When it checks timestamps on every include (validate_timestamps on,
+	 * revalidate_freq 0) it already compiles a changed file again, once,
+	 * and every worker shares that compile. Dropping it here as well was
+	 * worse than redundant: each worker, on its first include of the new
+	 * version, threw away the compile another worker had just stored, so
+	 * a file changed under N workers was compiled N times, and each
+	 * discarded compile stayed in shared memory as waste: a 17 MB data file
+	 * changed three times under 8 workers left 252 MB wasted instead of
+	 * 126. With the memory full of waste nothing can be cached any more,
+	 * and every include compiles again (about a second each for that file)
+	 * until the server restarts.
 	 */
 	private static function noteServed($realPath, $mtime)
 	{
 		if (isset(self::$servedMtime[$realPath])
 			and self::$servedMtime[$realPath] !== $mtime
-			and function_exists('opcache_invalidate')) {
+			and function_exists('opcache_invalidate')
+			and self::opcacheTrustsItsCopy()) {
 			@opcache_invalidate($realPath, true);
 		}
 		if (count(self::$servedMtime) >= self::STAT_MEMO_MAX) {

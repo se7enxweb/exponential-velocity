@@ -121,7 +121,7 @@ by default it does not look at the file on every include:
 |---|---|
 | `opcache.validate_timestamps=0` | The cache never checks the file. The server drops the compile of any file it has served whose mtime moved, at request boundaries. |
 | `opcache.revalidate_freq=N` (default 2) | The cache checks at most every N seconds. The server re-checks the files it has served as each request starts, so an idle worker does not serve an old compile once more. |
-| `opcache.revalidate_freq=0` | The cache checks on every include; the server's own sweep costs nothing. |
+| `opcache.revalidate_freq=0` | The cache checks on every include; the server's own sweep costs nothing, and the server never drops a compile itself: the cache compiles a changed file once and every worker uses that compile. (Dropping it per worker as well made each worker compile a changed file again and left each discarded copy in shared memory as waste; a large generated file changed a few times under many workers filled the cache, and every include compiled from then on.) |
 | Same-second rewrites | Two versions written within one second have the same mtime. The server treats a file that new as unsettled and does not trust any cached copy of it. |
 | `opcache.file_update_protection` (default 2) | The cache refuses to store a file modified in the last N seconds. Useful here; leave it on. |
 
