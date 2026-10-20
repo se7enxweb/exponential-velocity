@@ -136,17 +136,23 @@ $samples = array(
 		"namespace App\\Http;\nuse App\\Kernel;\ntrait T { public function boot() { header('X: 1'); } }\nclass C extends Kernel { use T; }",
 	'closures and arrow functions' =>
 		"\$f = function (\$x) { header(\"X: \$x\"); return fn(\$y) => \$y + 1; };",
-	'match, enums and named arguments' =>
-		"enum E: string { case A = 'a'; }\n\$v = match(E::A) { E::A => 1, default => 0 };\nsetcookie(name: 'a', value: 'b');",
+	'match and named arguments' =>
+		"\$v = match(1) { 1 => 1, default => 0 };\nsetcookie(name: 'a', value: 'b');",
 	'nullsafe calls and spread' =>
 		"\$o?->header('X: 1');\n\$a = [...[1,2], 3];\nheader('X: 2');",
-	'first-class callable syntax' =>
-		"\$c = strlen(...);\nheader('X: 1');",
 	'heredoc with interpolation next to a real call' =>
 		"\$h = <<<TXT\n  header(\$x) is not a call here\nTXT;\nheader('X: 1');",
 	'a string containing what looks like PHP close' =>
 		"\$s = '?' . '>';\nheader('X: 1');",
 );
+// Syntax from PHP 8.1 is checked on 8.1 and later only: on 8.0 the sample
+// itself does not parse, before any transform.
+if (PHP_VERSION_ID >= 80100) {
+	$samples['enums'] = "enum E: string { case A = 'a'; }\n\$v = match(E::A) { E::A => 1, default => 0 };\nheader('X: 1');";
+	$samples['first-class callable syntax'] = "\$c = strlen(...);\nheader('X: 1');";
+} else {
+	echo "  skip  enums and first-class callable syntax: PHP 8.1 syntax\n";
+}
 foreach ($samples as $what => $code) {
 	$result = t($code);
 	check("$what still parses after the transform", parses($result), true);

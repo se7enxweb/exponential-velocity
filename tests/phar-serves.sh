@@ -3,7 +3,7 @@
 #
 # The static binaries exist for five targets, because that is what the build
 # toolchain ships for. The phar has no such limit: it is PHP, so it runs
-# wherever PHP 8.1 or later does -- the BSDs, the illumos family, the Linux
+# wherever PHP 8.0 or later does -- the BSDs, the illumos family, the Linux
 # architectures nobody builds binaries for, and Haiku. This is the test that
 # turns that from a claim into something we have watched happen.
 #
@@ -28,9 +28,9 @@ PORT="${PORT:-19777}"
 # on a platform that plainly has one, which reads as the platform being unable
 # to run the server rather than as this script not having looked properly.
 if ! command -v "$PHP" >/dev/null 2>&1; then
-    for _candidate in php8.4 php8.3 php8.2 php8.1 \
-                      php-8.4 php-8.3 php-8.2 php-8.1 \
-                      php84 php83 php82 php81; do
+    for _candidate in php8.4 php8.3 php8.2 php8.1 php8.0 \
+                      php-8.4 php-8.3 php-8.2 php-8.1 php-8.0 \
+                      php84 php83 php82 php81 php80; do
         if command -v "$_candidate" >/dev/null 2>&1; then
             PHP="$_candidate"
             break

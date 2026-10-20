@@ -74,6 +74,9 @@ class Q_WebServer_WarmupGuard
 	 */
 	static function restore()
 	{
+		if (!class_exists('Q_WebServer_Snapshot', false)) {
+			require_once __DIR__ . '/Snapshot.php';
+		}
 		$done = array('buffers' => 0, 'globals' => 0, 'classes' => 0);
 
 		while (ob_get_level() > self::$obLevel) {
@@ -112,8 +115,14 @@ class Q_WebServer_WarmupGuard
 				}
 				$reset = false;
 				foreach ($ref->getProperties(\ReflectionProperty::IS_STATIC) as $prop) {
-					if ($prop->getDeclaringClass()->getName() !== $cls || !$prop->hasDefaultValue()) {
+					if ($prop->getDeclaringClass()->getName() !== $cls || !Q_WebServer_Snapshot::hasDeclaredDefault($prop)) {
 						continue;
+					}
+					// PHP 8.0 reaches a private or protected static through
+					// reflection only after setAccessible(); 8.1 and later
+					// always do, and 8.5 deprecates the call.
+					if (PHP_VERSION_ID < 80100) {
+						$prop->setAccessible(true);
 					}
 					// A closure in a static is behaviour installed once, never
 					// request data -- the same rule as the snapshot's restore.
@@ -129,7 +138,13 @@ class Q_WebServer_WarmupGuard
 					} catch (\Throwable $ignore) {
 						// Uninitialized typed property: nothing to keep.
 					}
-					$prop->setValue(null, $prop->getDefaultValue());
+					// The declared default, also on PHP 8.0, where
+					// getDefaultValue() answers with the current value.
+					$default = Q_WebServer_Snapshot::declaredDefault($prop, $known);
+					if (!$known) {
+						continue;
+					}
+					$prop->setValue(null, $default);
 					$reset = true;
 				}
 				if ($reset) {

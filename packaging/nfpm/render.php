@@ -40,9 +40,9 @@ $distros = array(
 	'debian-13'    => array('deb', 'apt', '8.4', 'deb13', '/usr/lib/systemd/system', ''),
 	'ubuntu-22.04' => array('deb', 'apt', '8.1', 'ubuntu22.04', '/lib/systemd/system', ''),
 	'ubuntu-24.04' => array('deb', 'apt', '8.3', 'ubuntu24.04', '/usr/lib/systemd/system', ''),
-	// EL 9's default PHP is 8.0; `dnf module enable php:8.2` gives the 8.1+
-	// the server needs (docs/packages.md).
-	'el-9'         => array('rpm', 'dnf', '8.2', 'el9', '/usr/lib/systemd/system', 'dnf module enable -y php:8.2'),
+	// EL 9's default PHP, 8.0 from AppStream, is enough: the server runs on
+	// 8.0 and later (docs/rhel.md). A newer stream works the same.
+	'el-9'         => array('rpm', 'dnf', '8.0', 'el9', '/usr/lib/systemd/system', ''),
 	'el-10'        => array('rpm', 'dnf', '8.4', 'el10', '/usr/lib/systemd/system', ''),
 );
 
@@ -80,7 +80,7 @@ $recommends = array_values(array_diff(packages_for(array_values(array_diff($stan
 if ($format === 'deb') {
 	array_unshift($depends, "php$php-cli");
 } else {
-	array_unshift($depends, 'php-cli >= 8.1');
+	array_unshift($depends, 'php-cli >= 8.0');
 }
 $depends = array_values(array_unique($depends));
 

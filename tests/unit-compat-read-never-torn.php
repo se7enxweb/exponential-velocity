@@ -67,6 +67,7 @@ if ($pid === 0) {
 }
 
 $readWhole = new ReflectionMethod('Q_WebServer_CompatFileWrapper', 'readWhole');
+if (PHP_VERSION_ID < 80100) $readWhole->setAccessible(true);   // PHP 8.0 needs it for a private method
 $chunkedTorn = 0; $wholeTorn = 0; $wholeGood = 0; $example = null;
 $until = microtime(true) + 4.0;
 while (microtime(true) < $until) {

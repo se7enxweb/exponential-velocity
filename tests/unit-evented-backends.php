@@ -62,6 +62,7 @@ foreach (array('Q_Evented_StreamSelect', 'Q_Evented_IoPoll', 'Q_Evented_Revolt')
 
 // ── Backend choice, before any stand-in exists ────────────────────────────
 $prop = new ReflectionProperty('Q_Evented', 'driver');
+if (PHP_VERSION_ID < 80100) $prop->setAccessible(true);   // PHP 8.0 needs it for a private property
 $choose = function ($env) use ($prop) {
 	putenv($env === null ? 'QBIX_EVENT_LOOP' : "QBIX_EVENT_LOOP=$env");
 	$prop->setValue(null, null);
@@ -86,7 +87,11 @@ check('an unknown name means auto', $choose('nonsense') === $auto);
 putenv('QBIX_EVENT_LOOP');
 
 // ── A stand-in for Io\Poll where the native API is missing ────────────────
-if (!$native) {
+// The stand-in declares Io\Poll\Event as the enum it is, which PHP 8.0 cannot
+// parse. There the IoPoll backend is never chosen anyway (Io\Poll is PHP 8.6),
+// so its runtime cases are skipped.
+$standIn = !$native && PHP_VERSION_ID >= 80100;
+if ($standIn) {
 	eval(<<<'PHP'
 namespace Io\Poll {
 	enum Event { case Read; case Write; }
@@ -134,8 +139,9 @@ PHP
 }
 
 // ── Runtime behaviour, per backend ────────────────────────────────────────
-$backends = array('Q_Evented_StreamSelect' => true, 'Q_Evented_IoPoll' => true, 'Q_Evented_Revolt' => $revolt);
+$backends = array('Q_Evented_StreamSelect' => true, 'Q_Evented_IoPoll' => $native || $standIn, 'Q_Evented_Revolt' => $revolt);
 foreach ($backends as $cls => $ok) {
+	if (!$ok and $cls === 'Q_Evented_IoPoll') { skip("$cls runtime: Io\\Poll is PHP 8.6, and its stand-in needs enums (PHP 8.1)"); continue; }
 	if (!$ok) { skip("$cls runtime: revolt/event-loop is not installed"); continue; }
 	$L = new $cls();
 

@@ -46,7 +46,7 @@ function mkcert($base, $cn, array $names, $days, $ca = null)
 	$cfg = "$base/openssl-" . (++$n) . '.cnf';
 	file_put_contents($cfg, "[req]\ndistinguished_name=dn\n[dn]\n[san]\nsubjectAltName="
 		. implode(',', array_map(function ($h) { return "DNS:$h"; }, $names)) . "\n");
-	$key = openssl_pkey_new(array('private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1', 'config' => $cfg));
+	$key = openssl_pkey_new(array('private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1', 'private_key_bits' => 2048, 'config' => $cfg));
 	$csr = openssl_csr_new(array('commonName' => $cn), $key, array('config' => $cfg, 'req_extensions' => 'san', 'digest_alg' => 'sha256'));
 	$crt = openssl_csr_sign($csr, $ca ? $ca[0] : null, $ca ? $ca[1] : $key, $days,
 		array('config' => $cfg, 'x509_extensions' => 'san', 'digest_alg' => 'sha256'), random_int(1, PHP_INT_MAX));

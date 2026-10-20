@@ -45,7 +45,8 @@ docker run --rm -v "$PWD/$(dirname "$pkg"):/pkgs:ro" "${oldmount[@]}" "$image" s
     esac
   }
   installed() { case '$distro' in debian-*|ubuntu-*) dpkg-query -W -f='\${Status}' \"\$1\" 2>/dev/null | grep -q 'install ok installed' ;; el-*) rpm -q \"\$1\" >/dev/null 2>&1 ;; esac; }
-  [ '$distro' = el-9 ] && dnf -y -q module enable php:8.2
+  # EL 9 installs its default PHP, 8.0 from AppStream: the oldest PHP the
+  # server supports, so this is where 8.0 is proven on a real distribution.
 
   if [ -n '$oldfile' ]; then
     echo '== the former package, qbix-webserver'

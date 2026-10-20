@@ -1690,6 +1690,20 @@ class Q_WebServer_Pool
 					$heap / 1048576, $ceiling / 1048576);
 			}
 		}
+		// PHP 8.0 does not keep a static property's declared default apart
+		// from its value, so the snapshot reads the defaults of classes this
+		// request declared from their source (Snapshot::declaredDefault()).
+		// Done here, before the answer goes out, so that a worker holding a
+		// static it cannot put back is replaced instead of serving the next
+		// request with this one's value in it.
+		if ($recycle === '' and PHP_VERSION_ID < 80100 and class_exists('Q_WebServer_Snapshot', false)) {
+			Q_WebServer_Snapshot::updateNewClasses();
+			if ($unknown = Q_WebServer_Snapshot::unknownDefaults()) {
+				$recycle = 'PHP 8.0 cannot tell the declared default of ' . $unknown[0]
+					. (count($unknown) > 1 ? ' and ' . (count($unknown) - 1) . ' more' : '')
+					. ', so this worker could not put it back';
+			}
+		}
 
 		// Cookies live in Q_Response, which is the worker's memory. The
 		// parent used to read its own copy when writing the response and so

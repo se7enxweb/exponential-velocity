@@ -11,7 +11,7 @@
 #   ./tests/run.sh --bench         Benchmarks only
 #   ./tests/run.sh --bench-nginx   Compare against nginx (must be installed)
 #
-# Requirements: PHP 8.1+, ab (Apache Bench)
+# Requirements: PHP 8.0+, ab (Apache Bench)
 #
 
 set +e  # Don't exit on errors — tests report failures themselves

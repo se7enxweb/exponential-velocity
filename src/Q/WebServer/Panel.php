@@ -2994,6 +2994,10 @@ class Q_WebServer_Panel
 		}
 		$filtering = ($filter !== '' or $method !== '' or $status !== '' or $hostNames);
 
+		// The size now, not a stat PHP remembered: PHP 8.0 keeps a file's
+		// size in its stat cache across writes, so a growing log read as the
+		// size it had at the previous poll.
+		clearstatcache(true, $file);
 		$size = (int) filesize($file);
 		$after = isset($params['after']) ? (int) $params['after'] : null;
 		$rotated = false;

@@ -14,7 +14,7 @@
             "8.5"
         ],
         "default": "8.3",
-        "minimum": "8.1",
+        "minimum": "8.0",
         "notes": {
             "8.4": "imap, oci8 and pdo_oci are no longer bundled with PHP; they build from PECL.",
             "8.5": "opcache is always compiled in and cannot be left out."

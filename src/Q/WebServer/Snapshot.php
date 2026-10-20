@@ -58,11 +58,10 @@ class Q_WebServer_Snapshot
 			self::$snapshot[$cls] = array();
 			self::$reflectors[$cls] = array();
 			foreach ($props as $prop) {
-				// No setAccessible() call. Reflection has reached private and
-				// protected members without one since PHP 8.1, which is this
-				// package's minimum, and PHP 8.5 deprecates it -- so the only
-				// thing it did here was write a deprecation notice into the
-				// log once per property, every time a snapshot was taken.
+				// Reflection reaches private and protected members by itself
+				// from PHP 8.1, and PHP 8.5 deprecates setAccessible(), so it
+				// is called on PHP 8.0 only (reach()).
+				self::reach($prop);
 				try {
 					$val = $prop->getValue(null);
 					if (is_resource($val)) continue;
@@ -138,6 +137,224 @@ class Q_WebServer_Snapshot
 	 * Expose the class snapshot for callers that need statics-only restore.
 	 */
 	static function getClassSnapshot() { return self::$snapshot; }
+
+	/**
+	 * Makes a private or protected property readable and writable through
+	 * reflection on PHP 8.0, where reflection needs setAccessible() for it.
+	 * PHP 8.1 and later reach every member without it (and 8.5 deprecates
+	 * the call), so there it does nothing.
+	 *
+	 * @method reach
+	 * @static
+	 * @param {ReflectionProperty} $prop
+	 * @return {ReflectionProperty} the same property
+	 */
+	static function reach(\ReflectionProperty $prop)
+	{
+		if (PHP_VERSION_ID < 80100) $prop->setAccessible(true);
+		return $prop;
+	}
+
+	/** @var array class => [prop => array(known, value)]: declared defaults read from source on PHP 8.0 */
+	private static $declared = array();
+	/** @var array Classes declared since the snapshot whose defaults PHP 8.0 could not tell */
+	private static $unknown = array();
+
+	/**
+	 * The value a static property is declared with, as a process that never
+	 * touched it would have it.
+	 *
+	 * PHP 8.1 and later answer this with getDefaultValue(). PHP 8.0 keeps a
+	 * user class's static values in the same table as its declared defaults
+	 * (unless the opcode cache made the class immutable), so there
+	 * getDefaultValue() returns whatever the property holds now: a class
+	 * first loaded during a request would be "reset" to that request's
+	 * values, and the next request in the worker would start with them.
+	 * Exponential's siteaccess, kept in such a static, then stayed the first
+	 * request's for every later one. On 8.0 the declaration is therefore read
+	 * from the class's source and evaluated as the constant expression it is,
+	 * in the class's scope and namespace.
+	 *
+	 * @method declaredDefault
+	 * @static
+	 * @param {ReflectionProperty} $prop a static property
+	 * @param {boolean} [&$known] set to false when the default cannot be told
+	 * @return {mixed}
+	 */
+	static function declaredDefault(\ReflectionProperty $prop, &$known = null)
+	{
+		if (PHP_VERSION_ID >= 80100) {
+			$known = $prop->hasDefaultValue();
+			return $known ? $prop->getDefaultValue() : null;
+		}
+		$d = self::fromSource($prop);
+		$known = $d !== null && $d[0] && $d[2];
+		return $known ? $d[1] : null;
+	}
+
+	/**
+	 * Whether a static property is declared with a default: what
+	 * hasDefaultValue() says, except on PHP 8.0, where a typed static
+	 * declared without one reports true as soon as something has been
+	 * assigned to it; there the declaration is read (declaredDefault()).
+	 *
+	 * @method hasDeclaredDefault
+	 * @static
+	 * @param {ReflectionProperty} $prop a static property
+	 * @return {boolean}
+	 */
+	static function hasDeclaredDefault(\ReflectionProperty $prop)
+	{
+		if (PHP_VERSION_ID >= 80100) return $prop->hasDefaultValue();
+		$d = self::fromSource($prop);
+		return $d === null ? $prop->hasDefaultValue() : $d[2];
+	}
+
+	/** array(known, value, hasDefault) of a static from its source, or null when not found. PHP 8.0 only. */
+	private static function fromSource(\ReflectionProperty $prop)
+	{
+		$class = $prop->getDeclaringClass();
+		$cn = $class->getName();
+		if (!isset(self::$declared[$cn])) {
+			// Read once per class: every static it declares, from its source and
+			// its traits'. A class from eval() has no source to read.
+			self::$declared[$cn] = self::readDeclared($class);
+		}
+		return self::$declared[$cn][$prop->getName()] ?? null;
+	}
+
+	/**
+	 * Finds every "static ... $name [= expr]" in the class's own source and
+	 * in its traits', and evaluates each expr. PHP 8.0 only.
+	 *
+	 * @return {array} name => array(known, value)
+	 */
+	private static function readDeclared(\ReflectionClass $class)
+	{
+		$found = array();
+		$places = array($class);
+		foreach ($class->getTraits() as $t) $places[] = $t;
+		foreach ($places as $c) {
+			$file = $c->getFileName();
+			if (!$file || !is_file($file)) continue;
+			$code = @file_get_contents($file);
+			if ($code === false) continue;
+			$tokens = token_get_all($code);
+			$n = count($tokens);
+			$short = $c->getShortName();
+			$open = function ($t) {
+				return $t === '{' or (is_array($t) and ($t[0] === T_CURLY_OPEN or $t[0] === T_DOLLAR_OPEN_CURLY_BRACES));
+			};
+			// The namespace and imports in force, and the class keyword itself.
+			$ns = ''; $uses = array(); $depth = 0; $nsDepth = 0; $at = -1;
+			for ($i = 0; $i < $n; $i++) {
+				$t = $tokens[$i];
+				if ($open($t)) { $depth++; continue; }
+				if ($t === '}') { $depth--; continue; }
+				if (!is_array($t)) continue;
+				if ($t[0] === T_NAMESPACE and $depth === 0) {
+					$ns = '';
+					for ($j = $i + 1; $j < $n and $tokens[$j] !== ';' and $tokens[$j] !== '{'; $j++) {
+						if (is_array($tokens[$j]) and $tokens[$j][0] !== T_WHITESPACE) $ns .= $tokens[$j][1];
+					}
+					$nsDepth = ($j < $n and $tokens[$j] === '{') ? 1 : 0;
+					$uses = array();
+				} elseif ($t[0] === T_USE and $depth === $nsDepth) {
+					$stmt = '';
+					for ($j = $i; $j < $n and $tokens[$j] !== ';' and $tokens[$j] !== '('; $j++) {
+						$stmt .= is_array($tokens[$j]) ? $tokens[$j][1] : $tokens[$j];
+					}
+					if ($j < $n and $tokens[$j] === ';') { $uses[] = $stmt . ';'; $i = $j; }
+				} elseif (in_array($t[0], array(T_CLASS, T_TRAIT), true) and $t[2] >= $c->getStartLine() and $t[2] <= $c->getEndLine()) {
+					for ($j = $i + 1; $j < $n and is_array($tokens[$j]) and $tokens[$j][0] === T_WHITESPACE; $j++);
+					if ($j < $n and is_array($tokens[$j]) and $tokens[$j][0] === T_STRING and $tokens[$j][1] === $short) { $at = $j; break; }
+				}
+			}
+			if ($at < 0) continue;
+			for ($i = $at; $i < $n and $tokens[$i] !== '{'; $i++);
+			$depth = 0;
+			for (; $i < $n; $i++) {
+				$t = $tokens[$i];
+				if ($open($t)) { $depth++; continue; }
+				if ($t === '}') { if (--$depth === 0) break; continue; }
+				if ($depth !== 1 or !is_array($t) or $t[0] !== T_STATIC) continue;
+				// "static" at the top of the class body: a property list or a method.
+				$typed = false;
+				for ($j = $i + 1; $j < $n; $j++) {
+					$u = $tokens[$j];
+					if (is_array($u) and $u[0] === T_FUNCTION) continue 2;
+					if (is_array($u) and $u[0] === T_VARIABLE) break;
+					if ($u === ';' or $u === '{' or $u === '(') continue 2;
+					// A type before the name: anything but whitespace, comments and modifiers.
+					if ($u === '?' or (is_array($u) and !in_array($u[0], array(T_WHITESPACE, T_COMMENT, T_DOC_COMMENT,
+						T_PUBLIC, T_PROTECTED, T_PRIVATE, T_STATIC, T_VAR), true))) $typed = true;
+				}
+				// $j is at the first variable; walk the list "$a = x, $b, $c = y;".
+				while ($j < $n) {
+					$var = $tokens[$j];
+					$expr = null;
+					for ($k = $j + 1; $k < $n and is_array($tokens[$k]) and in_array($tokens[$k][0], array(T_WHITESPACE, T_COMMENT, T_DOC_COMMENT), true); $k++);
+					if ($k < $n and $tokens[$k] === '=') {
+						$expr = array(); $nest = 0;
+						for ($k++; $k < $n; $k++) {
+							$u = $tokens[$k];
+							if (($u === ',' or $u === ';') and $nest === 0) break;
+							if ($u === '(' or $u === '[' or $open($u)) $nest++;
+							if ($u === ')' or $u === ']' or $u === '}') $nest--;
+							$expr[] = $u;
+						}
+					}
+					$name = substr($var[1], 1);
+					if (!isset($found[$name])) {
+						// array(known, value, hasDefault): a typed static declared
+						// without a value has no default; an untyped one is null.
+						$found[$name] = $expr === null
+							? array(true, null, !$typed)
+							: array_merge(self::evaluate($expr, $c, $class->getName(), $ns, $uses, $file), array(true));
+					}
+					if ($k >= $n or $tokens[$k] !== ',') break;
+					for ($j = $k + 1; $j < $n and !(is_array($tokens[$j]) and $tokens[$j][0] === T_VARIABLE); $j++);
+				}
+			}
+		}
+		return $found;
+	}
+
+	/** Evaluates a declared default's tokens in the class's scope. @return {array} array(known, value) */
+	private static function evaluate($expr, \ReflectionClass $where, $scope, $ns, array $uses, $file)
+	{
+		$text = '';
+		foreach ($expr as $u) {
+			if (!is_array($u)) { $text .= $u; continue; }
+			switch ($u[0]) {
+				case T_DIR: $text .= var_export(dirname($file), true); break;
+				case T_FILE: $text .= var_export($file, true); break;
+				case T_LINE: $text .= (string) $u[2]; break;
+				case T_CLASS_C: $text .= var_export($where->getName(), true); break;
+				case T_NS_C: $text .= var_export($ns, true); break;
+				case T_COMMENT: case T_DOC_COMMENT: break;
+				default: $text .= $u[1];
+			}
+		}
+		$code = ($ns !== '' ? "namespace $ns;\n" : '') . implode("\n", $uses) . "\nreturn " . $text . ";\n";
+		try {
+			$value = \Closure::bind(function ($code) { return eval($code); }, null, $scope)($code);
+			return array(true, $value);
+		} catch (\Throwable $e) {
+			return array(false, null);
+		}
+	}
+
+	/**
+	 * Static properties of classes declared since the snapshot whose
+	 * declared defaults PHP 8.0 could not tell, as "Class::$prop". A worker
+	 * that has any cannot put them back, so it is replaced after the request.
+	 *
+	 * @method unknownDefaults
+	 * @static
+	 * @return {array}
+	 */
+	static function unknownDefaults() { return self::$unknown; }
 
 	/**
 	 * Restore ONLY class statics, not globals.
@@ -216,15 +433,20 @@ class Q_WebServer_Snapshot
 			self::$snapshot[$cls] = array();
 			self::$reflectors[$cls] = array();
 			foreach ($props as $prop) {
-				// No setAccessible() call. Reflection has reached private and
-				// protected members without one since PHP 8.1, which is this
-				// package's minimum, and PHP 8.5 deprecates it -- so the only
-				// thing it did here was write a deprecation notice into the
-				// log once per property, every time a snapshot was taken.
+				// Reflection reaches private and protected members by itself
+				// from PHP 8.1, and PHP 8.5 deprecates setAccessible(), so it
+				// is called on PHP 8.0 only (reach()).
+				self::reach($prop);
 				try {
-					$val = $prop->hasDefaultValue()
-						? $prop->getDefaultValue()
-						: $prop->getValue(null);
+					if (self::hasDeclaredDefault($prop)) {
+						$val = self::declaredDefault($prop, $known);
+						if (!$known) {
+							self::$unknown[] = $cls . '::$' . $prop->getName();
+							continue;
+						}
+					} else {
+						$val = $prop->getValue(null);
+					}
 					if (is_resource($val)) continue;
 					$name = $prop->getName();
 					self::$snapshot[$cls][$name] =

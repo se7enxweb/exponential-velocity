@@ -43,7 +43,9 @@ class SdSleep
 	public $drop = 'd';
 	function __sleep() { return array('keep'); }
 }
-enum SdSuit: string { case Hearts = 'H'; case Spades = 'S'; }
+// Enums are PHP 8.1. Declared through eval() so the file still parses on 8.0,
+// where the enum case is left out.
+if (PHP_VERSION_ID >= 80100) eval("enum SdSuit: string { case Hearts = 'H'; case Spades = 'S'; }");
 
 $cases = array(
 	'scalars' => array('n' => null, 't' => true, 'f' => false, 'i' => -42, 'z' => 0, 's' => 'hello'),
@@ -51,13 +53,15 @@ $cases = array(
 	'separators in strings' => array('pipe' => 'a|b|c', 'semi' => 'x;y;', 'quote' => 'say "hi"', 'multi' => "é|\n|;", 'last' => 1),
 	'nested arrays' => array('eZUserLoggedInID' => 14, 'tree' => array(1 => array('a' => array(2.5, 'b|c')), 'k' => array()), 'after' => 'ok'),
 	'objects' => array('ser' => new SdSerializable(), 'sleep' => new SdSleep(), 'std' => (object) array('p' => 0.1), 'after' => 'ok'),
-	'enum' => array('suit' => SdSuit::Spades, 'after' => 'ok'),
 	'empty' => array(),
 );
+if (PHP_VERSION_ID >= 80100) $cases['enum'] = array('suit' => constant('SdSuit::Spades'), 'after' => 'ok');
+else echo "  skip  enum: enums are PHP 8.1\n";
 
 $dir = sys_get_temp_dir() . DS . 'qbix-sessdecode-' . getmypid();
 @mkdir($dir, 0700, true);
 ini_set('session.save_path', $dir);
+ini_set('session.save_handler', 'files');   // not whatever the host's php.ini names (redis, say)
 ini_set('session.serialize_handler', 'php');
 ini_set('session.use_cookies', '0');
 ini_set('session.use_only_cookies', '0');

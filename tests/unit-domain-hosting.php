@@ -62,7 +62,7 @@ file_put_contents("$sites/e/errors/404.html", '<h1>E-NOT-FOUND</h1>');
 file_put_contents("$sites/outside/secret.html", 'SECRET');
 
 // The HTTPS port the redirect targets (private; set for the unit part only).
-$setPort = function ($p) { $r = new ReflectionProperty('Q_WebServer', 'httpsPort'); $r->setValue(null, $p); };
+$setPort = function ($p) { $r = new ReflectionProperty('Q_WebServer', 'httpsPort'); if (PHP_VERSION_ID < 80100) $r->setAccessible(true); $r->setValue(null, $p); };
 
 // ── redirect() ─────────────────────────────────────────────────────────
 $req = function ($host, $uri, $https = false) {

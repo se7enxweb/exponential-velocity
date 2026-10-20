@@ -9,7 +9,7 @@
         "se7enxweb/qbix-webserver": "self.version"
     },
     "require": {
-        "php": ">=8.1",
+        "php": ">=8.0",
         "ext-sockets": "*"
     },
     "require-dev": {
