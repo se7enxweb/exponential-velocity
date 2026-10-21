@@ -65,6 +65,19 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.56 — instances share one opcode cache and one APCu, and a list of files is stat()ed in one go
+
+2026-10-21
+
+### Added
+
+- **`Q.webserver.instances`: several servers on one port that share one opcode cache and one APCu segment.** Started one by one (`reusePort`, a launcher starting each), every server set PHP up on its own, so each had a cache of compiled scripts and an APCu segment of its own: a script was compiled once per server, and an entry the application keeps in APCu was missed and paid for once per server. On Exponential with four servers, the administration dashboard -- about 2.3 s of database work when its query cache misses -- took 2.3 to 3.3 s on each of the four in turn after every write it depends on, and 3 of 8 requests landed on a server that had not paid yet, where PHP-FPM, one pool with one APCu, paid once. Started once with `Q.webserver.instances` set, the server now forks the others itself after PHP has set up its shared memory and before any of them binds the port, so all of them and all their workers use one opcode cache and one APCu, as the children of one FPM pool do. Each is forked twice and starts a session, so none is the parent of another; each writes its own pid file (`server.pid`, `server.1.pid` ...) and start record; `QBIX_FORKED_INSTANCE` names it, so a reload comes back as the same instance and forks nothing. `reusePort` is implied. See [architecture.md](docs/architecture.md#one-start-shared-caches-qwebserverinstances); `tests/unit-instances-share-memory.php` covers it (pid files, no parent among them, both answering, one APCu counter counting every request once, a reload, and ending one leaving the other).
+- **`Q_WebServer_CompatFileWrapper::nativeStats()`: the size and time of a whole list of files with PHP's own `stat()`.** Under the include wrapper every `filemtime()` and `filesize()` is answered through libcurl's file protocol, about 30 microseconds a file against 3 for PHP's own stat, because every swap of the wrapper leaves a resource behind for the life of the worker. An application that looks at thousands of files at once can now hand over the list: one swap for all of it, the wrapper back in place before it returns (also when a stat makes an error handler throw), nothing remembered. Exponential's help index compares ~9 000 pages every few seconds; under the wrapper that took 310 to 410 ms and now takes what PHP-FPM takes, about 100 ms with the rest of the look. See [compatibility.md](docs/compatibility.md#many-files-at-once-nativestats); `tests/unit-compat-native-stats.php` covers it.
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.56.
+
 ## v0.0.4.55 — the server warns when the application's cache file loads classes the transform never reaches
 
 2026-10-21
