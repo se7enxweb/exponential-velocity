@@ -372,9 +372,41 @@ What to know before using it:
 
 - Each server has its own worker pool, so memory grows with the number of
   servers; size the pools down accordingly.
+- Started one by one, each server sets PHP up on its own, so each has its own
+  opcode cache and APCu segment: a script is compiled once per server, and an
+  entry the application keeps in APCu (a query result, a cached response) is
+  missed and paid for once per server. `Q.webserver.instances` avoids that
+  (below).
 - The response cache's disk tier is shared when the servers use the same cache
-  directory; its memory and APCu tiers belong to each server (APCu is per
-  process tree), so each warms its own.
+  directory; its memory tier belongs to each server, and so does its APCu tier
+  unless the servers were forked by `Q.webserver.instances`.
+
+### One start, shared caches: `Q.webserver.instances`
+
+```json
+{ "Q": { "webserver": { "instances": 4 } } }
+```
+
+Started once with this, the server forks the other three itself, after PHP has
+set up its shared memory and before any of them binds the port. All four
+servers, and every worker of each, then use one opcode cache and one APCu
+segment, as the children of one PHP-FPM pool do. `reusePort` is implied.
+
+- Each server is forked twice, so it has no parent among the others: ending
+  one, or the shutdown deadline killing what one forked, leaves the rest.
+- Each writes its own pid file: the one given with `--pid` for the first, the
+  others with their number before the extension (`server.pid`,
+  `server.1.pid`, `server.2.pid`), and its own start record beside it.
+- `QBIX_FORKED_INSTANCE` in a server's environment (and its workers') is its
+  number. A reload (`SIGHUP`, `--reload`) re-executes a server with the same
+  arguments, and it comes back as the same instance without forking more; it
+  sets PHP up again, so from then on it has caches of its own until the set is
+  restarted. A start with the variable set and not empty is taken to be that
+  instance, so a launcher clears it (`QBIX_FORKED_INSTANCE=`).
+- Their output goes where the first one's goes; each says at start which
+  instance it is.
+- One APCu segment is shared, so `apc.shm_size` is the room for all of them.
+- Needs pcntl and posix; without them the server runs alone.
 - The panel, the statistics and the pid file describe one server; with several
   they describe the one you ask.
 - Renders are not faster: they are bounded by the workers, not the listener.

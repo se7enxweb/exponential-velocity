@@ -1242,6 +1242,30 @@ if (!empty($opts['test'])) {
 	exit(0);
 }
 
+// ── Instances: several servers sharing one opcode cache and one APCu ──
+//
+// Q.webserver.instances > 1 forks the other servers here, after PHP has set up
+// its shared memory and before anything binds a port, so every server and
+// every worker uses the same compiled scripts and the same APCu entries
+// (Q_WebServer_Instances). A process that already is one of them (a reload
+// re-executes it with the same arguments) forks nothing and keeps its number.
+$__instances = 1;
+if (empty($opts['signal'])) {
+	require_once dirname(__DIR__) . '/src/Q/WebServer/Instances.php';
+	$__instances = Q_WebServer_Instances::count(Q_Config::get('Q', 'webserver', 'instances', 1));
+}
+if ($__instances > 1) {
+	$__instance = Q_WebServer_Instances::current();
+	if ($__instance === null) $__instance = Q_WebServer_Instances::fork($__instances);
+	Q_Config::set('Q', 'webserver', 'reusePort', true);
+	Q_Config::set('Q', 'webserver', 'instance', $__instance);
+	if ($opts['pid']) $opts['pid'] = Q_WebServer_Instances::path((string) $opts['pid'], $__instance);
+	fwrite(STDERR, sprintf("  [instances] instance %d of %d (pid %d), sharing the opcode cache and APCu\n",
+		$__instance, $__instances, getmypid()));
+	unset($__instance);
+}
+unset($__instances);
+
 // ── PID file ────────────────────────────────────────
 
 if ($opts['pid']) {
