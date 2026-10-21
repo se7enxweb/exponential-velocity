@@ -433,6 +433,7 @@ class Q_WebServer_Compat
 		// Register custom include wrapper
 		stream_wrapper_unregister('file');
 		stream_wrapper_register('file', 'Q_WebServer_CompatFileWrapper');
+		Q_WebServer_CompatFileWrapper::$installed = true;
 
 		// And for phar://, when an engine archive is in use.
 		//
@@ -492,6 +493,7 @@ class Q_WebServer_Compat
 		self::resetRequestState();
 
 		@stream_wrapper_restore('file');
+		Q_WebServer_CompatFileWrapper::$installed = false;
 	}
 
 	/**
@@ -3306,6 +3308,69 @@ class Q_WebServer_CompatFileWrapper
 		return self::$includeMemo[$realPath] = $stat;
 	}
 
+	/**
+	 * The size and modification time of many files, asked of the operating
+	 * system with the real file layer in place for the whole list.
+	 *
+	 * Each filemtime() or filesize() an application makes under the wrapper
+	 * is answered without it (includeStat(): libcurl's file protocol, about
+	 * 30 microseconds a file, against 3 for PHP's own stat), because every
+	 * swap of the wrapper leaves a resource behind for the life of the
+	 * worker (see unwrap()). An application that looks at thousands of files
+	 * in one go -- Exponential compares the size and time of each of its
+	 * ~9 000 help pages every few seconds to tell whether its help index is
+	 * current, 0.3 s of CPU a time this way, and up to a second under load --
+	 * can ask for all of them here instead: one swap for the list, PHP's own
+	 * stat for each path, the wrapper back in place before this returns,
+	 * also when a stat throws.
+	 *
+	 * Nothing is remembered: the answers are the files as they are now, and
+	 * no stat memo or stat cache is left holding them. A phar:// path, and
+	 * every path while no wrapper is installed, is answered the ordinary way.
+	 *
+	 * @method nativeStats
+	 * @static
+	 * @param {array} $paths
+	 * @return {array} the paths' keys => array('size' => int, 'mtime' => int),
+	 *   or false for a path that cannot be stat()ed
+	 */
+	static function nativeStats(array $paths)
+	{
+		$out = array();
+		$later = array();
+		$swap = self::$installed;
+		if ($swap) {
+			stream_wrapper_restore('file');
+			self::$installed = false;
+		}
+		try {
+			foreach ($paths as $key => $path) {
+				$path = self::bare((string) $path);
+				if ($swap and strncmp($path, 'phar://', 7) === 0) {
+					$later[$key] = $path;
+					continue;
+				}
+				$st = @stat($path);
+				$out[$key] = $st ? array('size' => (int) $st['size'], 'mtime' => (int) $st['mtime']) : false;
+			}
+		} finally {
+			clearstatcache();
+			if ($swap) {
+				stream_wrapper_unregister('file');
+				stream_wrapper_register('file', __CLASS__);
+				self::$installed = true;
+			}
+		}
+		foreach ($later as $key => $path) {
+			$st = self::includeStat($path);
+			$out[$key] = $st ? array('size' => (int) $st['size'], 'mtime' => (int) $st['mtime']) : false;
+		}
+		// in the order the paths were given
+		$ordered = array();
+		foreach (array_keys($paths) as $key) $ordered[$key] = $out[$key];
+		return $ordered;
+	}
+
 	/** @var array mtime/size answers from includeStat(), for this request */
 	private static $includeMemo = array();
 
@@ -3619,9 +3684,14 @@ class Q_WebServer_CompatFileWrapper
 	// operation whenever an engine archive was in use, which doubled the cost
 	// above for plain files that never touch an archive.
 	private static $pharOut = false;
+
+	/** @var bool whether this class is the file:// wrapper now (Compat::init() and rewrap() set it) */
+	public static $installed = false;
+
 	private static function unwrap($path = null)
 	{
 		stream_wrapper_restore('file');
+		self::$installed = false;
 		self::$pharOut = (Q_WebServer_Compat::pharWrapped()
 			and is_string($path) and strncmp($path, 'phar://', 7) === 0);
 		if (self::$pharOut) {
@@ -3632,6 +3702,7 @@ class Q_WebServer_CompatFileWrapper
 	{
 		stream_wrapper_unregister('file');
 		stream_wrapper_register('file', __CLASS__);
+		self::$installed = true;
 		if (self::$pharOut) {
 			stream_wrapper_unregister('phar');
 			stream_wrapper_register('phar', __CLASS__);

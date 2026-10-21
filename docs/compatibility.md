@@ -142,6 +142,33 @@ made by hand showing up to a second later is acceptable. Leave it at `0` while
 developing against files an editor is changing, or when another process writes
 files the application must see the instant they appear.
 
+### Many files at once: `nativeStats()`
+
+Without the wrapper, `filemtime()` and `filesize()` are answered by libcurl's
+file protocol (about 30 microseconds a file, against 3 for PHP's own stat),
+because every swap of the wrapper to reach the real file layer leaves a resource
+behind for the life of the worker. For one file that is nothing; for thousands
+at once it is not -- Exponential compares the size and time of each of its
+~9 000 help pages every few seconds to tell whether its help index is current,
+0.3 s of CPU each time this way.
+
+An application that knows it is about to look at a list can ask for all of it
+at once:
+
+```php
+if (class_exists('Q_WebServer_CompatFileWrapper', false)
+    and method_exists('Q_WebServer_CompatFileWrapper', 'nativeStats')) {
+    $stats = Q_WebServer_CompatFileWrapper::nativeStats($paths);
+    // key => array('size' => ..., 'mtime' => ...), or false
+}
+```
+
+One swap for the whole list, PHP's own `stat()` for each path (links followed,
+as `filemtime()` does), the wrapper back in place before it returns, also when a
+stat makes an error handler throw. Nothing is remembered: the answers are the
+files as they are now. Outside a worker, with no wrapper installed, it is
+simply PHP's own stat.
+
 ## Tests
 
 Five test suites, 152 tests total:
