@@ -370,6 +370,18 @@ class Q_WebServer_Panel_Cache
 				$out[] = array('level' => 'warn', 'title' => $w, 'fix' => '');
 			}
 		}
+		// What the application's cache file loaded besides its class, in the
+		// server process, before the source transform (Q_WebServer_AppCache::checkPreload()).
+		if (class_exists('Q_WebServer_AppCache', false)) {
+			foreach ((array) Q_WebServer_AppCache::$preload as $p) {
+				$what = $p['classes'] ? implode(', ', $p['classes']) . ' (' . $p['file'] . ')' : $p['file'];
+				$out[] = $p['needsTransform']
+					? array('level' => 'warn', 'title' => "The application's cache file also loads $what before the source transform, so header(), setcookie() and exit do nothing in it in any worker.",
+						'fix' => 'Load it lazily in the application, or list it in Q.web.appCache.allow if it never needs the transform; then restart the server.')
+					: array('level' => 'info', 'title' => "The application's cache file also loads $what before the source transform; it calls nothing the transform rewrites.",
+						'fix' => 'Nothing to do. Q.web.appCache.allow takes it off this list.');
+			}
+		}
 		if (!$C::$enabled) {
 			$out[] = array('level' => 'info', 'title' => 'The cache is off: every page is rendered on every request.',
 				'fix' => 'Turn it on with the Cache switch above.');

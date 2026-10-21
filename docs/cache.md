@@ -286,6 +286,30 @@ holds `scheme`, `host`, `uri` (with the query), `method`, `cookies`,
 asked as the GET it stands for (`method` is `GET`), so the answer states the
 GET's length; the server then writes it without the body.
 
+**What the file may load.** The file is loaded once, in the server process,
+before the source transform is in place, and every worker inherits the classes
+it compiled. A class it loads besides `class` therefore never gets the
+transform in a worker: `header()`, `setcookie()`, `exit` and the other calls the
+transform rewrites stay PHP's own, which do nothing under the CLI SAPI. Nothing
+fails and nothing is logged; the headers simply never go out. (It happened:
+Exponential's cache class started loading the kernel's file helpers, and for
+two weeks every download on the server went out as `text/html`.)
+
+So the server records every file and class that loading `file` brings in
+besides `class` (engine files are not counted). One the transform would change
+is logged at start as a warning naming the file and its classes, and shown on
+the control panel's Cache tab; one the transform would leave as it is is only
+listed on that tab, as information. Two settings go with it:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `allow` | `[]` | Class names, or file paths, the file may load without being reported. |
+| `strict` | `false` | `true` refuses to start when the file loads a class that needs the transform. |
+
+The fix for a warning is in the application: load the class lazily, from the
+method that needs it, or answer without it (check `class_exists($name, false)`
+and fall back) — not `allow`, unless the class really never needs the transform.
+
 A new object is made for every request, so a purge or a switched-off cache is
 seen at once. A class that throws is logged and not asked for ten seconds.
 This is independent of `Q.web.cache.enabled`. Exponential's role-aware HTTP

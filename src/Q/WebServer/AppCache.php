@@ -19,6 +19,10 @@
  *          ifNoneMatch, headers (every request header, lower-case names),
  *          port (the listener's)
  *   dir    passed to fromDir()
+ *   allow  optional: classes (or files) the file may load besides its class
+ *          without a warning (see checkPreload())
+ *   strict optional: true refuses to start when the file loaded a class that
+ *          needs the source transform (see checkPreload())
  *
  * A new object is made for every request, so what it read (a purge, a
  * switched-off configuration) is never older than the request. Anything the
@@ -43,6 +47,17 @@ class Q_WebServer_AppCache
 	private static $offUntil = 0.0;
 
 	/**
+	 * What loading the file brought in besides its class, one entry per file:
+	 * file, classes (declared from it), needsTransform (the source transform
+	 * would change it). Filled by init(); see checkPreload().
+	 * @var array
+	 */
+	static $preload = array();
+
+	/** @var bool Q.web.appCache.strict and a preloaded class needs the transform: the server must not start */
+	static $refuse = false;
+
+	/**
 	 * Reads Q.web.appCache and loads the class.
 	 * @method init
 	 * @static
@@ -50,6 +65,8 @@ class Q_WebServer_AppCache
 	static function init()
 	{
 		self::$class = null;
+		self::$preload = array();
+		self::$refuse = false;
 		$config = Q_Config::get('Q', 'web', 'appCache', array());
 		if (!is_array($config) or empty($config['class']) or empty($config['dir'])) return;
 		$file = (string) Q::ifset($config, 'file', '');
@@ -59,7 +76,10 @@ class Q_WebServer_AppCache
 					error_log("Q.web.appCache: $file does not exist; the application cache is not asked");
 					return;
 				}
+				$classesBefore = self::declared();
+				$filesBefore = get_included_files();
 				require_once $file;
+				self::checkPreload($file, $config, $classesBefore, $filesBefore);
 			}
 			if (!class_exists($config['class'], false)
 				or !method_exists($config['class'], 'fromDir')
@@ -73,6 +93,153 @@ class Q_WebServer_AppCache
 		}
 		self::$class = (string) $config['class'];
 		self::$dir = (string) $config['dir'];
+	}
+
+	/**
+	 * Every class, interface and trait declared so far.
+	 * @method declared
+	 * @static
+	 * @return {array}
+	 */
+	static function declared()
+	{
+		return array_merge(get_declared_classes(), get_declared_interfaces(), get_declared_traits());
+	}
+
+	/**
+	 * Says when the file loaded more than its class.
+	 *
+	 * The file is loaded here, in the server process, before the source
+	 * transform is in place -- and every worker inherits what it compiled.
+	 * A class it loads besides its own is therefore never transformed in a
+	 * worker: header(), setcookie(), exit and the other calls the transform
+	 * rewrites stay PHP's own, which do nothing under the CLI SAPI. Nothing
+	 * fails and nothing is logged; the calls go nowhere. That happened once:
+	 * an application's cache class started loading its file helpers, and for
+	 * two weeks every download went out as text/html.
+	 *
+	 * So each file (and class) the require brought in besides the listed file
+	 * and class is recorded in self::$preload, unless Q.web.appCache.allow
+	 * names the class or the file. One the transform would change is logged
+	 * as a warning, naming the file and its classes; with
+	 * Q.web.appCache.strict, self::$refuse is set and the server does not
+	 * start. One the transform would leave as it is cannot be harmed, and is
+	 * only listed in the control panel. Engine files are not counted: they are
+	 * loaded before the transform anyway.
+	 *
+	 * @method checkPreload
+	 * @static
+	 * @param {string} $file the configured file
+	 * @param {array} $config Q.web.appCache
+	 * @param {array} $classesBefore self::declared() before the require
+	 * @param {array} $filesBefore get_included_files() before the require
+	 * @return {array} self::$preload
+	 */
+	static function checkPreload($file, $config, $classesBefore, $filesBefore)
+	{
+		$listedClass = strtolower((string) Q::ifset($config, 'class', ''));
+		$allowClasses = array();
+		$allowFiles = array();
+		foreach ((array) Q::ifset($config, 'allow', array()) as $a) {
+			$a = (string) $a;
+			if ($a === '') continue;
+			if (strpbrk($a, '/\\') !== false or substr($a, -4) === '.php') {
+				$allowFiles[self::samePath($a)] = true;
+			} else {
+				$allowClasses[strtolower(ltrim($a, '\\'))] = true;
+			}
+		}
+		$listedFile = self::samePath($file);
+		$engine = self::samePath(dirname(__DIR__, 2)) . '/';
+
+		$byFile = array();
+		foreach (array_diff(self::declared(), $classesBefore) as $class) {
+			$lower = strtolower($class);
+			if ($lower === $listedClass) continue;
+			try {
+				$from = (new ReflectionClass($class))->getFileName();
+			} catch (Throwable $e) {
+				$from = false;
+			}
+			$from = $from === false ? '(unknown file)' : self::samePath($from);
+			$byFile[$from][] = $class;
+		}
+		foreach (array_diff(get_included_files(), $filesBefore) as $f) {
+			$f = self::samePath($f);
+			if (!isset($byFile[$f])) $byFile[$f] = array();
+		}
+
+		$out = array();
+		foreach ($byFile as $f => $classes) {
+			if (strpos($f, $engine) === 0) continue;
+			if (isset($allowFiles[$f])) continue;
+			$left = array();
+			foreach ($classes as $c) {
+				if (!isset($allowClasses[strtolower($c)])) $left[] = $c;
+			}
+			// The listed file itself: only its classes besides the listed one.
+			if ($f === $listedFile and !$left) continue;
+			if ($classes and !$left) continue;
+			$out[] = array(
+				'file' => $f,
+				'classes' => $left,
+				'needsTransform' => self::needsTransform($f),
+			);
+		}
+		self::$preload = $out;
+
+		$strict = (bool) Q::ifset($config, 'strict', false);
+		foreach ($out as $p) {
+			if (!$p['needsTransform']) continue;
+			$what = $p['classes'] ? 'class ' . implode(', ', $p['classes']) . ' from ' . $p['file'] : $p['file'];
+			error_log("Q.web.appCache: WARNING: loading $file also loaded $what. "
+				. 'It was compiled in the server process, before the source transform is in place, and every worker '
+				. 'inherits it as it is: header(), setcookie(), exit and the other calls the transform rewrites do '
+				. 'nothing in it on this server. Load it lazily in the application, or list it in '
+				. 'Q.web.appCache.allow if it never needs the transform.');
+			if ($strict) self::$refuse = true;
+		}
+		if (self::$refuse) {
+			error_log('Q.web.appCache: Q.web.appCache.strict is set; the server does not start');
+		}
+		return $out;
+	}
+
+	/**
+	 * Whether the source transform would change a file; true when it cannot
+	 * be told (no transform class, an unreadable file).
+	 * @method needsTransform
+	 * @static
+	 * @param {string} $file
+	 * @return {boolean}
+	 */
+	static function needsTransform($file)
+	{
+		if (!class_exists('Q_WebServer_Compat')) return true;
+		$source = @file_get_contents($file);
+		if (!is_string($source)) return true;
+		try {
+			return Q_WebServer_Compat::transformSource($source) !== $source;
+		} catch (Throwable $e) {
+			return true;
+		}
+	}
+
+	/**
+	 * A path as compared here: resolved when it exists, with forward slashes.
+	 * @method samePath
+	 * @static
+	 * @param {string} $path
+	 * @return {string}
+	 */
+	private static function samePath($path)
+	{
+		$path = (string) $path;
+		if (strpos($path, '://') === false) {
+			$real = realpath($path);
+			if ($real !== false) $path = $real;
+		}
+		return rtrim(str_replace('\\', '/', $path), '/');
 	}
 
 	/**

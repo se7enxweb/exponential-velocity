@@ -65,6 +65,18 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.55 — the server warns when the application's cache file loads classes the transform never reaches
+
+2026-10-21
+
+### Added
+
+- **A class that `Q.web.appCache.file` loads besides its own is reported at start.** That file is loaded in the server process before the source transform is in place, and every worker inherits what it compiled, so such a class never gets the transform: its `header()`, `setcookie()` and `exit` stay PHP's own, which do nothing under the CLI SAPI, and nothing says so. With Exponential this went unseen for two weeks: the kernel's cache class started loading its file helpers, and every download on the server went out as `text/html` without its `Content-Type`, `Content-Disposition` or `206`. The server now compares the declared classes and included files before and after loading the file. Each file or class beyond the listed one that the transform would change is logged as a warning naming the file and the classes, with what goes wrong and the fix, and is shown on the control panel's Cache tab; one the transform would leave unchanged is only listed there, as information. Engine files are not counted. `Q.web.appCache.allow` (class names or file paths) takes a file or class off the list; `Q.web.appCache.strict: true` refuses to start when a loaded class needs the transform. See [cache.md](docs/cache.md#an-applications-own-cache); `tests/unit-app-cache-preload.php` covers it (a clean file, a helper calling `header()`, a helper the transform would not change, a second class in the file itself, a function library, both allow forms and strict mode).
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.55.
+
 ## v0.0.4.54 — Velocity installs and runs on PHP 8.0 (Red Hat Enterprise Linux)
 
 2026-10-20

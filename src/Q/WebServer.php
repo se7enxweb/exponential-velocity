@@ -307,6 +307,13 @@ class Q_WebServer
 		}
 		Q_WebServer_Cache::init();
 		Q_WebServer_AppCache::init();
+		// The application's cache file loaded a class that needs the source
+		// transform, and Q.web.appCache.strict says not to start like that
+		// (the warning naming it is in the log already).
+		if (Q_WebServer_AppCache::$refuse) {
+			fwrite(STDERR, "\n  ERROR: Q.web.appCache.file loads classes that would run untransformed in every worker; see the warning above, or set Q.web.appCache.strict to false\n\n");
+			exit(1);
+		}
 		// Q.web.cache.components.enabled was read by nothing: init() was never
 		// called, so the setting did nothing and the layer stayed off.
 		Q_WebServer_Cache_Components::init();
