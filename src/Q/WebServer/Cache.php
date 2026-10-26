@@ -688,25 +688,24 @@ class Q_WebServer_Cache
 	 * Whether the cache is paused: Q.web.cache.pauseFile names a file, and it
 	 * exists. An application puts it there while it must answer every request
 	 * itself (a maintenance window, an installation rebuilding the database).
-	 * Looked at no more than twice a second per worker.
+	 *
+	 * Looked at for every lookup and every store: one stat. It was looked at no
+	 * more than twice a second, and in that half second after an installation
+	 * began the cache went on answering with the site, and stored what workers
+	 * rendered from the half-built database for after it.
 	 * @method paused
 	 * @static
 	 * @return {boolean}
 	 */
 	static function paused()
 	{
-		static $file = null, $checked = 0.0, $state = false;
+		static $file = null;
 		if ($file === null) {
 			$file = class_exists('Q_Config', false) ? (string) Q_Config::get('Q', 'web', 'cache', 'pauseFile', '') : '';
 		}
 		if ($file === '') return false;
-		$now = microtime(true);
-		if ($now - $checked >= 0.5) {
-			clearstatcache(true, $file);
-			$state = is_file($file);
-			$checked = $now;
-		}
-		return $state;
+		clearstatcache(true, $file);
+		return is_file($file);
 	}
 
 	/** This cache's own lookup (get() asks the application's cache around it). */
@@ -881,6 +880,14 @@ class Q_WebServer_Cache
 		if (!self::$enabled) return $response;
 		if ($parsed['method'] !== 'GET') return $response;
 		if (self::isServerPath($parsed['path'] ?? '')) return $response;
+		// Paused: nothing is stored either. What a worker answers now -- a page
+		// rendered for a visitor the application lets through, from a database
+		// that is being rebuilt, or one that began before the pause -- would be
+		// served to everybody once the pause ends.
+		if (self::paused()) {
+			self::releaseRevalidation(self::cacheKey($parsed));
+			return $response;
+		}
 
 		// A request that claimed the re-render and then produced something
 		// uncacheable -- an error, a redirect, a no-store -- must still give
