@@ -65,6 +65,18 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.57 — the response cache neither answers nor stores from the first request after the pause file appears
+
+2026-10-29
+
+### Fixed
+
+- **The response cache neither answers nor stores while the pause file exists, from the first request after it appears.** The pause file (`Q.web.cache.pauseFile`) was looked at no more than twice a second, so for up to half a second after an installation or a maintenance window began the cache still answered with the site. `put()` never looked at it, so a page a worker rendered during the pause, for a visitor the application lets through or from a database being rebuilt, was stored and handed to everybody once the pause ended. `paused()` now stats the file for every lookup and every store, and `put()` stores nothing while it exists. `tests/unit-cache-paused-neither-answers-nor-stores.php` starts a server and checks both, from the first request after the file appears.
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.57.
+
 ## v0.0.4.56 — instances share one opcode cache and one APCu, and a list of files is stat()ed in one go
 
 2026-10-21
