@@ -67,6 +67,10 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.59 — GraphQL subscriptions over a WebSocket (graphql-transport-ws), bridged to the application's event stream
+
+2026-10-30
+
 ### Added
 
 - **GraphQL subscriptions over a WebSocket (graphql-transport-ws), bridged to the application's event stream.** On the paths of `Q.webserver.graphqlWs.paths` the server accepts a WebSocket that offers the subprotocol `graphql-transport-ws` and speaks the protocol itself (connection_init and its ack, ping and pong, subscribe, next, error, complete, and its close codes 4400, 4401, 4408, 4409, 4429). Each subscription is sent to the application as an ordinary POST of the subscription to the same path with `Accept: text/event-stream` through the worker pool, carrying the handshake's headers and the credentials of connection_init (Authorization, X-Api-Key, X-Siteaccess, Accept-Language; a string token as a bearer token); each event of the answer (graphql-sse: `event: next`, `event: complete`) becomes a message, and a stream that ends without `complete` is opened again with `Last-Event-ID`. So the application implements its subscriptions once, as an event stream, the server process runs none of its code, and a subscription is a pooled stream like any other (`streamShare`, `maxStreams`, `streamTimeout`). The client's `complete` and the end of the connection stop the stream at its next piece or probe. `initTimeout` (10 s), `idleTimeout` (60 s without a subscription), `pingInterval` (30 s) and `maxSubscriptions` per connection (20) are settings of `Q.webserver.graphqlWs`; with no path configured nothing changes. `Q_WebSocket::upgrade()` takes the agreed subprotocol (sent back as `Sec-WebSocket-Protocol`) and a close callback. `tests/unit-graphql-ws-bridge.php` covers the protocol, the bridge and the timers.
