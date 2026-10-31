@@ -3864,6 +3864,18 @@ class Q_WebServer
 
 		// 2. WebSocket upgrade on any path
 		$upgrade = strtolower($parsed['headers']['upgrade'] ?? '');
+		// GraphQL subscriptions (graphql-transport-ws): kept here, each
+		// subscription answered by the application's event stream on the same
+		// path through the worker pool (Q_WebServer_GraphQLWs)
+		if ($upgrade === 'websocket' && Q_WebServer_GraphQLWs::wants($parsed, $path)) {
+			if (self::isBlocked($path)) {
+				self::sendResponse($client, 403, self::renderErrorPage(403, $path), 'text/html; charset=utf-8');
+				return false;
+			}
+			$fsPath = rtrim(self::$rootDir, '/\\') . str_replace('/', DIRECTORY_SEPARATOR, rawurldecode($path));
+			return Q_WebServer_GraphQLWs::accept($client, $parsed, $path,
+				self::resolveScript(rawurldecode($path), $fsPath), self::$rootDir);
+		}
 		if ($upgrade === 'websocket' && $path !== '/Q/ws') {
 			$upgraded = Q_WebSocket::upgrade(
 				$client, $parsed['headers'],

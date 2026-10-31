@@ -44,6 +44,11 @@ Create `config/server.json` next to your `web/` directory, or pass `--config=pat
 | `webserver.streamTimeout` | 300 | Seconds a streaming response (`text/event-stream`, `X-Accel-Buffering: no`, or `Q_WebServer_State::setStreaming(true)`) -- or a request with `Accept: text/event-stream` before its first byte -- may run, instead of `requestTimeout`; the stream is then ended cleanly and its worker replaced (0 = no limit). See [workers.md](workers.md#streaming-responses) |
 | `webserver.streamShare` | 0.25 | Share of `webserver.workers` that requests for an event stream may hold at once (at least one); past it they are answered 503 with `Retry-After` (0 = refuse them all) |
 | `webserver.maxStreams` | 0 | The same cap as an absolute number of workers; 0 uses `streamShare` |
+| `webserver.graphqlWs.paths` | `[]` | Paths where a WebSocket offering the subprotocol `graphql-transport-ws` is accepted and each subscription bridged to the application's event stream of the same path. See [websocket.md](websocket.md#graphql-subscriptions-graphql-transport-ws) |
+| `webserver.graphqlWs.initTimeout` | 10 | Seconds a client has to send `connection_init` (then close 4408) |
+| `webserver.graphqlWs.idleTimeout` | 60 | Seconds a connection may stay open without a subscription (0 = no limit) |
+| `webserver.graphqlWs.pingInterval` | 30 | Seconds between two `ping` messages to the client (0 = none) |
+| `webserver.graphqlWs.maxSubscriptions` | 20 | Subscriptions one connection may have open at once |
 | `webserver.retryWithin` | 10 | Seconds after reaching its worker within which a `GET`, `HEAD` or `OPTIONS` whose worker died without answering is run again, once; never an event stream or a response that had started |
 | `webserver.requestTimeoutGrace` | 5 | Seconds between the SIGTERM a pooled worker past `requestTimeout` is sent (it ends at the next point where PHP code runs, outside APCu's lock) and the SIGKILL that follows if it is still there (0 = SIGKILL at once). See [workers.md](workers.md#how-a-worker-is-stopped) |
 | `webserver.shutdownTimeout` | 15 | Seconds a graceful stop (SIGTERM, SIGINT) may take before the server and every process it started are killed with SIGKILL, even when it is blocked where no signal of its own reaches it (0 = no bound). See [workers.md](workers.md#reload-and-stop) |

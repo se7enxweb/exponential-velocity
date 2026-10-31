@@ -411,6 +411,48 @@ This is useful for AI token streaming (proxying LLM APIs to the browser), real-t
 
 ---
 
+## GraphQL subscriptions (graphql-transport-ws)
+
+An application that answers GraphQL subscriptions as an event stream -- the
+[graphql-sse](https://github.com/enisdenjo/graphql-sse/blob/master/PROTOCOL.md)
+"distinct connections" protocol: a POST of the subscription with
+`Accept: text/event-stream`, answered with `event: next` for each result and
+`event: complete` at the end -- gets WebSocket clients on the same path for
+free. Name the path:
+
+```json
+{ "Q": { "webserver": { "graphqlWs": { "paths": ["/api/graphql/subscribe"] } } } }
+```
+
+A client that connects there with `Sec-WebSocket-Protocol: graphql-transport-ws`
+(the `graphql-ws` library, Apollo Client's `GraphQLWsLink`, urql, Relay) is
+answered by the server itself, which speaks
+[the protocol](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md):
+
+| Client sends | The server |
+|---|---|
+| `connection_init` | answers `connection_ack`; its payload's `Authorization`, `X-Api-Key`, `X-Siteaccess` and `Accept-Language` (and a string `token`, as a bearer token) go with every request of the connection |
+| `subscribe` | POSTs the payload to the application through the worker pool, as an event stream; each `next` event becomes a `next` message, `complete` a `complete`; a refusal (a whole JSON answer with `errors`) an `error` |
+| `complete` | ends that subscription's stream at its next piece |
+| `ping` | answers `pong` |
+
+The handshake's own headers (Cookie, Authorization, Origin) go with every
+request too; the WebSocket ones never do. A subscribe before
+`connection_init` is closed with 4401, a second `connection_init` with 4429, a
+duplicate id with 4409, a malformed message with 4400, and a connection that
+sends no `connection_init` within `initTimeout` with 4408. A connection with no
+subscription for `idleTimeout` seconds is closed; the server pings every
+`pingInterval` seconds.
+
+Each open subscription is one pooled stream: `streamShare` and `maxStreams`
+cap them, and `streamTimeout` ends a long one -- after which the server opens
+it again with `Last-Event-ID` set to the last event id it saw, so the client
+sees one subscription that never stops and misses nothing the application can
+still send. The server process runs no application code for any of this and
+holds none of its resources.
+
+---
+
 ## 🏠 Rooms — Process Per Room
 
 For use cases where multiple connections need **shared in-memory state** — chat messages, game positions, cursor aggregation, live vote tallies — use room processes.

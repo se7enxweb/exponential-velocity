@@ -32,14 +32,32 @@ class Q_WebSocket
 
 	// ── Upgrade + framing (unchanged) ───────────────
 
-	static function upgrade($socket, $headers, $onMessage = null, $channel = null, $path = '/')
+	/**
+	 * Accept a WebSocket handshake and take the socket over.
+	 *
+	 * @param {resource} $socket
+	 * @param {array} $headers the request's headers, lower-case names
+	 * @param {callable} [$onMessage] function ($socketKey, $text) for each text frame
+	 * @param {string} [$channel] a channel to join at once
+	 * @param {string} [$path='/'] the request's path (Socket.IO is chosen by it)
+	 * @param {string} [$subprotocol] the subprotocol agreed on (Sec-WebSocket-Protocol), sent
+	 *   back in the handshake; a connection with one speaks it in plain text frames, never
+	 *   Socket.IO or the JSON event envelope
+	 * @param {callable} [$onClose] function ($socketKey) when the connection ends, whichever
+	 *   side ends it
+	 * @return {boolean}
+	 */
+	static function upgrade($socket, $headers, $onMessage = null, $channel = null, $path = '/', $subprotocol = null, $onClose = null)
 	{
 		$key = $headers['sec-websocket-key'] ?? null;
 		if (!$key) return false;
 		$accept = base64_encode(sha1($key . self::GUID, true));
+		$subprotocol = ($subprotocol !== null and preg_match('/^[A-Za-z0-9._-]{1,64}$/', (string) $subprotocol))
+			? (string) $subprotocol : null;
 		$resp = "HTTP/1.1 101 Switching Protocols\r\n"
 			. "Upgrade: websocket\r\nConnection: Upgrade\r\n"
 			. "Sec-WebSocket-Accept: $accept\r\n"
+			. ($subprotocol !== null ? "Sec-WebSocket-Protocol: $subprotocol\r\n" : '')
 			. "Server: QbixServer\r\n\r\n";
 		// A short write here truncates the handshake, and the client then
 		// treats a valid upgrade as a malformed response.
@@ -53,11 +71,12 @@ class Q_WebSocket
 		// Set Q.socket.io to false to disable Socket.IO protocol
 		$ioPath = Q_Config::get('Q', 'socket', 'io', '/socket.io');
 		$proto = ($ioPath !== false && strpos($path, $ioPath) === 0) ? 'socketio' : 'json';
+		if ($subprotocol !== null) $proto = 'raw';
 
 		self::$clients[$sk] = array(
 			'socket' => $socket, 'watcher' => $watcher,
 			'channels' => array(), 'buffer' => '', 'onMessage' => $onMessage,
-			'protocol' => $proto,
+			'protocol' => $proto, 'onClose' => $onClose,
 		);
 
 		// Socket.IO: send Engine.IO OPEN handshake
@@ -205,6 +224,17 @@ class Q_WebSocket
 	{
 		if (!isset(self::$clients[$sk])) return;
 		self::notifyDisconnect($sk);
+		// Whoever owns the connection's state hears about its end first,
+		// whichever side ended it; a failure there never keeps the socket open.
+		$onClose = self::$clients[$sk]['onClose'] ?? null;
+		if ($onClose) {
+			self::$clients[$sk]['onClose'] = null;
+			try {
+				call_user_func($onClose, $sk);
+			} catch (\Throwable $e) {
+				fwrite(STDERR, '  websocket close handler: ' . $e->getMessage() . "\n");
+			}
+		}
 		$w = self::$clients[$sk]['watcher'];
 		if ($w) Q_Evented::cancel($w);
 		foreach (self::$clients[$sk]['channels'] as $ch => $_) {
