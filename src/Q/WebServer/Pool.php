@@ -1168,6 +1168,9 @@ class Q_WebServer_Pool
 				$resp['headers'], $resp['cookies'] ?? array(),
 				$resp['recycle'] ?? '', $canPeak ? memory_get_peak_usage() : 0);
 			$handled++;
+			// From here the worker resets itself; how long that takes goes to
+			// the server with the next answer (see findIdle()).
+			$resetStarted = hrtime(true);
 
 			if (!$octane) {
 				// This worker is about to exit. Compat has taken over
@@ -1248,9 +1251,10 @@ class Q_WebServer_Pool
 			// when its root buffer fills -- raising the threshold each time a
 			// run finds little, which in a process that never ends a request
 			// means garbage piles up: measured at ~47 KB a request on an
-			// Exponential install, flat with a collection here. Cheap now,
-			// because the buffer only ever holds one request's candidates.
-			gc_collect_cycles();
+			// Exponential install, flat with a collection here. Collected when
+			// there is something to collect, not after every request: see
+			// collectCycles().
+			self::collectCycles();
 
 			// Superglobals: overwritten by executeScript() on next iteration.
 			// Output buffers: the one capture buffer, emptied by Capture::end().
@@ -1289,6 +1293,7 @@ class Q_WebServer_Pool
 			// Voluntary recycling: after N requests, exit so the parent
 			// re-forks a clean worker. Safety net for state the snapshot
 			// can't reach (C extension internals, accumulated closures).
+			self::$lastResetMs = (hrtime(true) - $resetStarted) / 1e6;
 			if ($maxReqs > 0 && $handled >= $maxReqs) break;
 
 		} while (true);
@@ -1740,6 +1745,13 @@ class Q_WebServer_Pool
 	/** The socket to the server while a request runs; null between requests. */
 	protected static $requestSocket = null;
 
+	/**
+	 * How long this worker's last between-request reset took, in ms: sent
+	 * with its next answer (_reset), so the server knows for how long after
+	 * an answer the worker is not free yet (see findIdle()).
+	 */
+	protected static $lastResetMs = 0.0;
+
 	/** Whether a request is running in this worker. */
 	protected static $inRequest = false;
 
@@ -1962,6 +1974,52 @@ class Q_WebServer_Pool
 	{
 		$reason = trim(preg_replace('/\s+/', ' ', (string) $reason));
 		self::$retireReason = $reason !== '' ? substr($reason, 0, 200) : 'no reason given';
+	}
+
+	/**
+	 * Heap growth since the last collection, in bytes, past which the
+	 * between-request reset collects cycles.
+	 */
+	const GC_GROWTH = 1048576;
+
+	/**
+	 * Collect the cycles requests left behind when there is something to
+	 * collect: the heap has grown by GC_GROWTH since the last collection, or
+	 * the cycle collector's buffer is half way to the size at which PHP would
+	 * collect on its own -- inside a request, which would then wait for it.
+	 * The first reset of a worker always collects.
+	 *
+	 * Collecting after every request cost more than many requests do. The
+	 * reset puts every static back (Q_WebServer_Snapshot::restoreStatics()),
+	 * and each array it reads or writes there goes into the collector's
+	 * buffer as a possible root: on an Exponential worker that had rendered
+	 * one page, ~880 of the kernel's arrays, all of them alive, so the
+	 * collection walked the kernel's static data after every request and
+	 * found nothing -- 6-8 ms, where the request itself (a cached API answer)
+	 * took 1 ms. The worker is not free until its reset is done, so the next
+	 * request waited for that. The same arrays are put back every time and a
+	 * value already in the buffer is not added twice, so they do not grow it;
+	 * real garbage grows the heap, and is collected as it does
+	 * (tests/unit-worker-memory-bounded.php).
+	 *
+	 * @method collectCycles
+	 * @static
+	 * @return {integer} how many values were freed; 0 when it did not collect
+	 */
+	static function collectCycles()
+	{
+		static $heapAfter = null;
+		$heap = memory_get_usage();
+		$status = function_exists('gc_status') ? gc_status() : array();
+		$roots = (int) ($status['roots'] ?? 0);
+		$threshold = (int) ($status['threshold'] ?? 10001);
+		if ($heapAfter !== null and $heap - $heapAfter < self::GC_GROWTH
+			and $roots < max(1, $threshold) / 2) {
+			return 0;
+		}
+		$freed = gc_collect_cycles();
+		$heapAfter = memory_get_usage();
+		return $freed;
 	}
 
 	/**
@@ -2320,6 +2378,14 @@ class Q_WebServer_Pool
 			unset($response['_mem']);
 		}
 
+		// How long the worker's resets take: it is not free for about that
+		// long after this answer (findIdle()). For the pool, not the client.
+		$reset = 0.0;
+		if ($response and isset($response['_reset'])) {
+			$reset = max(0.0, min(1000.0, (float) $response['_reset']));
+			unset($response['_reset']);
+		}
+
 		// A worker's request to be replaced is for the pool, not the client.
 		$recycleReason = '';
 		if ($response and isset($response['_recycle'])) {
@@ -2356,6 +2422,7 @@ class Q_WebServer_Pool
 		if ($this->octane) {
 			$this->workers[$index]['busy'] = false;
 			$this->workers[$index]['idleSince'] = microtime(true);
+			$this->workers[$index]['readyAt'] = $this->workers[$index]['idleSince'] + $reset / 1000;
 			$this->workers[$index]['requests'] = ($this->workers[$index]['requests'] ?? 0) + 1;
 			$this->workerBuffers[$index] = '';
 			unset($this->workerClients[$index]);
@@ -3167,8 +3234,20 @@ class Q_WebServer_Pool
 		// Without the rescan, a request arriving when every idle worker had
 		// died went on the queue -- with fresh workers idle and nothing left
 		// to drain it.
+		//
+		// A worker is idle as soon as its answer arrives, but it is not free
+		// yet: it resets itself after answering (statics, globals, cycles),
+		// and a request sent to it meanwhile waits for that. So a worker whose
+		// reset is done by now (readyAt, from the _reset it reports) is taken
+		// first, and when none is, the one that will be free soonest. On an
+		// Exponential worker the reset took 1.5-8 ms, longer than a cached API
+		// answer that waited for it: with one client sending one request after
+		// the other, every request waited for the reset of the one before.
 		for ($pass = 0; $pass < 2; ++$pass) {
 			$discarded = false;
+			$now = microtime(true);
+			$soonest = null;
+			$soonestAt = 0.0;
 			foreach ($this->workers as $i => $w) {
 				if ($w['busy']) continue;
 				// An idle worker's socket is not watched, so one that died
@@ -3180,8 +3259,14 @@ class Q_WebServer_Pool
 					$discarded = true;
 					continue;
 				}
-				return $i;
+				$readyAt = (float) ($w['readyAt'] ?? 0.0);
+				if ($readyAt <= $now) return $i;
+				if ($soonest === null or $readyAt < $soonestAt) {
+					$soonest = $i;
+					$soonestAt = $readyAt;
+				}
 			}
+			if ($soonest !== null) return $soonest;
 			if (!$discarded) break;
 		}
 		return null;
@@ -3732,6 +3817,11 @@ class Q_WebServer_Pool
 		if ($mem > 0) {
 			$_mem = (int) $mem;
 			$fields[] = '_mem';
+		}
+		// How long the worker's last reset took (see findIdle()).
+		if (self::$lastResetMs > 0) {
+			$_reset = round(self::$lastResetMs, 3);
+			$fields[] = '_reset';
 		}
 		// The last message of a response whose head and earlier output have
 		// already been sent: what is left of the body, and nothing else that

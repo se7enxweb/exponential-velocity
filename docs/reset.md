@@ -146,9 +146,17 @@ which runs on its own when its root buffer fills -- and raises that threshold
 each time a run finds little. A normal request ends before that matters; a
 worker never ends one, so a request's cyclic garbage outlived it (~47 KB a
 request on one application). The between-request reset calls
-`gc_collect_cycles()`, which is cheap there because the buffer only ever holds
-one request's candidates. `tests/unit-worker-memory-bounded.php` makes ~96 MB
-of cyclic garbage over 150 requests and requires the worker not to keep it.
+`gc_collect_cycles()` when there is something to collect: when the heap has
+grown by 1 MB since the last collection, or the collector's buffer is half way
+to the size at which PHP would collect on its own, in the middle of a request.
+
+Not after every request: putting the statics back puts each array it touches
+into the collector's buffer as a possible root, all of them alive. On a worker
+that had rendered one Exponential page that was ~880 of the kernel's arrays,
+and a collection after every request walked them for nothing -- 6-8 ms, where
+a cached API answer took 1 ms -- while the next request waited for the worker.
+`tests/unit-worker-memory-bounded.php` makes ~96 MB of cyclic garbage over 150
+requests and requires the worker not to keep it.
 
 ## A worker that grows is replaced
 

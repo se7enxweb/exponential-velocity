@@ -226,7 +226,12 @@ hand-offs, and a stop leaving no process behind.
 
 The parent accepts every connection and reads every request. Static files, cache
 hits and the server's own pages are answered there, and only a request that runs
-PHP goes to a worker: the first idle one, checked to be alive before it is used.
+PHP goes to a worker: the first idle one that has finished resetting itself after
+its last request, checked to be alive before it is used. A worker answers first and
+resets afterwards (statics, globals, cycles; see [reset.md](reset.md)), and tells the
+parent with each answer how long its last reset took; a request sent to it during
+the reset would wait for it. When every idle worker is still resetting, the one that
+will be free soonest takes the request.
 
 When every worker is busy, the request waits in the parent until one is free; it is
 never refused for lack of a worker. The limit on load is `maxConnections`, checked
