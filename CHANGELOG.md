@@ -65,6 +65,15 @@ edited down to what a reader actually needs.
 
 ---
 
+## v0.0.4.58 — a request goes to a worker that has finished its reset, and the reset collects cycles only when there is something to collect
+
+2026-10-30
+
+### Updated
+
+- **A request goes to a worker that has finished its reset.** A worker sends its answer and then resets itself (statics put back, globals cleared, cycles collected). The parent counted it idle as soon as the answer arrived, and `findIdle()` always picked the lowest-numbered idle worker, so each request of a sequence waited for the reset of the one before. Each worker now reports how long its last reset took (`_reset`), and `findIdle()` prefers an idle worker whose reset is done, else the one free soonest. It never answers "none" while a worker is idle, so it forks or queues no more than before.
+- **The reset collects cycles only when there is something to collect.** Putting the statics back adds every array it touches to PHP's cycle-collector buffer, about 880 roots once a worker has rendered a page, all still in use; `gc_collect_cycles()` walked them after every request (6 to 8 ms) and collected nothing. `Pool::collectCycles()` now collects when the heap has grown by 1 MB since the last collection or the buffer is halfway to the size where PHP collects on its own; a worker's first reset always collects. Measured on a worker that had rendered pages: reset 7.6 ms to 1.2 ms, an early API answer 8.9 to 10.2 ms median to 2.4 ms. `unit-worker-memory-bounded` still holds a worker flat under about 96 MB of cyclic garbage. Tests: `tests/unit-pool-ready-worker-and-cycles.php`; docs: `docs/reset.md`, `docs/workers.md`.
+
 ## v0.0.4.57 — the response cache neither answers nor stores from the first request after the pause file appears
 
 2026-10-29
