@@ -1531,6 +1531,11 @@ class Q_WebServer_Pool
 			foreach (headers_list() as $h) {
 				if (strpos($h, ':') !== false) {
 					list($k, $v) = explode(':', $h, 2);
+					// each Set-Cookie its own line (State::rawCookie), never over the one before
+					if (strcasecmp(trim($k), 'Set-Cookie') === 0 and class_exists('Q_WebServer_State', false)) {
+						if (!in_array(trim($v), \Q_WebServer_State::rawCookies(), true)) \Q_WebServer_State::rawCookie(trim($v), false);
+						continue;
+					}
 					$headers[trim($k)] = trim($v);
 				}
 			}
@@ -1573,6 +1578,11 @@ class Q_WebServer_Pool
 			foreach (headers_list() as $h) {
 				if (strpos($h, ':') !== false) {
 					list($k, $v) = explode(':', $h, 2);
+					// each Set-Cookie its own line (State::rawCookie), never over the one before
+					if (strcasecmp(trim($k), 'Set-Cookie') === 0 and class_exists('Q_WebServer_State', false)) {
+						if (!in_array(trim($v), \Q_WebServer_State::rawCookies(), true)) \Q_WebServer_State::rawCookie(trim($v), false);
+						continue;
+					}
 					$headers[trim($k)] = trim($v);
 				}
 			}
@@ -1635,6 +1645,11 @@ class Q_WebServer_Pool
 				foreach (headers_list() as $h) {
 					if (strpos($h, ':') !== false) {
 						list($k, $v) = explode(':', $h, 2);
+						// each Set-Cookie its own line (State::rawCookie), never over the one before
+						if (strcasecmp(trim($k), 'Set-Cookie') === 0 and class_exists('Q_WebServer_State', false)) {
+							if (!in_array(trim($v), \Q_WebServer_State::rawCookies(), true)) \Q_WebServer_State::rawCookie(trim($v), false);
+							continue;
+						}
 						$headers[trim($k)] = trim($v);
 					}
 				}
@@ -1903,6 +1918,11 @@ class Q_WebServer_Pool
 		foreach (headers_list() as $h) {
 			if (strpos($h, ':') !== false) {
 				list($k, $v) = explode(':', $h, 2);
+				// each Set-Cookie its own line (State::rawCookie), never over the one before
+				if (strcasecmp(trim($k), 'Set-Cookie') === 0 and class_exists('Q_WebServer_State', false)) {
+					if (!in_array(trim($v), \Q_WebServer_State::rawCookies(), true)) \Q_WebServer_State::rawCookie(trim($v), false);
+					continue;
+				}
 				$headers[trim($k)] = trim($v);
 			}
 		}

@@ -17,6 +17,10 @@ class Q_WebServer_State
 {
 	protected static $savedInput = null;
 	protected static $headers = array();
+	// Set-Cookie lines sent with header(), each its own: a cookie can never be
+	// folded into one line with another (RFC 6265 3), the way repeated headers
+	// are joined with ", " below.
+	protected static $rawCookies = array();
 	protected static $code = 200;
 	protected static $streaming = false;
 
@@ -124,6 +128,10 @@ class Q_WebServer_State
 	/** Set a header by name/value (what Q_Response::setHeader() did). */
 	static function setHeader($name, $value, $replace = true)
 	{
+		if (strcasecmp($name, 'Set-Cookie') === 0) {
+			self::rawCookie($value, $replace);
+			return;
+		}
 		if ($replace || !isset(self::$headers[$name])) {
 			self::$headers[$name] = $value;
 		} else {
@@ -141,6 +149,7 @@ class Q_WebServer_State
 	static function clearHeaders()
 	{
 		self::$headers = array();
+		self::$rawCookies = array();
 	}
 
 	/** Record a header emitted during this request. */
@@ -158,6 +167,16 @@ class Q_WebServer_State
 		$parts = explode(':', $header, 2);
 		$name = trim($parts[0]);
 		$value = isset($parts[1]) ? trim($parts[1]) : '';
+		// Two Set-Cookie headers joined into one line with ", " are read by the
+		// browser as one cookie whose attributes run into the second: the second
+		// cookie is never set. A script that sends a cookie it deletes and one
+		// it sets (header('Set-Cookie: a=; Max-Age=0', false), then
+		// header('Set-Cookie: b=...', false)) lost the second one, every time.
+		if (strcasecmp($name, 'Set-Cookie') === 0) {
+			self::rawCookie($value, $replace);
+			if ($code) { self::$code = $code; }
+			return;
+		}
 		if ($replace || !isset(self::$headers[$name])) {
 			self::$headers[$name] = $value;
 		} else {
@@ -177,7 +196,28 @@ class Q_WebServer_State
 		return self::$headers;
 	}
 
-	/** Cookie headers, from the Platform when it can produce them. */
+	/**
+	 * Keep one Set-Cookie line sent with header(). As PHP's header(): replace
+	 * (the default) drops the Set-Cookie lines sent before it, false adds one.
+	 */
+	static function rawCookie($value, $replace = true)
+	{
+		$value = (string) $value;
+		if ($replace) {
+			self::$rawCookies = array();
+		}
+		if ($value !== '' && !preg_match('/[\r\n]/', $value)) {
+			self::$rawCookies[] = $value;
+		}
+	}
+
+	/** The Set-Cookie lines sent with header(), in order. */
+	static function rawCookies()
+	{
+		return self::$rawCookies;
+	}
+
+	/** Cookie headers: those sent with header() first, then the Platform's (setcookie()). */
 	static function cookieHeaders()
 	{
 		// Build the Set-Cookie strings HERE, from Q_Response::$cookies.
@@ -189,13 +229,13 @@ class Q_WebServer_State
 		// only invokes native setcookie() -- a no-op under CLI -- and returns
 		// nothing, so it yields no headers at all.
 		if (!property_exists('Q_Response', 'cookies')) {
-			return array();
+			return self::$rawCookies;
 		}
 		$cookies = Q_Response::$cookies;
 		if (!is_array($cookies)) {
-			return array();
+			return self::$rawCookies;
 		}
-		$headers = array();
+		$headers = self::$rawCookies;
 		foreach ($cookies as $name => $args) {
 			if (!is_array($args)) continue;
 			$value    = $args[0] ?? '';
