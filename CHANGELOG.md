@@ -67,6 +67,14 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.60 — every cookie a script sets with header() is sent as its own Set-Cookie line
+
+2026-11-13
+
+### Fixed
+
+- **Every cookie a script sets with `header('Set-Cookie: …', false)` is sent as its own `Set-Cookie` line.** Repeated headers were kept as one and joined with ", ", which is right for most headers but never for `Set-Cookie` (RFC 6265 §3: it is not folded). A browser read the joined line as one cookie whose attributes ran into the second, so the second cookie was never set. The request shield answers a solved browser check that way, deleting its solution cookie and setting its pass cookie in one response; behind the server the pass never arrived, every admin page asked for the check again, and the admin's background requests got the challenge as JSON (se7enxweb/exponential#363). `Q_WebServer_State` now keeps the cookies from `header()` and `setHeader()` in a list of their own: `replace` drops the earlier ones as PHP's `header()` does, a value with a line break is not kept, `clearHeaders()` forgets them, and the pool moves cookies found in `headers_list()` into that list instead of the joined headers. Other repeated headers are still joined. `tests/unit-set-cookie-lines.php` covers it.
+
 ## v0.0.4.59 — GraphQL subscriptions over a WebSocket (graphql-transport-ws), bridged to the application's event stream
 
 2026-10-30
