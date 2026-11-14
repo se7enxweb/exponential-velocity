@@ -380,13 +380,19 @@ jobs:
       # pulls an extension's suggested sources, but the build links none of
       # them unless asked, so gd came out able to read PNG only and
       # imagejpeg() was an undefined function at runtime.
+      #
+      # -P: packaging/ci/spc-drop-stray-ext-dirs.php removes an extension
+      # directory php-src ships without a config.m4 (PHP 8.4.27 and 8.5.12
+      # carry ext/imap/tests/), which otherwise stops spc from extracting the
+      # PECL source there. The file says more.
       - name: Build static PHP CLI + phpmicro (Unix)
         if: runner.os != 'Windows'
         env:
           SPC_SKIP_DOCTOR_CHECK_ITEMS: "pkg-config,musl-wrapper"
         run: |
           libs='${{ matrix.libs }}'
-          ./spc build '${{ matrix.extensions }}' --build-cli --build-micro ${libs:+--with-libs="$libs"}
+          ./spc build '${{ matrix.extensions }}' --build-cli --build-micro ${libs:+--with-libs="$libs"} \
+            -P "$GITHUB_WORKSPACE/packaging/ci/spc-drop-stray-ext-dirs.php"
 
       # spc extracts php-src with php-sdk-binary-tools\bin\7za.exe and that
       # file is not always there. When it is missing the extraction fails with
