@@ -60,6 +60,15 @@ list with reasons):
 | `yac` | windows-x64 | its bundled igbinary breaks `redis`' igbinary detection |
 | `xlswriter`, `ds` | windows-x64 | static-php-cli's Windows patch or source path no longer matches |
 | `xz` | windows-x64 | the library builds, but the extension is never registered |
+
+Where `full` carries an extension, it is not always the newest release of it:
+
+- **`yac` is built from 2.4.2.** yac 3.0 (October 2026) dropped the igbinary and
+  JSON serializers and the fastlz compressor that static-php-cli's yac build
+  still patches and configures, so a build with yac 3 stops before it starts.
+  `packaging/ci/release-matrix.php` pins the source and says what would let the
+  pin go.
+
 To see exactly what a variant carries on a platform, and what it leaves out and
 why:
 

@@ -326,11 +326,15 @@ jobs:
         if: runner.os != 'Windows'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # matrix.source_urls: sources taken from a pinned archive rather than
+        # their newest release (packaging/ci/release-matrix.php says which and why).
         run: |
           libs='${{ matrix.libs }}'
+          pins=()
+          for p in ${{ matrix.source_urls }}; do pins+=("--custom-url=$p"); echo "pinned: $p"; done
           for try in 1 2 3; do
             ./spc download --for-extensions='${{ matrix.extensions }}' \
-              ${libs:+--for-libs="$libs"} --with-php='${{ matrix.php }}' && exit 0
+              ${libs:+--for-libs="$libs"} --with-php='${{ matrix.php }}' "${pins[@]}" && exit 0
             echo "download failed, retry $try of 3 in 15s"; sleep 15
           done
           echo "::error::spc download failed after 3 tries"; exit 1
@@ -344,6 +348,8 @@ jobs:
           $phpVer = '${{ matrix.php }}'
           $libs = '${{ matrix.libs }}'
           $libArg = @(); if ($libs) { $libArg = @("--for-libs=$libs") }
+          # Sources taken from a pinned archive (packaging/ci/release-matrix.php).
+          foreach ($p in ('${{ matrix.source_urls }}' -split ' ' | Where-Object { $_ })) { $libArg += "--custom-url=$p"; Write-Host "pinned: $p" }
           # Try with FFI first (needed for the copy-on-write fork shim), fall
           # back without it, in which case the server uses php-cgi per request.
           $exts = '${{ matrix.extensions }},ffi'

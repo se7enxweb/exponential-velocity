@@ -29,6 +29,23 @@ $runners = array(
 	'windows-x64'   => array('windows-2022', 'windows', 'x64', true),
 );
 
+// Sources static-php-cli must not take at their newest, keyed by the spc
+// extension that pulls them in (each has a source of the same name). A build
+// whose extension list carries the extension downloads the archive named here
+// instead (`spc download --custom-url`); every other build is unaffected.
+// Each entry says why, and what would let it go.
+$pinnedSources = array(
+	// yac 3.0 (PECL, 2026-10-19) removed serializer/igbinary.c and
+	// serializer/json.c and moved from fastlz to a bundled lz4. static-php-cli
+	// still builds yac the 2.x way -- it patches both files and configures
+	// --with-system-fastlz -- so every build with yac stopped with "Reading
+	// file .../ext/yac/serializer/igbinary.c failed" (linux-x86_64 full on
+	// PHP 8.2 and 8.3; 8.4 and 8.5 stopped earlier, on imap). 2.4.2 is the
+	// last release that build knows. Drop this once static-php-cli builds
+	// yac 3.
+	'yac' => 'https://pecl.php.net/get/yac-2.4.2.tgz',
+);
+
 function pick($arg, array $all, $what)
 {
 	$arg = trim((string) $arg);
@@ -63,6 +80,10 @@ foreach (pick($argv[1] ?? '', $platforms, 'platform') as $p) {
 			}
 			$exts = implode(',', $r['spc']);
 			$libs = implode(',', $r['libs']);
+			$pins = array();
+			foreach ($pinnedSources as $ext => $url) {
+				if (in_array($ext, $r['spc'], true)) $pins[] = "$ext:$url";
+			}
 			$include[] = array(
 				'os' => $runner, 'platform' => $p, 'spc_os' => $spcOs, 'spc_arch' => $spcArch,
 				'php' => $php, 'variant' => $v, 'extensions' => $exts, 'libs' => $libs,
@@ -72,6 +93,9 @@ foreach (pick($argv[1] ?? '', $platforms, 'platform') as $p) {
 				// the variants people run. It publishes where it builds.
 				'experimental' => $experimental || $v === 'full',
 				'name' => "$p-php$php-$v",
+				// "source:url" pairs, space separated, each passed to
+				// `spc download` as --custom-url.
+				'source_urls' => implode(' ', $pins),
 				// Names this build's set of sources, for the download cache key.
 				'libs_key' => substr(sha1($exts . '|' . $libs), 0, 12),
 			);
