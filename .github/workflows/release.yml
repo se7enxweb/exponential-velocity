@@ -316,8 +316,23 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # The doctor stops at the first fix that fails, so one failed download
+        # also skips every check after it. v0.0.4.60's windows-x64 8.4
+        # standard build lost NASM that way: the runner's curl could not reach
+        # the certificate revocation server (schannel CRYPT_E_REVOCATION_OFFLINE)
+        # for the one try, and OpenSSL's configure then stopped at "NASM not
+        # found" two minutes later. The other fifteen Windows builds of the
+        # same run fetched it. Tried again until the doctor is satisfied, as
+        # on Unix, and said plainly when it never is.
         run: |
-          php spc-src\bin\spc doctor --auto-fix 2>&1
+          for ($try = 1; $try -le 3; $try++) {
+            php spc-src\bin\spc doctor --auto-fix 2>&1
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "Doctor had issues, retry $try of 3 in 20s"
+            Start-Sleep -Seconds 20
+          }
+          Write-Host "::warning::spc doctor still reports problems after 3 tries; the build may stop on a missing tool (NASM, perl)"
+          exit 1
 
       # ── Download sources ─────────────────────────────────
       # One unlucky fetch should not cost a platform. v0.0.4.26 lost its
