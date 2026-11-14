@@ -67,6 +67,25 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.61 — the binaries build again: v0.0.4.60's cookie fix, released with its binaries
+
+2026-11-14
+
+**v0.0.4.60 has no release and no binaries.** Its tag exists and Packagist lists it, but its binary build did not finish, so no GitHub release was made for it. This version carries everything v0.0.4.60 did, plus the build fixes below; use v0.0.4.61.
+
+What failed in v0.0.4.60's build: fifteen of the sixteen macOS jobs were never picked up by a GitHub-hosted runner ("The job was not acquired by Runner of type hosted even after multiple attempts", two hours in the queue) and were cancelled, which is what held the release back. The failing `full` builds and the one Windows build below are best effort and would not have held it back on their own, but they were real faults, and are fixed here.
+
+### Fixed
+
+- **Every cookie a script sets with `header('Set-Cookie: …', false)` is sent as its own `Set-Cookie` line** (from v0.0.4.60, which was never released with binaries). Repeated headers were joined with ", ", which is never right for `Set-Cookie`; a browser read two cookies as one, so the request shield's pass cookie never arrived and every admin page asked for the browser check again (se7enxweb/exponential#363). See v0.0.4.60 below for the whole change; `tests/unit-set-cookie-lines.php` covers it.
+- **The `full` binaries for PHP 8.4 and 8.5 build again, with `imap`.** The PHP 8.4.27 and 8.5.12 tarballs carry a stray `ext/imap/tests/` directory, and static-php-cli only extracts the PECL imap source into `php-src/ext/imap` when that directory does not exist, so every `full` build on 8.4 and 8.5 stopped at "Reading file …/ext/imap/config.m4 failed" (since v0.0.4.56). The build now removes an extension directory php-src ships without a `config.m4` right after extracting it (`packaging/ci/spc-drop-stray-ext-dirs.php`).
+- **The linux-x86_64 `full` binaries build again, with `yac`.** yac 3.0 (PECL, October 2026) dropped the igbinary and JSON serializers and fastlz, which static-php-cli's yac build still patches and configures, so it stopped at "Reading file …/ext/yac/serializer/igbinary.c failed". yac is built from 2.4.2 until static-php-cli builds yac 3; `packaging/ci/release-matrix.php` holds the pin, and [binaries.md](docs/binaries.md) says so.
+- **The Windows build tries the spc doctor three times.** One failed download of NASM (the runner's curl could not reach the certificate revocation server) cost v0.0.4.60's windows-x64 PHP 8.4 standard build; OpenSSL's configure then stopped at "NASM not found".
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.61.
+
 ## v0.0.4.60 — every cookie a script sets with header() is sent as its own Set-Cookie line
 
 2026-11-13
