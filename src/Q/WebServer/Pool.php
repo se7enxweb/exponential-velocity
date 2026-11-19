@@ -1295,6 +1295,9 @@ class Q_WebServer_Pool
 			// can't reach (C extension internals, accumulated closures).
 			self::$lastResetMs = (hrtime(true) - $resetStarted) / 1e6;
 			if ($maxReqs > 0 && $handled >= $maxReqs) break;
+			// Free now: the server waits for this before it counts on this
+			// worker again (workerReady()).
+			self::writeReady($socket);
 
 		} while (true);
 
@@ -2365,6 +2368,13 @@ class Q_WebServer_Pool
 			if (strlen($buf) < 4 + $len) return;
 			$json = substr($buf, 4, $len);
 			$response = json_decode($json, true);
+			// The worker saying it is free again (writeReady()): for the pool,
+			// never an answer. It may arrive alone or just ahead of an answer.
+			if (is_array($response) and isset($response['_ready']) and count($response) === 1) {
+				$this->workerBuffers[$index] = (string) substr($buf, 4 + $len);
+				$this->workerReady($index);
+				continue;
+			}
 			// Binary bodies travel base64-encoded; see writeMsg().
 			if ($response and !empty($response['b64'])) {
 				$response['body'] = base64_decode($response['body']);
@@ -2443,8 +2453,12 @@ class Q_WebServer_Pool
 			$this->workers[$index]['busy'] = false;
 			$this->workers[$index]['idleSince'] = microtime(true);
 			$this->workers[$index]['readyAt'] = $this->workers[$index]['idleSince'] + $reset / 1000;
+			// Answered, but not free until it says so (writeReady()): what
+			// the request does after its answer runs now, for however long.
+			$this->workers[$index]['awaitReady'] = true;
 			$this->workers[$index]['requests'] = ($this->workers[$index]['requests'] ?? 0) + 1;
-			$this->workerBuffers[$index] = '';
+			// Not emptied: a worker with a short reset says it is free right
+			// behind its answer, often in the same read (see below).
 			unset($this->workerClients[$index]);
 
 			// Recycle if marked for graceful recycling, or hit maxRequests
@@ -2473,16 +2487,59 @@ class Q_WebServer_Pool
 				return;
 			}
 
-			if (isset($this->watchers[$index])) {
-				Q_Evented::cancel($this->watchers[$index]);
-				unset($this->watchers[$index]);
-			}
-			if (!empty($this->pending)) {
-				$next = array_shift($this->pending);
-				$this->dispatch($next[0], $next[1], $next[2], $next[3] ?? null);
+			// The watcher stays until the worker says it is free (workerReady()
+			// cancels it), and what is queued waits for that too.
+			//
+			// Both used to happen here, at the answer. The worker was then
+			// handed the next queued request at once, and every request after
+			// it chose this worker as soon as its usual reset time had passed
+			// -- while it was still running what its request does after the
+			// answer (shutdown callbacks: a session write, mail, work started
+			// for later). Those requests sat unread in its socket for as long
+			// as that took, seconds, with other workers idle or the pool free
+			// to grow. PHP-FPM only gives a process a new request once it has
+			// finished, so the same page did not wait there.
+			//
+			// A short reset's word arrives with the answer, in the same read.
+			$rest = (string) ($this->workerBuffers[$index] ?? '');
+			$len = strlen($rest) >= 4 ? unpack('N', substr($rest, 0, 4))[1] : -1;
+			if ($len >= 0 and strlen($rest) >= 4 + $len) {
+				$msg = json_decode(substr($rest, 4, $len), true);
+				if (is_array($msg) and isset($msg['_ready'])) {
+					$this->workerBuffers[$index] = (string) substr($rest, 4 + $len);
+					$this->workerReady($index);
+				}
 			}
 		} else {
 			$this->recycle($index, false);
+		}
+	}
+
+	/**
+	 * A worker said it is free (writeReady()): its reset is done, including
+	 * whatever its request does after the answer. Stop watching its socket --
+	 * an idle socket is not watched, see sweepDeadIdle() -- and give it the
+	 * oldest queued request.
+	 *
+	 * Ignored while the worker is busy: the server may already have handed it
+	 * a request during its reset (findIdle()), and the word that the reset is
+	 * over comes after that request was sent.
+	 *
+	 * @method workerReady
+	 * @param {integer} $index
+	 */
+	protected function workerReady($index)
+	{
+		if (!isset($this->workers[$index]) or !empty($this->workers[$index]['busy'])) return;
+		$this->workers[$index]['awaitReady'] = false;
+		$this->workers[$index]['readyAt'] = microtime(true);
+		if (isset($this->watchers[$index])) {
+			Q_Evented::cancel($this->watchers[$index]);
+			unset($this->watchers[$index]);
+		}
+		if (!empty($this->pending)) {
+			$next = array_shift($this->pending);
+			$this->dispatch($next[0], $next[1], $next[2], $next[3] ?? null);
 		}
 	}
 
@@ -3280,7 +3337,15 @@ class Q_WebServer_Pool
 					continue;
 				}
 				$readyAt = (float) ($w['readyAt'] ?? 0.0);
-				if ($readyAt <= $now) return $i;
+				if ($readyAt <= $now) {
+					// Past its usual reset and still not free: its request is
+					// doing something after the answer, for no one knows how
+					// long. Not taken; another worker, a new one or the queue
+					// (sent on with the first worker free, workerReady()) is
+					// never slower than waiting behind it.
+					if (!empty($w['awaitReady'])) continue;
+					return $i;
+				}
 				if ($soonest === null or $readyAt < $soonestAt) {
 					$soonest = $i;
 					$soonestAt = $readyAt;
@@ -3882,6 +3947,29 @@ class Q_WebServer_Pool
 		//
 		// The socket is already blocking, so a plain loop completes the write
 		// without touching the mode.
+		$packet = pack('N', strlen($j)) . $j;
+		$length = strlen($packet);
+		$written = 0;
+		while ($written < $length) {
+			$n = @fwrite($sock, substr($packet, $written));
+			if ($n === false or $n === 0) break;
+			$written += $n;
+		}
+	}
+
+	/**
+	 * Tell the server this worker is free: its reset is over, and with it
+	 * everything the last request did after its answer. Sent once per
+	 * request, after the reset; the server hands it nothing new until then,
+	 * unless it expects the reset to end in a moment (findIdle()).
+	 *
+	 * @method writeReady
+	 * @static
+	 * @param {resource} $sock
+	 */
+	protected static function writeReady($sock)
+	{
+		$j = json_encode(array('_ready' => round(self::$lastResetMs, 3)));
 		$packet = pack('N', strlen($j)) . $j;
 		$length = strlen($packet);
 		$written = 0;
