@@ -45,6 +45,7 @@ require_once __DIR__ . '/../src/Q/Evented.php';
 require_once __DIR__ . '/../src/Q/WebServer/Process.php';
 require_once __DIR__ . '/../src/Q/WebServer/Pool.php';
 require_once __DIR__ . '/../src/Q/WebServer/PortablePool.php';
+require_once __DIR__ . '/../src/Q/WebServer/Ctl.php';
 
 $pass = 0;
 $fail = 0;
@@ -112,6 +113,19 @@ pp_check('a static binary (micro) is its own script',
 pp_check('Q.webserver.portable.command replaces it all',
 	$P::workerCommand($argv, 'php', 'cli', '/etc/php.ini', array('C:\\php\\php.exe', 'w.php', 5)),
 	array('C:\\php\\php.exe', 'w.php', '5'));
+
+pp_check('the server\'s own interpreter line (with its -d settings) is used when known',
+	$P::workerCommand($argv, '/usr/bin/php', 'cli', '/etc/php.ini', null, array(),
+		array('/usr/bin/php', '-d', 'precision=11', '/srv/vc/sbin/qbixserver.php')),
+	array('/usr/bin/php', '-d', 'precision=11', '/srv/vc/sbin/qbixserver.php', '--root=/srv/web', '--workers=2'));
+pp_check('...with phpArgs before the script',
+	$P::workerCommand($argv, '/usr/bin/php', 'cli', false, null, array('-d', 'a=1'),
+		array('/usr/bin/php', '-d', 'b=2', 'sbin/qbixserver.php')),
+	array('/usr/bin/php', '-d', 'b=2', '-d', 'a=1', 'sbin/qbixserver.php', '--root=/srv/web', '--workers=2'));
+if (is_readable('/proc/self/cmdline')) {
+	$ic = $P::interpreterCommand();
+	pp_check('this process\'s interpreter line ends with its script', is_array($ic) ? basename(end($ic)) : null, basename(__FILE__));
+}
 
 // ── Pool mode ────────────────────────────────────────────────────────
 
@@ -291,6 +305,7 @@ require __DIR__ . '/fixtures/race-harness.php';
 $GLOBALS['rh_extra_args'] = array('--pool-mode=portable');
 list($base, $root) = rh_setup('portable');
 file_put_contents("$root/pid.php", "<?php echo getmypid();\n");
+file_put_contents("$root/ini.php", "<?php echo ini_get('precision');\n");
 file_put_contents("$root/fatal.php", "<?php echo 'x'; undefined_function_portable_pool();\n");
 
 $port = rh_start('portable', array('Q' => array(
@@ -312,7 +327,8 @@ pp_check('pages are served', min($pids) > 0, true);
 pp_check('...not by the server', isset($seen[$server]), false);
 $wpid = (int) $pids[0];
 $env = (string) @file_get_contents("/proc/$wpid/environ");
-pp_check('...by a process started for the pool (QBIX_POOL_WORKER set)', strpos($env, 'QBIX_POOL_WORKER=127.0.0.1:') !== false, true);
+pp_check('...by a process started for the pool (QBIX_POOL_WORKER set, a Unix socket here)', strpos($env, 'QBIX_POOL_WORKER=unix://') !== false, true);
+pp_check('...and the server listens on no TCP port of the pool\'s own', Q_WebServer_Ctl::portsOf($server), array($port));
 pp_check('...which is not a fork of the server (it ran qbixserver.php itself)',
 	strpos((string) @file_get_contents("/proc/$wpid/cmdline"), 'qbixserver.php') !== false, true);
 pp_check('...and workers are reused (at most 2 pids for 4 requests)', count($pids) <= 2, true);
@@ -347,6 +363,9 @@ do {
 } while (microtime(true) < $deadline);
 pp_check('...and the pool is back to two workers', $live >= 2, true);
 
+$r = rh_get($port, '/ini.php');
+pp_check('a worker runs with the server\'s own php.ini settings', $r['body'] ?? null, (string) ini_get('precision'));
+
 $r = rh_get($port, '/fatal.php');
 pp_check('a fatal error answers 500', $r['status'], 500);
 pp_check('...and the pool goes on', pp_pid($port) > 0, true);
@@ -370,6 +389,34 @@ $left = 0;
 foreach ($workersBefore as $wp) if (Q_WebServer_Process::isAlive($wp)) ++$left;
 pp_check('...and every worker', $left, 0);
 pp_check('...gracefully', strpos(rh_log('portable'), 'Graceful shutdown (stop requested)') !== false, true);
+
+
+// The control channel as a file -- what Windows uses -- on this system.
+$port2 = rh_start('portable-file', array('Q' => array(
+	'web' => array('cache' => array('enabled' => false)),
+	// What Windows uses: a control file per worker, and TCP on 127.0.0.1.
+	'webserver' => array('portable' => array('controlChannel' => 'file', 'transport' => 'tcp')),
+)), 2);
+$srv2 = rh_server_pid('portable-file');
+$ok = 0; $p2 = array();
+for ($i = 0; $i < 5; ++$i) { $v = pp_pid($port2); if ($v > 0) { ++$ok; $p2[$v] = true; } }
+pp_check('with a control file per worker, requests are answered', $ok, 5);
+pp_check('...by workers, not the server', isset($p2[$srv2]), false);
+$files = glob(sys_get_temp_dir() . DS . 'qbix-pool-' . $srv2 . '-*.ctl') ?: array();
+pp_check('...each worker has its control file', count($files) >= 2, true);
+$lines = '';
+foreach ($files as $f) $lines .= (string) @file_get_contents($f);
+pp_check('...which holds READY and DONE lines', strpos($lines, 'READY ') !== false && strpos($lines, 'DONE ') !== false, true);
+Q_WebServer_Process::requestControl("$base/portable-file.pid", 'stop');
+$deadline = microtime(true) + 15;
+while (microtime(true) < $deadline) {
+	$st = proc_get_status($GLOBALS['rh']['servers']['portable-file']);
+	if (empty($st['running'])) break;
+	usleep(100000);
+}
+usleep(500000);
+pp_check('...and the control files are removed when the pool stops',
+	count(glob(sys_get_temp_dir() . DS . 'qbix-pool-' . $srv2 . '-*.ctl') ?: array()), 0);
 
 printf("%s  %d passed, %d failed\n", $fail ? 'FAIL' : 'PASS', $pass, $fail);
 exit($fail ? 1 : 0);
