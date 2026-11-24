@@ -6,9 +6,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for trying Velocity on Windows. The portable worker pool is tested on Linux and on
-        GitHub's Windows Server runners; reports from Windows 11 desktops and physical machines are what
-        we do not have yet. How to run the check: docs/windows.md ("How to run it on Windows").
+        Thank you for trying Velocity on Windows. Current status: it does not work yet on Windows.
+        On GitHub's Windows Server 2022/2025 runners the workers start but requests are not answered;
+        it has not been tried on Windows 11 desktops or physical machines. Reports help: say what you
+        see, whether it works, works with issues, or does not work. How to run the check:
+        docs/windows.md ("How to run it on Windows").
   - type: dropdown
     id: result
     attributes:

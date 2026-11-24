@@ -1,16 +1,26 @@
 # Running on Windows
 
-**Status: written for Windows, tested on Linux only.** Nothing on this page has
-been run on a real Windows 11 or Windows Server machine yet. The portable worker
-pool described below is exercised on Linux by `tests/unit-portable-pool.php`,
-which forces it on; the Windows-only code paths (tasklist, taskkill, `NUL`,
-`sapi_windows_set_ctrl_handler()`, `bypass_shell`) are covered by unit checks of
-their logic, not by a run on Windows. `tests/windows/smoke.ps1` is the test to
-run once a Windows machine is available; until it has passed there, treat
-Windows support as untested.
+**Status: does not work yet.** The portable worker pool is tested on Linux (with
+the pool forced on) and on GitHub Actions Windows Server 2022 and 2025 runners:
+x64 with PHP 8.1, 8.3 and 8.5, and x86 (32-bit) with PHP 8.3. On those Windows
+runners the server starts, its workers start and connect, and `--stop` ends the
+server and every worker; HTTP requests to PHP scripts are not answered yet. Work
+on this continues. It has not been tried on a Windows 11 desktop or on a
+physical Windows machine.
 
-A Windows Server VPS (for example on Contabo, with the licence add-on) is planned for testing on a
-real machine; Windows 11 desktop is not yet tested.
+| Where | Result |
+|---|---|
+| Linux, portable pool forced (PHP 8.0, 8.5) | works: `tests/unit-portable-pool.php` passes |
+| GitHub Actions, Windows Server 2022 / 2025, x64, PHP 8.1, 8.3, 8.5 | does not work yet: workers start, requests are not answered |
+| GitHub Actions, Windows Server 2022, x86, PHP 8.3 | does not work yet: same as x64 |
+| Windows 11 desktop, physical machines | not tried |
+
+A Windows Server VPS (for example on Contabo, with the licence add-on) is planned for
+testing on a real machine; Windows 11 desktop is not yet tested.
+
+Reports are welcome: open an issue with the "Windows report" form and say whether it
+works, works with issues, or does not work on your machine, with the output of
+`tests\windows\smoke.ps1`.
 
 ## Why Windows needs its own pool
 
@@ -68,7 +78,11 @@ Settings:
 | `Q.webserver.portable.startTimeout` | 60 | seconds a worker may take to boot |
 | `Q.webserver.portable.phpArgs` | `[]` | extra PHP options for workers, e.g. `["-d", "memory_limit=512M"]` |
 | `Q.webserver.portable.command` | none | replaces the whole worker command line |
-| `Q.webserver.portable.host` | `127.0.0.1` | address of the workers' listener |
+| `Q.webserver.portable.host` | `127.0.0.1` | address of the workers' listener (TCP) |
+| `Q.webserver.portable.transport` | `auto` | `unix` (POSIX default: a 0600 Unix socket) or `tcp` (Windows) |
+| `Q.webserver.portable.controlChannel` | `auto` | `pipe` (POSIX default) or `file` (Windows default) |
+| `QBIX_POOL_MODE` (environment) | none | default for `Q.webserver.poolMode` when the configuration has none |
+| `QBIX_POOL_TRACE` (environment) | none | `1` prints what the pool and its workers do |
 
 Each worker holds its own copy of the application (no copy-on-write), so keep
 the worker count modest. `stream_select()` on the official Windows builds
@@ -114,13 +128,14 @@ powershell -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php C:\php\php
 or `tests\windows\smoke.bat C:\php\php.exe`. It prints PASS/FAIL per check and
 exits non-zero on failure. The same test on Linux is `php tests/unit-portable-pool.php`.
 
-## Known gaps (not done yet)
+## Known issues and gaps
 
-- Not run on Windows 11, Windows Server, or 32-bit Windows at all.
-- Whether `stream_select()` reports readiness on `proc_open()` pipes on
-  Windows is unproven. Supervision does not depend on it (liveness comes from
-  `proc_get_status()` and the worker's socket), but the `DONE`/`EXIT` lines may
-  arrive late or not at all there.
+- Windows: requests to PHP scripts are not answered yet (see the status above).
+  `QBIX_POOL_TRACE=1` prints each step of the pool and its workers with the time.
+- On Windows a worker's control lines go to a file per worker in the temporary
+  directory (`Q.webserver.portable.controlChannel`), not a pipe: on the first
+  runs, reading the pipes left the server unresponsive.
+- Not tried on Windows 11 desktop or physical Windows machines.
 - Whether a worker inherits the server's listening socket on Windows (handle
   inheritance) is unproven; the smoke test checks that the port is free after
   a stop. On POSIX every inherited descriptor is replaced with `/dev/null`.
