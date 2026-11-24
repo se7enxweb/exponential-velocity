@@ -1,0 +1,80 @@
+name: Windows report
+description: Tell us how Velocity runs on your Windows machine (works, works with issues, does not work)
+title: "Windows report: "
+labels: ["windows"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for trying Velocity on Windows. The portable worker pool is tested on Linux and on
+        GitHub's Windows Server runners; reports from Windows 11 desktops and physical machines are what
+        we do not have yet. How to run the check: docs/windows.md ("How to run it on Windows").
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Works with issues
+        - Does not work
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows edition and version
+      description: "From `winver` or `Get-ComputerInfo OsName, OsVersion`, e.g. Windows 11 Pro 24H2, Windows Server 2022"
+    validations:
+      required: true
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture of PHP
+      options:
+        - x64 (64-bit)
+        - x86 (32-bit)
+        - ARM64
+    validations:
+      required: true
+  - type: input
+    id: php
+    attributes:
+      label: PHP version and build
+      description: "First line of `php -v`, and NTS or TS, e.g. PHP 8.3.14 (cli) NTS Visual C++ 2019 x64"
+    validations:
+      required: true
+  - type: input
+    id: velocity
+    attributes:
+      label: Velocity version or commit
+      description: "`php sbin\\qbixserver.php --version`, or the git commit"
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How was it run
+      multiple: true
+      options:
+        - tests\windows\smoke.ps1
+        - php sbin\qbixserver.php from a console
+        - qbixctl
+        - the phar
+        - as a service / Task Scheduler
+        - other (describe below)
+  - type: textarea
+    id: smoke
+    attributes:
+      label: Output of tests\windows\smoke.ps1
+      description: The PASS/FAIL lines and the log tail it prints at the end.
+      render: text
+  - type: textarea
+    id: issues
+    attributes:
+      label: What did not work, or worked differently than expected
+      description: Steps, what you saw, what you expected. Leave empty if everything worked.
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Antivirus, unusual paths (spaces, network drives), php.ini changes, the application you served.

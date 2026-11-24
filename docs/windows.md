@@ -9,6 +9,9 @@ their logic, not by a run on Windows. `tests/windows/smoke.ps1` is the test to
 run once a Windows machine is available; until it has passed there, treat
 Windows support as untested.
 
+A Windows Server VPS (for example on Contabo, with the licence add-on) is planned for testing on a
+real machine; Windows 11 desktop is not yet tested.
+
 ## Why Windows needs its own pool
 
 On Linux, the BSDs and macOS, Velocity forks its PHP workers from the server
