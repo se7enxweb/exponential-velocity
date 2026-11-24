@@ -1735,7 +1735,7 @@ if (!Q_Config::get('Q', 'compat', 'skipSourceCodeTransform', false)) {
 	fwrite(STDERR, "  │" . str_pad("  Compat: $preset (source transform active)", $W) . "│\n");
 }
 $__poolLabel = class_exists('Q_WebServer_Fork') ? Q_WebServer_Fork::method() : 'detecting...';
-$__poolMode = strtolower((string) Q_Config::get('Q', 'webserver', 'poolMode', 'auto'));
+$__poolMode = strtolower((string) Q_Config::get('Q', 'webserver', 'poolMode', getenv('QBIX_POOL_MODE') ?: 'auto'));
 if ($opts['workers'] && ($__poolMode === 'portable' || !function_exists('pcntl_fork'))) $__poolLabel = 'portable, proc_open';
 fwrite(STDERR, "  │" . str_pad("  PHP: " . ($opts['workers'] ? $opts['workers'] . ' workers' : 'in-process')
 	. ' (' . $__poolLabel . ')', $W) . "│\n");

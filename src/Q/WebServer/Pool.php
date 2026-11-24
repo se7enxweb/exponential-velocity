@@ -548,7 +548,8 @@ class Q_WebServer_Pool
 	 * as their own processes with proc_open(), Q_WebServer_PortablePool), or
 	 * null when neither can run here.
 	 *
-	 * Q.webserver.poolMode chooses: "fork", "portable", or "auto" (the
+	 * Q.webserver.poolMode (default: the QBIX_POOL_MODE environment variable)
+	 * chooses: "fork", "portable", or "auto" (the
 	 * default), which is fork when it is available and portable otherwise --
 	 * on Windows, and on any PHP built without pcntl. Asked for fork where
 	 * there is none, the answer is portable, with a warning; asked for
@@ -561,7 +562,9 @@ class Q_WebServer_Pool
 	 */
 	static function mode($wanted = null)
 	{
-		if ($wanted === null) $wanted = Q_Config::get('Q', 'webserver', 'poolMode', 'auto');
+		// The environment (QBIX_POOL_MODE) gives the default, so a whole test
+		// suite can be run with one mode; the configuration still decides.
+		if ($wanted === null) $wanted = Q_Config::get('Q', 'webserver', 'poolMode', getenv('QBIX_POOL_MODE') ?: 'auto');
 		$wanted = strtolower(trim((string) $wanted));
 		if (!class_exists('Q_WebServer_Fork', false)) require_once __DIR__ . '/Fork.php';
 		// Fork means pcntl_fork(). The FFI route in Q_WebServer_Fork needs a
