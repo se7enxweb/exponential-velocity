@@ -154,6 +154,13 @@ class Q_WebServer
 	static $pool = null;
 	/** @property $rootDir Document root with trailing DS */
 	public static $rootDir;
+	/**
+	 * The pid file this server wrote (--pid), whose request files
+	 * ("<pidfile>.stop", "<pidfile>.reload") it watches; null for none.
+	 * @property $controlPidFile
+	 * @type {string|null}
+	 */
+	public static $controlPidFile = null;
 	public static $serverDir;
 	/** @property $host Bound host */
 	public static $host;
@@ -266,6 +273,110 @@ class Q_WebServer
 		if ($w !== '') fwrite(STDERR, $w);
 	}
 
+	/**
+	 * The request limits the server applies, read from the configuration and
+	 * php.ini: post and upload sizes, the number of files, whether uploads
+	 * are allowed. The server reads them at start; a portable pool worker
+	 * reads them for itself (prepareWorkerProcess()).
+	 * @method readLimits
+	 * @static
+	 */
+	static function readLimits()
+	{
+		self::$maxPostSize = self::parseIniBytes(
+			Q_Config::get('Q', 'webserver', 'postMaxSize', ini_get('post_max_size') ?: '8M')
+		);
+		self::$maxUploadSize = self::parseIniBytes(
+			Q_Config::get('Q', 'webserver', 'uploadMaxFilesize', ini_get('upload_max_filesize') ?: '2M')
+		);
+		self::$maxFileUploads = (int) Q_Config::get(
+			'Q', 'webserver', 'maxFileUploads', ini_get('max_file_uploads') ?: 20
+		);
+		self::$fileUploads = (bool) Q_Config::get(
+			'Q', 'webserver', 'fileUploads', ini_get('file_uploads') !== '0'
+		);
+	}
+
+	/**
+	 * Load Q.webserver.preload: an autoloader, then the classes it names.
+	 * Done by the server before its workers exist; a portable pool worker
+	 * does it for itself (prepareWorkerProcess()).
+	 * @method loadPreload
+	 * @static
+	 */
+	static function loadPreload()
+	{
+		$preload = Q_Config::get('Q', 'webserver', 'preload', array());
+		if (!empty($preload)) {
+			// Load the autoloader first (e.g. Composer's)
+			$autoload = is_string($preload)
+				? $preload
+				: (isset($preload['autoload']) ? $preload['autoload'] : null);
+			if ($autoload) {
+				$autoloadPath = $autoload;
+				// Resolve relative to the document root's parent (project root)
+				// C:\ and \\server\share are absolute too (Windows).
+				if (!Q_WebServer_Process::isAbsolutePath($autoloadPath)) {
+					$projectRoot = dirname(rtrim(self::$rootDir, DS));
+					$autoloadPath = $projectRoot . DS . $autoloadPath;
+				}
+				if (file_exists($autoloadPath)) {
+					require_once $autoloadPath;
+					$count = count(get_declared_classes());
+					echo "  Autoloader: " . basename($autoload) . "\n";
+					// This runs before the pool exists, so before the source
+					// transform is installed. With the transform on, whatever
+					// the file loads keeps its real exit and header() in every
+					// worker -- exit then ends the worker, not the request. A
+					// script meant to warm the application in the parent
+					// belongs in Q.webserver.warmup, which runs after it.
+					if (!Q_Config::get('Q', 'compat', 'skipSourceCodeTransform', false)) {
+						fwrite(STDERR, "  Warning: Q.webserver.preload is loaded before the source"
+							. " transform; code it loads keeps real exit/header()."
+							. " Use Q.webserver.warmup for a parent warm-up.\n");
+					}
+				} else {
+					echo "  Warning: autoload file not found: $autoloadPath\n";
+				}
+			}
+			// Then load each named class (triggers the autoloader)
+			$classes = isset($preload['classes']) ? $preload['classes'] : array();
+			if (!empty($classes)) {
+				$loaded = 0;
+				foreach ($classes as $class) {
+					if (!class_exists($class, true) && !interface_exists($class, true)
+						&& !trait_exists($class, true)
+					) {
+						echo "  Warning: could not preload $class\n";
+					} else {
+						$loaded++;
+					}
+				}
+				echo "  Preloaded: $loaded classes\n";
+			}
+		}
+	}
+
+	/**
+	 * What a worker that is not forked from the server needs of the server's
+	 * own start: the document root, the server directory, the request limits
+	 * and the preload. Called by Q_WebServer_PortablePool::workerMain().
+	 * @method prepareWorkerProcess
+	 * @static
+	 * @param {string} $dir the document root
+	 */
+	static function prepareWorkerProcess($dir)
+	{
+		$root = (strpos($dir, 'phar://') === 0) ? $dir : realpath($dir);
+		if (!$root || !is_dir($root)) {
+			throw new Exception("Invalid document root: $dir");
+		}
+		self::$rootDir = rtrim(str_replace(array('/','\\'), DS, $root), DS) . DS;
+		self::$serverDir = defined('QBIX_SERVER_DIR') ? QBIX_SERVER_DIR : dirname(__DIR__, 2);
+		self::readLimits();
+		self::loadPreload();
+	}
+
 	static function start($dir, $host = '0.0.0.0', $port = 80, $workers = 0)
 	{
 		self::requireIsolation();
@@ -323,18 +434,7 @@ class Q_WebServer
 		}
 
 		// Read PHP ini limits — respect the same limits php-fpm would use
-		self::$maxPostSize = self::parseIniBytes(
-			Q_Config::get('Q', 'webserver', 'postMaxSize', ini_get('post_max_size') ?: '8M')
-		);
-		self::$maxUploadSize = self::parseIniBytes(
-			Q_Config::get('Q', 'webserver', 'uploadMaxFilesize', ini_get('upload_max_filesize') ?: '2M')
-		);
-		self::$maxFileUploads = (int) Q_Config::get(
-			'Q', 'webserver', 'maxFileUploads', ini_get('max_file_uploads') ?: 20
-		);
-		self::$fileUploads = (bool) Q_Config::get(
-			'Q', 'webserver', 'fileUploads', ini_get('file_uploads') !== '0'
-		);
+		self::readLimits();
 
 		// File response cache config
 		self::$fileCacheMaxSize = Q_Config::get('Q', 'webserver', 'fileCache', 'maxSize', 67108864);
@@ -479,54 +579,7 @@ class Q_WebServer
 		}
 
 		// ── Preload classes (before forking) ─────────────
-		$preload = Q_Config::get('Q', 'webserver', 'preload', array());
-		if (!empty($preload)) {
-			// Load the autoloader first (e.g. Composer's)
-			$autoload = is_string($preload)
-				? $preload
-				: (isset($preload['autoload']) ? $preload['autoload'] : null);
-			if ($autoload) {
-				$autoloadPath = $autoload;
-				// Resolve relative to the document root's parent (project root)
-				if ($autoloadPath[0] !== '/' && $autoloadPath[0] !== '\\') {
-					$projectRoot = dirname(rtrim(self::$rootDir, DS));
-					$autoloadPath = $projectRoot . DS . $autoloadPath;
-				}
-				if (file_exists($autoloadPath)) {
-					require_once $autoloadPath;
-					$count = count(get_declared_classes());
-					echo "  Autoloader: " . basename($autoload) . "\n";
-					// This runs before the pool exists, so before the source
-					// transform is installed. With the transform on, whatever
-					// the file loads keeps its real exit and header() in every
-					// worker -- exit then ends the worker, not the request. A
-					// script meant to warm the application in the parent
-					// belongs in Q.webserver.warmup, which runs after it.
-					if (!Q_Config::get('Q', 'compat', 'skipSourceCodeTransform', false)) {
-						fwrite(STDERR, "  Warning: Q.webserver.preload is loaded before the source"
-							. " transform; code it loads keeps real exit/header()."
-							. " Use Q.webserver.warmup for a parent warm-up.\n");
-					}
-				} else {
-					echo "  Warning: autoload file not found: $autoloadPath\n";
-				}
-			}
-			// Then load each named class (triggers the autoloader)
-			$classes = isset($preload['classes']) ? $preload['classes'] : array();
-			if (!empty($classes)) {
-				$loaded = 0;
-				foreach ($classes as $class) {
-					if (!class_exists($class, true) && !interface_exists($class, true)
-						&& !trait_exists($class, true)
-					) {
-						echo "  Warning: could not preload $class\n";
-					} else {
-						$loaded++;
-					}
-				}
-				echo "  Preloaded: $loaded classes\n";
-			}
-		}
+		self::loadPreload();
 
 		// ── Worker pool ──────────────────────────────────
 		// Workers are auto-detected in qbixserver.php before start() is called.
@@ -544,14 +597,22 @@ class Q_WebServer
 		}
 		echo '  Workers as: ' . Q_WebServer_RunAs::describe() . "\n";
 		if ($runAs['warning']) fwrite(STDERR, '  Warning: ' . $runAs['warning'] . "\n");
-		if ($runAs['switch'] and !Q_WebServer_Fork::available()) {
-			fwrite(STDERR, "  Warning: no fork here, so PHP runs in the server process, as root\n");
+		$poolMode = $workers > 0 ? Q_WebServer_Pool::mode() : null;
+		if ($runAs['switch'] and $poolMode === null) {
+			fwrite(STDERR, "  Warning: no worker pool here, so PHP runs in the server process, as root\n");
 		}
 		foreach (Q_WebServer_RunAs::prepare() as $dir => $n) {
 			if ($n > 0) echo "  Handed to {$runAs['user']}: $dir ($n entries were root's)\n";
 		}
 
-		if ($workers > 0 && Q_WebServer_Fork::available()) {
+		// Forked workers where pcntl exists; workers started as processes of
+		// their own where it does not -- Windows -- or where
+		// Q.webserver.poolMode says "portable" (Q_WebServer_Pool::mode()).
+		if ($poolMode === 'portable') {
+			if (!class_exists('Q_WebServer_PortablePool', false)) require_once __DIR__ . '/WebServer/PortablePool.php';
+			echo "  Pool: portable ($workers workers started with proc_open)\n";
+			self::$pool = new Q_WebServer_PortablePool($workers);
+		} elseif ($poolMode === 'fork') {
 			self::$pool = new Q_WebServer_Pool($workers);
 		}
 
@@ -1866,6 +1927,42 @@ class Q_WebServer
 		return max(0.5, min(5.0, $limit - 5.0));
 	}
 
+	/**
+	 * Act on a stop or reload asked for by request file.
+	 *
+	 * Stop is SIGTERM's graceful stop. Reload is SIGHUP's re-exec where the
+	 * process can re-exec itself (pcntl_exec()); elsewhere it is a rolling
+	 * restart of the workers, each replaced once it has finished what it is
+	 * doing -- for workers that load the application themselves (a portable
+	 * pool), that is what brings changed code in.
+	 * @method onControlRequest
+	 * @static
+	 * @param {string} $what "stop" or "reload"
+	 */
+	static function onControlRequest($what)
+	{
+		if ($what === 'stop') {
+			echo "\n  Graceful shutdown (stop requested)...\n";
+			$limit = self::armShutdownDeadline();
+			self::stop(self::drainTimeout($limit));
+			Q_Evented::stop();
+			exit(0);
+		}
+		if ($what !== 'reload') return;
+		if (function_exists('pcntl_exec')) {
+			echo "\n  Reloading (requested)...\n";
+			self::stop();
+			Q_Evented::stop();
+			pcntl_exec(PHP_BINARY, $_SERVER['argv'] ?? array());
+			return;
+		}
+		if (self::$pool) {
+			$r = self::$pool->recycleAll();
+			echo sprintf("\n  Reload: workers replaced (%d now, %d after their request)\n",
+				$r['immediate'], $r['pending']);
+		}
+	}
+
 	static function run()
 	{
 		if (!self::$running) return;
@@ -1938,6 +2035,28 @@ class Q_WebServer
 						// The child handles recording on its own via exit(0)
 					}
 				}
+			});
+		} else {
+			// No signals (Windows): CTRL+C and CTRL+BREAK in the console take
+			// the same graceful path SIGINT does. Workers of a portable pool
+			// are in their own process group and ignore both; the server ends
+			// them through their sockets (Q_WebServer_PortablePool::shutdown()).
+			Q_WebServer_Process::onConsoleInterrupt(function ($event) {
+				echo "\n  Graceful shutdown (console interrupt)...\n";
+				self::stop(self::drainTimeout(0));
+				Q_Evented::stop();
+				exit(0);
+			});
+		}
+		// Stop and reload asked for by request file beside the pid file
+		// (Q_WebServer_Process::requestControl()): how `--stop` and
+		// `--reload` reach a server that cannot be sent a signal. Checked
+		// wherever there is a pid file, so the same command works everywhere.
+		$controlPid = self::$controlPidFile;
+		if (is_string($controlPid) and $controlPid !== '') {
+			Q_Evented::repeat(1.0, function () use ($controlPid) {
+				$what = Q_WebServer_Process::takeControlRequest($controlPid);
+				if ($what !== null) self::onControlRequest($what);
 			});
 		}
 		// Engine.IO ping timer — keeps Socket.IO connections alive

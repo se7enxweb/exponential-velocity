@@ -478,11 +478,11 @@ class Q_WebServer_Pool
 		if (!class_exists('Q_WebServer_Capture', false)) {
 			require_once dirname(__DIR__) . '/WebServer/Capture.php';
 		}
-		if (!Q_WebServer_Fork::available()) {
+		if (!$this->canStartWorkers()) {
 			throw new Exception(
 				"Q_WebServer_Pool requires fork capability. "
-				. "Install pcntl (Linux/macOS) or qbix_fork.dll (Windows). "
-				. "Or use --workers=0 for php-cgi mode."
+				. "Install pcntl, or set Q.webserver.poolMode to \"portable\" "
+				. "(workers started with proc_open), or use --workers=0 for php-cgi mode."
 			);
 		}
 		$this->targetSize = $size ?: (int) Q_Config::get(
@@ -504,6 +504,156 @@ class Q_WebServer_Pool
 			(float) Q_Config::get('Q', 'webserver', 'streamShare', 0.25)));
 		$this->maxStreams = max(0, (int) Q_Config::get('Q', 'webserver', 'maxStreams', 0));
 
+		// Compat, the warm-up and the statics snapshot: see prepareRuntime().
+		$this->prepareParent();
+
+		if (function_exists('pcntl_signal')) {
+			pcntl_signal(SIGCHLD, SIG_DFL);
+		}
+		$initial = $this->spareWorkers > 0 ? $this->spareWorkers : $this->targetSize;
+		for ($i = 0; $i < $initial; $i++) {
+			$this->forkWorker();
+		}
+		$this->initialWorkersStarted();
+		// Still before the first connection is accepted: the zygote forked
+		// now holds no client, and neither will any worker it forks.
+		if ($this->forksWorkers() and Q_Config::get('Q', 'webserver', 'zygote', true)) {
+			if (self::zygoteSupported()) {
+				$this->startZygote();
+			} elseif (function_exists('socket_recvmsg') and !self::socketPassingWorks()) {
+				fwrite(STDERR, sprintf("  zygote off: PHP %s does not pass sockets between processes intact"
+					. " (SCM_RIGHTS); workers are forked from the server\n", PHP_VERSION));
+			}
+		}
+		$pool = $this;
+		Q_Evented::repeat(2.0, function () use ($pool) {
+			$pool->reapPending();
+			$pool->sweepDeadIdle();
+		});
+		// Streams: a client that left, and streams past streamTimeout. Every
+		// second, so a worker learns of a departed client within about one.
+		Q_Evented::repeat(1.0, function () use ($pool) {
+			$pool->superviseStreams();
+		});
+		if ($this->spareWorkers > 0) {
+			Q_Evented::repeat(min(10.0, max(1.0, $this->idleTimeout / 4)), function () use ($pool) {
+				$pool->retireIdleExtras();
+			});
+		}
+	}
+
+	/**
+	 * Which kind of pool serves PHP: "fork" (workers forked from the server,
+	 * the default wherever pcntl_fork() exists), "portable" (workers started
+	 * as their own processes with proc_open(), Q_WebServer_PortablePool), or
+	 * null when neither can run here.
+	 *
+	 * Q.webserver.poolMode chooses: "fork", "portable", or "auto" (the
+	 * default), which is fork when it is available and portable otherwise --
+	 * on Windows, and on any PHP built without pcntl. Asked for fork where
+	 * there is none, the answer is portable, with a warning; asked for
+	 * portable, the answer is portable even where fork exists, which is how
+	 * the portable pool is run and tested on Linux.
+	 * @method mode
+	 * @static
+	 * @param {string|null} [$wanted] defaults to Q.webserver.poolMode
+	 * @return {string|null}
+	 */
+	static function mode($wanted = null)
+	{
+		if ($wanted === null) $wanted = Q_Config::get('Q', 'webserver', 'poolMode', 'auto');
+		$wanted = strtolower(trim((string) $wanted));
+		if (!class_exists('Q_WebServer_Fork', false)) require_once __DIR__ . '/Fork.php';
+		// Fork means pcntl_fork(). The FFI route in Q_WebServer_Fork needs a
+		// qbix_fork.dll that is not shipped, and cloning a Windows process with
+		// open sockets is not something Windows supports; it is not relied on.
+		$fork = function_exists('pcntl_fork') && Q_WebServer_Fork::available();
+		$portable = function_exists('proc_open') && function_exists('stream_socket_server');
+		if ($wanted === 'portable') return $portable ? 'portable' : ($fork ? 'fork' : null);
+		if ($wanted === 'fork') {
+			if ($fork) return 'fork';
+			if ($portable) {
+				fwrite(STDERR, "  poolMode fork: no pcntl_fork() in this PHP; workers are started"
+					. " as their own processes (portable)\n");
+				return 'portable';
+			}
+			return null;
+		}
+		if ($wanted !== 'auto' and $wanted !== '') {
+			fwrite(STDERR, "  poolMode \"$wanted\" is not fork, portable or auto; using auto\n");
+		}
+		return $fork ? 'fork' : ($portable ? 'portable' : null);
+	}
+
+	/**
+	 * Whether this pool can start workers here: a forking pool needs fork.
+	 * @method canStartWorkers
+	 * @return {boolean}
+	 */
+	protected function canStartWorkers()
+	{
+		return Q_WebServer_Fork::available();
+	}
+
+	/**
+	 * Whether workers are forked from this process -- and so whether a
+	 * zygote can fork them instead. A portable pool starts new processes.
+	 * @method forksWorkers
+	 * @return {boolean}
+	 */
+	protected function forksWorkers()
+	{
+		return true;
+	}
+
+	/**
+	 * Called once the constructor has started the first workers. A forked
+	 * worker is ready the moment it exists; a portable one has to boot and
+	 * connect first, and its pool waits for that here.
+	 * @method initialWorkersStarted
+	 */
+	protected function initialWorkersStarted()
+	{
+	}
+
+	/**
+	 * Ask a worker to end (SIGTERM), or end it at once ($force, SIGKILL).
+	 * @method signalWorker
+	 * @param {array} $w a worker entry
+	 * @param {boolean} $force
+	 * @return {boolean}
+	 */
+	protected function signalWorker($w, $force)
+	{
+		$pid = (int) ($w['pid'] ?? 0);
+		if ($pid <= 0 or !function_exists('posix_kill')) return false;
+		return @posix_kill($pid, $force ? SIGKILL : SIGTERM);
+	}
+
+	/**
+	 * What the parent does before the first worker exists: the compat layer,
+	 * the warm-up and the statics snapshot (see prepareRuntime()). A pool
+	 * whose workers are not forked from this process has them do it
+	 * themselves instead (Q_WebServer_PortablePool).
+	 * @method prepareParent
+	 */
+	protected function prepareParent()
+	{
+		self::prepareRuntime($this->octane);
+	}
+
+	/**
+	 * Make this process what a worker starts from: the compat layer
+	 * installed, the warm-up run (Q.webserver.warmup) and, for persistent
+	 * workers, the clean statics snapshot taken. A forking pool does it once
+	 * in the server, before the fork; a portable worker does it in its own
+	 * process, before it takes its first request.
+	 * @method prepareRuntime
+	 * @static
+	 * @param {boolean} $octane whether workers persist between requests
+	 */
+	static function prepareRuntime($octane)
+	{
 		// Compat on by default unless explicitly disabled, in either mode.
 		// It shims the lifecycle functions for shared-nothing safety, which
 		// only a persistent worker needs -- but it also shims header() and
@@ -633,7 +783,7 @@ class Q_WebServer_Pool
 			}
 		}
 
-		if ($this->octane) {
+		if ($octane) {
 			$snapFile = dirname(__DIR__) . '/WebServer/Snapshot.php';
 			if (!class_exists('Q_WebServer_Snapshot', false) && is_file($snapFile)) {
 				require_once $snapFile;
@@ -641,38 +791,6 @@ class Q_WebServer_Pool
 			if (class_exists('Q_WebServer_Snapshot', false)) {
 				$n = Q_WebServer_Snapshot::take();
 			}
-		}
-		if (function_exists('pcntl_signal')) {
-			pcntl_signal(SIGCHLD, SIG_DFL);
-		}
-		$initial = $this->spareWorkers > 0 ? $this->spareWorkers : $this->targetSize;
-		for ($i = 0; $i < $initial; $i++) {
-			$this->forkWorker();
-		}
-		// Still before the first connection is accepted: the zygote forked
-		// now holds no client, and neither will any worker it forks.
-		if (Q_Config::get('Q', 'webserver', 'zygote', true)) {
-			if (self::zygoteSupported()) {
-				$this->startZygote();
-			} elseif (function_exists('socket_recvmsg') and !self::socketPassingWorks()) {
-				fwrite(STDERR, sprintf("  zygote off: PHP %s does not pass sockets between processes intact"
-					. " (SCM_RIGHTS); workers are forked from the server\n", PHP_VERSION));
-			}
-		}
-		$pool = $this;
-		Q_Evented::repeat(2.0, function () use ($pool) {
-			$pool->reapPending();
-			$pool->sweepDeadIdle();
-		});
-		// Streams: a client that left, and streams past streamTimeout. Every
-		// second, so a worker learns of a departed client within about one.
-		Q_Evented::repeat(1.0, function () use ($pool) {
-			$pool->superviseStreams();
-		});
-		if ($this->spareWorkers > 0) {
-			Q_Evented::repeat(min(10.0, max(1.0, $this->idleTimeout / 4)), function () use ($pool) {
-				$pool->retireIdleExtras();
-			});
 		}
 	}
 
@@ -983,7 +1101,7 @@ class Q_WebServer_Pool
 				@socket_write($ctl, pack('N', 0));
 				continue;
 			}
-			$pid = pcntl_fork();
+			$pid = Q_WebServer_Fork::fork();
 			if ($pid === 0) {
 				// ── WORKER, forked from the zygote ──
 				socket_close($ctl);
@@ -1105,6 +1223,30 @@ class Q_WebServer_Pool
 	// ── Child process ────────────────────────────────────
 
 	/**
+	 * Called in a worker after each answer, with how many requests it has
+	 * answered. A portable worker reports them to its supervisor ("DONE n").
+	 * @property $afterRequest
+	 * @type {callable|null}
+	 * @static
+	 */
+	public static $afterRequest = null;
+
+	/**
+	 * Serve requests from the server over $socket until it closes or the
+	 * worker has served $maxReqs: the worker's life, for a worker that is
+	 * not forked (Q_WebServer_PortablePool).
+	 * @method serve
+	 * @static
+	 * @param {resource} $socket
+	 * @param {boolean} $octane
+	 * @param {integer} $maxReqs
+	 */
+	static function serve($socket, $octane, $maxReqs)
+	{
+		self::childRun($socket, $octane, $maxReqs);
+	}
+
+	/**
 	 * Child: handle requests. In octane mode, loops with snapshot restore
 	 * between requests (0.05ms) instead of dying and re-forking (8ms).
 	 * In classic mode, handles one request and exits.
@@ -1168,6 +1310,9 @@ class Q_WebServer_Pool
 				$resp['headers'], $resp['cookies'] ?? array(),
 				$resp['recycle'] ?? '', $canPeak ? memory_get_peak_usage() : 0);
 			$handled++;
+			if (self::$afterRequest !== null) {
+				try { call_user_func(self::$afterRequest, $handled); } catch (\Throwable $e) { /* reporting only */ }
+			}
 			// From here the worker resets itself; how long that takes goes to
 			// the server with the next answer (see findIdle()).
 			$resetStarted = hrtime(true);
@@ -2643,8 +2788,10 @@ class Q_WebServer_Pool
 		}
 		$newIdx = $this->forkWorker();
 
-		// Drain pending queue
-		if (!empty($this->pending)) {
+		// Drain pending queue. A pool whose new workers have to boot first
+		// (portable) has no index to give yet; it drains the queue itself
+		// once the replacement has connected.
+		if ($newIdx !== null and !empty($this->pending)) {
 			$next = array_shift($this->pending);
 			$this->sendTo($newIdx, $next[0], $next[1], $next[2], $next[3] ?? null);
 		}
@@ -3476,7 +3623,7 @@ class Q_WebServer_Pool
 			if (!empty($w['dying']) and empty($w['killed']) and isset($w['dyingSince'])
 			and $now - $w['dyingSince'] >= $grace) {
 				$pid = (int) ($w['pid'] ?? 0);
-				if ($pid > 0) @posix_kill($pid, SIGKILL);
+				if ($pid > 0) $this->signalWorker($w, true);
 				$this->workers[$index]['killed'] = true;
 				fwrite(STDERR, sprintf("  worker %d did not end %.1fs after SIGTERM; SIGKILL\n",
 					$pid, $now - $w['dyingSince']));
@@ -3521,7 +3668,7 @@ class Q_WebServer_Pool
 			$this->workers[$index]['dying'] = true;
 			$this->workers[$index]['dyingSince'] = $now;
 			$pid = (int) ($w['pid'] ?? 0);
-			if ($pid > 0) @posix_kill($pid, $grace > 0 ? SIGTERM : SIGKILL);
+			if ($pid > 0) $this->signalWorker($w, $grace <= 0);
 			if ($grace <= 0) $this->workers[$index]['killed'] = true;
 			fwrite(STDERR, sprintf("  worker %d killed after %.1fs on %s %s (%s %ss)\n",
 				$pid, $now - $started, $method, $uri,
@@ -3617,7 +3764,7 @@ class Q_WebServer_Pool
 
 		// Send SIGTERM to all workers
 		foreach ($this->workers as $w) {
-			if (function_exists("posix_kill")) posix_kill($w["pid"], SIGTERM);
+			$this->signalWorker($w, false);
 		}
 
 		// Wait for workers to exit gracefully. One the zygote forked is not
@@ -3643,7 +3790,7 @@ class Q_WebServer_Pool
 
 		// SIGKILL any workers that didn't exit in time
 		foreach ($remaining as $w) {
-			if (function_exists("posix_kill")) posix_kill($w["pid"], SIGKILL);
+			$this->signalWorker($w, true);
 			if (empty($w['zygote'])) Q_WebServer_Fork::waitpid($w['pid'], $st, 0);
 		}
 

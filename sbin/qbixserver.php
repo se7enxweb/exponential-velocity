@@ -51,6 +51,11 @@ if ((PHP_SAPI === 'cli' || PHP_SAPI === 'micro') && in_array($argv[1] ?? '', arr
 	exit(0);
 }
 
+// A portable pool worker's standard output is its control pipe to the server
+// (READY/DONE/EXIT lines). What the start-up prints is held here and handed to
+// standard error once the worker takes over (Q_WebServer_PortablePool).
+if (getenv('QBIX_POOL_WORKER')) ob_start();
+
 define('QBIX_SERVER_VERSION', '1.5.0');
 
 // A stamp written to disk beside this file by build-phar.php, if present.
@@ -159,6 +164,7 @@ $opts = array(
 	'user'    => null,  // --user=NAME : the user the workers run as (Apache's User)
 	'group'   => null,  // --group=NAME : the group the workers run as (Apache's Group)
 	'allow-root-workers' => false, // --allow-root-workers : permit --user=root
+	'pool-mode' => null, // --pool-mode=fork|portable|auto : how workers are started (Q.webserver.poolMode)
 );
 
 
@@ -197,7 +203,7 @@ if (!function_exists('qbix_normalize_argv')) {
 $argv = qbix_normalize_argv($argv,
 	array('root', 'app', 'host', 'port', 'https-port', 'socket', 'socket-mode', 'workers', 'config',
 		'preset', 'sign', 'verify', 'key', 'key-id', 'generate-key', 'policy', 'pid', 'pack', 'output',
-		'keep-globals', 'conf-dir', 'distribution', 'deploy', 'signer', 'm', 'user', 'group'),
+		'keep-globals', 'conf-dir', 'distribution', 'deploy', 'signer', 'm', 'user', 'group', 'pool-mode'),
 	array('help', 'version', 'stop', 'reload', 'debug', 'quiet', 'verbose', 'hotreload', 'layout', 'gui', 'open', 'watchdog',
 		'sign-binary', 'verify-binary', 'publish-rekor', 'allow-root-workers'));
 
@@ -217,6 +223,9 @@ foreach ($argv as $i => $arg) {
 		echo "  --socket-mode=MODE  Permissions on socket file (default: 0660)\n";
 		echo "  --workers=N      Persistent workers (default: what fits in RAM, at most\n";
 		echo "                   8 per core and 64 in all, never fewer than 4)\n";
+		echo "  --pool-mode=MODE How workers are started: fork (forked from the server),\n";
+		echo "                   portable (own processes via proc_open; Windows), or\n";
+		echo "                   auto (default: fork where pcntl exists, else portable)\n";
 		echo "  --config=FILE    JSON config file (usually DIR/sites-enabled/SITE.conf)\n";
 		echo "  --conf-dir=DIR   Configuration directory laid out like /etc/apache2:\n";
 		echo "                   qbix.conf, ports.conf, mods-enabled/, conf-enabled/,\n";
@@ -1102,7 +1111,9 @@ if (!Q_Config::get('Q', 'compat', 'skipSourceCodeTransform', false)) {
 	// tried to prewarm (and, trimmed to '', crashed on before it could).
 	if ($prewarmDir === DIRECTORY_SEPARATOR || !is_dir($prewarmDir)) $prewarmDir = $webDir;
 	$prewarmStarted = microtime(true);
-	$prewarmCount = Q_WebServer_Compat::prewarm($prewarmDir);
+	// Not in a portable pool worker: each would walk the whole tree again.
+	// It transforms what it loads, as it loads it, through the same cache.
+	$prewarmCount = getenv('QBIX_POOL_WORKER') ? 0 : Q_WebServer_Compat::prewarm($prewarmDir);
 	$prewarmMs = (microtime(true) - $prewarmStarted) * 1000;
 	if ($prewarmCount > 0) {
 		$stats = Q_WebServer_Compat::cacheStats();
@@ -1183,6 +1194,20 @@ if ($socketPath) {
 	Q_Config::set('Q', 'webserver', 'socketMode', $socketMode);
 }
 
+if ($opts['pool-mode'] !== null) {
+	Q_Config::set('Q', 'webserver', 'poolMode', (string) $opts['pool-mode']);
+}
+
+// ── Portable pool worker ────────────────────────────
+// A worker of a portable pool (Q_WebServer_PortablePool) is this script, run
+// again with the server's own command line, so it reads the same
+// configuration. It stops here: no pid file, no listener, no banner. It boots
+// the application, connects back to the server and serves what it is sent.
+if (getenv('QBIX_POOL_WORKER')) {
+	require_once dirname(__DIR__) . '/src/Q/WebServer/PortablePool.php';
+	exit(Q_WebServer_PortablePool::workerMain($webDir));
+}
+
 // ── Signal commands (--stop, --reload) ──────────────
 
 if (!empty($opts['signal'])) {
@@ -1192,19 +1217,30 @@ if (!empty($opts['signal'])) {
 		fwrite(STDERR, "Use --pid=PATH to specify, or start the server with --pid first.\n");
 		exit(1);
 	}
+	require_once dirname(__DIR__) . '/src/Q/WebServer/Process.php';
 	$pid = (int) trim(file_get_contents($pidFile));
-	if ($pid <= 0 || !posix_kill($pid, 0)) {
+	if ($pid <= 0 || !Q_WebServer_Process::isAlive($pid)) {
 		fwrite(STDERR, "No running server found (PID $pid)\n");
 		@unlink($pidFile);
 		exit(1);
 	}
-	if ($opts['signal'] === 'stop') {
-		posix_kill($pid, SIGTERM);
-		fwrite(STDERR, "Sent SIGTERM to PID $pid\n");
-	} elseif ($opts['signal'] === 'reload') {
-		posix_kill($pid, SIGHUP);
-		fwrite(STDERR, "Sent SIGHUP to PID $pid\n");
+	if (function_exists('posix_kill') and defined('SIGTERM')) {
+		if ($opts['signal'] === 'stop') {
+			posix_kill($pid, SIGTERM);
+			fwrite(STDERR, "Sent SIGTERM to PID $pid\n");
+		} elseif ($opts['signal'] === 'reload') {
+			posix_kill($pid, SIGHUP);
+			fwrite(STDERR, "Sent SIGHUP to PID $pid\n");
+		}
+		exit(0);
 	}
+	// No signals here (Windows): the server reads a request file beside its
+	// pid file within a second (Q_WebServer::onControlRequest()).
+	if (!Q_WebServer_Process::requestControl($pidFile, $opts['signal'])) {
+		fwrite(STDERR, "Could not write " . Q_WebServer_Process::controlFile($pidFile, $opts['signal']) . "\n");
+		exit(1);
+	}
+	fwrite(STDERR, "Asked PID $pid to {$opts['signal']} (" . Q_WebServer_Process::controlFile($pidFile, $opts['signal']) . ")\n");
 	exit(0);
 }
 
@@ -1273,12 +1309,18 @@ if ($opts['pid']) {
 	// start takes the file over, and removes it again on the way out only
 	// while it still names this process.
 	$__prev = is_file($opts['pid']) ? (int) trim((string) @file_get_contents($opts['pid'])) : 0;
-	if ($__prev > 0 and $__prev !== getmypid() and function_exists('posix_kill') and @posix_kill($__prev, 0)) {
+	require_once dirname(__DIR__) . '/src/Q/WebServer/Process.php';
+	if ($__prev > 0 and $__prev !== getmypid() and Q_WebServer_Process::isAlive($__prev)) {
 		fwrite(STDERR, "  [PID] {$opts['pid']} names a server that is still running (pid $__prev); this one takes the file over\n");
 	}
 	unset($__prev);
 	file_put_contents($opts['pid'], getmypid());
 	$pidOwner = getmypid();
+	// Where --stop and --reload leave their request when no signal can be
+	// sent (Q_WebServer_Process::requestControl()). Stale ones go first.
+	Q_WebServer::$controlPidFile = $opts['pid'];
+	require_once dirname(__DIR__) . '/src/Q/WebServer/Process.php';
+	Q_WebServer_Process::takeControlRequest($opts['pid']);
 	// How this server was started, beside the pid file, so `qbixctl restart`
 	// starts it again with the same options, directory and environment.
 	require_once dirname(__DIR__) . '/src/Q/WebServer/StartRecord.php';
@@ -1497,11 +1539,31 @@ if (!$opts['workers'] && function_exists('pcntl_fork')) {
 	}
 }
 
+// No fork here (Windows, or a PHP without pcntl): a portable pool of workers
+// started as their own processes, unless --workers says otherwise. Each one
+// loads the application itself, so the count stays modest: one per core,
+// between 2 and 8. Q.webserver.workers, when set, decides instead.
+if (!$opts['workers'] && !function_exists('pcntl_fork') && function_exists('proc_open')) {
+	$__cfgWorkers = (int) Q_Config::get('Q', 'webserver', 'workers', 0);
+	$__cores = (int) (getenv('NUMBER_OF_PROCESSORS') ?: 0);
+	$opts['workers'] = $__cfgWorkers > 0 ? $__cfgWorkers : max(2, min(8, $__cores ?: 2));
+	unset($__cfgWorkers, $__cores);
+}
+
 // ── System limits check ──────────────────────────────────────────────
 // Workers need: 2 fds each (socket pair) + ~10 fds per worker for
 // open files, plus the parent needs fds for the listen socket, logs, etc.
 // Each worker is also a process, so nproc/maxproc limits apply.
-if ($opts['workers'] > 0) {
+if ($opts['workers'] > 0 && PHP_OS_FAMILY === 'Windows') {
+	// None of the probes below exist on Windows (ulimit, /proc, sysctl).
+	// What does bind there is select(): PHP's stream_select() takes at most
+	// FD_SETSIZE sockets (256 in the official builds), and the event loop
+	// watches the busy workers' sockets beside the clients'.
+	if ($opts['workers'] * 2 + 64 > 256) {
+		fwrite(STDERR, "  Warning: {$opts['workers']} workers is near the 256 sockets stream_select()"
+			. " can watch on Windows; consider --workers=" . max(2, (int) ((256 - 64) / 2)) . " or fewer\n");
+	}
+} elseif ($opts['workers'] > 0) {
 	$needed = $opts['workers'];
 	$neededFds = $needed * 2 + 128; // socket pairs + headroom
 	$warnings = [];
@@ -1672,8 +1734,12 @@ if (!Q_Config::get('Q', 'compat', 'skipSourceCodeTransform', false)) {
 	$preset = $opts['preset'] ?: 'custom';
 	fwrite(STDERR, "  │" . str_pad("  Compat: $preset (source transform active)", $W) . "│\n");
 }
+$__poolLabel = class_exists('Q_WebServer_Fork') ? Q_WebServer_Fork::method() : 'detecting...';
+$__poolMode = strtolower((string) Q_Config::get('Q', 'webserver', 'poolMode', 'auto'));
+if ($opts['workers'] && ($__poolMode === 'portable' || !function_exists('pcntl_fork'))) $__poolLabel = 'portable, proc_open';
 fwrite(STDERR, "  │" . str_pad("  PHP: " . ($opts['workers'] ? $opts['workers'] . ' workers' : 'in-process')
-	. ' (' . (class_exists('Q_WebServer_Fork') ? Q_WebServer_Fork::method() : 'detecting...') . ')', $W) . "│\n");
+	. ' (' . $__poolLabel . ')', $W) . "│\n");
+unset($__poolLabel, $__poolMode);
 $nClasses = count(get_declared_classes());
 $nHandlers = property_exists('Q', 'preloadedHandlers') ? Q::$preloadedHandlers : 0;
 $preloadLabel = $nHandlers > 0

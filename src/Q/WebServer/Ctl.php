@@ -95,7 +95,10 @@ class Q_WebServer_Ctl
 			$state = substr($stat, strrpos($stat, ')') + 2, 1);
 			return $state !== 'Z' and $state !== 'X';
 		}
-		return function_exists('posix_kill') ? @posix_kill($pid, 0) : false;
+		if (function_exists('posix_kill')) return @posix_kill($pid, 0);
+		// Windows: tasklist.
+		if (!class_exists('Q_WebServer_Process', false)) require_once __DIR__ . '/Process.php';
+		return Q_WebServer_Process::isAlive($pid);
 	}
 
 	/** Parse the options out of a qbixserver.php command line read from /proc. */
@@ -561,6 +564,21 @@ class Q_WebServer_Ctl
 	static function launch(array $command, array $args, $cwd, $env, $log, $pidFile, array $ports, $wait, $oldPid = 0, $allPorts = false)
 	{
 		if (!is_dir(dirname($log))) @mkdir(dirname($log), 0755, true);
+		if (!class_exists('Q_WebServer_Process', false)) require_once __DIR__ . '/Process.php';
+		if (Q_WebServer_Process::isWindows()) {
+			// No shell, no setsid: the server is started directly, in a
+			// process group of its own so a CTRL+C in this console does not
+			// reach it, with its output in the log. It outlives this process
+			// (the handle is let go, not waited for).
+			$fullEnv = getenv();
+			if (is_array($env)) $fullEnv = $env + array_intersect_key($fullEnv, array('SystemRoot' => 1, 'PATH' => 1, 'TEMP' => 1, 'TMP' => 1));
+			$proc = @proc_open(array_map('strval', array_merge($command, $args)), array(
+				0 => array('file', 'NUL', 'r'),
+				1 => array('file', $log, 'a'),
+				2 => array('file', $log, 'a'),
+			), $pipes, $cwd, $fullEnv, array('bypass_shell' => true, 'create_process_group' => true));
+			if (!is_resource($proc)) return array(false, 0, 'could not start ' . $command[0]);
+		} else {
 		$setsid = null;
 		foreach (array_merge(explode(PATH_SEPARATOR, (string) getenv('PATH')), array('/usr/bin', '/bin', '/usr/sbin', '/sbin')) as $d) {
 			if ($d !== '' and is_executable("$d/setsid")) { $setsid = "$d/setsid"; break; }
@@ -580,6 +598,7 @@ class Q_WebServer_Ctl
 		$cmd = '(' . ($cwd !== null ? 'cd ' . escapeshellarg($cwd) . ' && ' : '') . "exec $run)"
 			. ' > ' . escapeshellarg($log) . ' 2>&1 < /dev/null &';
 		@exec($cmd);
+		}
 		$deadline = microtime(true) + $wait;
 		$pid = 0;
 		while (microtime(true) < $deadline) {
@@ -735,15 +754,27 @@ class Q_WebServer_Ctl
 	static function stopProcess($pid, $pidFile, $direct, $wait)
 	{
 		if (!self::isAlive($pid)) return array(true, 'not running');
-		if (($direct or $pidFile === '' or $pidFile === null) and function_exists('posix_kill')) {
+		if (!class_exists('Q_WebServer_Process', false)) require_once __DIR__ . '/Process.php';
+		$noPidFile = ($direct or $pidFile === '' or $pidFile === null);
+		if ($noPidFile and function_exists('posix_kill')) {
 			@posix_kill($pid, defined('SIGTERM') ? SIGTERM : 15);
-		} else {
-			@exec(implode(' ', array_map('escapeshellarg', array_merge(self::serverCommand(), array('--stop', '--pid=' . $pidFile)))) . ' > /dev/null 2>&1');
+		} elseif (!$noPidFile and !function_exists('posix_kill')) {
+			// No signals (Windows): the server reads this request file.
+			Q_WebServer_Process::requestControl($pidFile, 'stop');
+		} elseif (!$noPidFile) {
+			Q_WebServer_Process::run(array_merge(self::serverCommand(), array('--stop', '--pid=' . $pidFile)));
 		}
 		$deadline = microtime(true) + (float) $wait;
 		while (microtime(true) < $deadline) {
 			if (!self::isAlive($pid)) return array(true, "stopped (pid $pid)");
 			usleep(250000);
+		}
+		// Windows, last resort: a server with no pid file cannot be asked,
+		// and one that did not answer its request file is ended, with every
+		// process it started (taskkill /T /F).
+		if (Q_WebServer_Process::isWindows() and Q_WebServer_Process::terminate($pid, true)) {
+			usleep(500000);
+			if (!self::isAlive($pid)) return array(true, "ended (pid $pid, taskkill)");
 		}
 		return array(false, "pid $pid is still running");
 	}
@@ -766,7 +797,13 @@ class Q_WebServer_Ctl
 			@posix_kill($pid, defined('SIGHUP') ? SIGHUP : 1);
 			return array(true, "reload requested (pid $pid)");
 		}
-		@exec(implode(' ', array_map('escapeshellarg', array_merge(self::serverCommand(), array('--reload', '--pid=' . $pidFile)))) . ' > /dev/null 2>&1', $o, $code);
+		if (!class_exists('Q_WebServer_Process', false)) require_once __DIR__ . '/Process.php';
+		if (!function_exists('posix_kill')) {
+			if ($direct or $pidFile === '' or $pidFile === null) return array(false, 'reload needs the pid file on this system');
+			return Q_WebServer_Process::requestControl($pidFile, 'reload')
+				? array(true, "reload requested (pid $pid)") : array(false, 'reload failed');
+		}
+		Q_WebServer_Process::run(array_merge(self::serverCommand(), array('--reload', '--pid=' . $pidFile)), $code);
 		return $code === 0 ? array(true, "reload requested (pid $pid)") : array(false, 'reload failed');
 	}
 
@@ -839,9 +876,10 @@ class Q_WebServer_Ctl
 		}
 		$ask = function ($prompt) {
 			fwrite(STDERR, $prompt);
-			@shell_exec('stty -echo 2>/dev/null');
+			$tty = PHP_OS_FAMILY !== 'Windows';   // no stty there; the password echoes
+			if ($tty) @shell_exec('stty -echo 2>/dev/null');
 			$line = fgets(STDIN);
-			@shell_exec('stty echo 2>/dev/null');
+			if ($tty) @shell_exec('stty echo 2>/dev/null');
 			fwrite(STDERR, "\n");
 			return $line === false ? '' : rtrim($line, "\r\n");
 		};
