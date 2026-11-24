@@ -67,6 +67,19 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.62 — file access checks in a worker follow the operating system, and a worker still busy after its answer gets no new request
+
+2026-11-24
+
+### Fixed
+
+- **`is_writable()`, `is_writeable()`, `is_readable()` and `is_executable()` in a worker give the operating system's answer.** With the worker's `file://` wrapper (`Q_WebServer_CompatFileWrapper`) installed, PHP cannot call `access(2)` for these functions; it compares the mode bits of the wrapper's `stat()` with the process's uid and gid instead. That comparison does not see root's rights, an NFS export's user squashing, ACLs or capabilities, so a directory the process can write to could be reported as not writable: a directory of another user for a worker running as root, or an NFS mount exported with `all_squash`. An application that checks its storage directory before writing (for example a cluster file handler checking its NFS mount point) then refused it. The transform now sends the four calls to `Q_WebServer_Compat::accessCheck()`, which asks `access(2)` through `posix_access()`, or, without the posix extension, runs the native function with PHP's own file wrapper put back for that call. URLs of other wrappers and calls outside a worker go to the native function unchanged. The transform cache is keyed by `rulesHash()`, so scripts transformed by an earlier version are transformed again after the upgrade. See [compatibility.md](docs/compatibility.md#access-checks-is_writable-is_readable-is_executable); `tests/unit-compat-access-checks.php` covers it.
+- **A pooled worker still busy after its answer is given no new request until it says it is free.** A persistent worker sends its answer and then resets, running the request's shutdown callbacks (a session write, mail, work started for later). The server counted it free at the answer and predicted the end of its reset from the reset before; once that prediction had passed it handed the worker the next request, and queued ones after it, which then waited in the worker's socket for as long as the after-answer work took while other workers were idle. On a page of 500 images whose requests each start work after their answer, single images took up to 21 s and the page 4 to 12 s; PHP-FPM served the same page in under 3 s. The worker now sends a short ready message after its reset (`writeReady()`); until it arrives the server does not take the worker once its predicted reset has run out and leaves queued requests for the first free worker (`workerReady()`). A ready message that arrives in the same read as the answer is used. `tests/unit-pool-busy-after-answer.php` covers it.
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.62.
+
 ## v0.0.4.61 — the binaries build again: v0.0.4.60's cookie fix, released with its binaries
 
 2026-11-14
