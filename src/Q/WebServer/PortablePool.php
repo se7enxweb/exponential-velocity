@@ -364,6 +364,33 @@ class Q_WebServer_PortablePool extends Q_WebServer_Pool
 		$this->watchers = array();
 	}
 
+	/** Traced: a request handed to a worker. */
+	protected function sendTo($index, $client, $parsed, $scriptPath, $responder = null)
+	{
+		self::trace("send to worker #$index: " . ($parsed['method'] ?? '?') . ' ' . ($parsed['uri'] ?? '?'));
+		parent::sendTo($index, $client, $parsed, $scriptPath, $responder);
+		self::trace("sent to worker #$index" . (isset($this->workers[$index]) ? '' : ' (worker gone)'));
+	}
+
+	/** Traced: what arrives from a worker. */
+	function onWorkerData($index, $sock)
+	{
+		if (getenv('QBIX_POOL_TRACE')) {
+			$meta = @stream_get_meta_data($sock);
+			self::trace("data from worker #$index readable, eof=" . var_export(@feof($sock), true)
+				. ', unread=' . (int) ($meta['unread_bytes'] ?? 0));
+		}
+		parent::onWorkerData($index, $sock);
+	}
+
+	/** Traced: a request arriving at the pool. */
+	function dispatch($client, $parsed, $scriptPath, $responder = null)
+	{
+		self::trace('dispatch ' . ($parsed['method'] ?? '?') . ' ' . ($parsed['uri'] ?? '?') . ' -> ' . basename((string) $scriptPath)
+			. ', idle ' . $this->idleCount() . ', queued ' . count($this->pending));
+		parent::dispatch($client, $parsed, $scriptPath, $responder);
+	}
+
 	/** No zygote in a portable pool. */
 	function stopZygote()
 	{
@@ -984,7 +1011,8 @@ class Q_WebServer_PortablePool extends Q_WebServer_Pool
 		$say('READY', getmypid());
 		self::trace('worker connected and ready');
 
-		self::$afterRequest = function ($handled) use ($say) { $say('DONE', $handled); };
+		self::$afterRequest = function ($handled) use ($say) { $say('DONE', $handled); self::trace("answer written ($handled so far)"); };
+		if (getenv('QBIX_POOL_TRACE')) self::$traceHook = function ($what) { self::trace($what); };
 		self::workerSignals();
 		self::serve($sock, $octane, $maxRequests);
 		$say('EXIT', 0);

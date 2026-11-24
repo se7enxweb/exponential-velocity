@@ -1235,6 +1235,16 @@ class Q_WebServer_Pool
 	public static $afterRequest = null;
 
 	/**
+	 * Called in a worker with a line about each step of a request (frame
+	 * read, script run); for tracing a pool on a system nobody can watch
+	 * (Q_WebServer_PortablePool, QBIX_POOL_TRACE). Null: nothing is done.
+	 * @property $traceHook
+	 * @type {callable|null}
+	 * @static
+	 */
+	public static $traceHook = null;
+
+	/**
 	 * Serve requests from the server over $socket until it closes or the
 	 * worker has served $maxReqs: the worker's life, for a worker that is
 	 * not forked (Q_WebServer_PortablePool).
@@ -1279,6 +1289,8 @@ class Q_WebServer_Pool
 			$json = self::readExact($socket, $len);
 			if ($json === false) break;
 			$req = json_decode($json, true);
+			if (self::$traceHook !== null) call_user_func(self::$traceHook, 'request frame read, ' . $len . ' bytes, '
+				. (is_array($req) ? ($req['method'] ?? '?') . ' ' . ($req['uri'] ?? '?') : 'undecodable'));
 			if (is_array($req) and isset($req['_control'])) {
 				// A word from the server about a request that has already
 				// ended here -- the client of a stream left just as it
@@ -1308,6 +1320,8 @@ class Q_WebServer_Pool
 			self::$requestSocket = $socket;
 			if ($canPeak) memory_reset_peak_usage();
 			$resp = self::executeScript($req);
+			if (self::$traceHook !== null) call_user_func(self::$traceHook, 'script ran, status ' . ($resp['status'] ?? '?')
+				. ', ' . strlen((string) ($resp['body'] ?? '')) . ' bytes');
 			self::$requestSocket = null;
 			self::writeMsg($socket, $resp['status'], $resp['body'],
 				$resp['headers'], $resp['cookies'] ?? array(),

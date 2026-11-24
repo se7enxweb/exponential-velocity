@@ -144,6 +144,6 @@ Write-Host "Log: $log"
 if ($LogDir -ne "") {
     New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
     Copy-Item $log, "$log.err" -Destination $LogDir -ErrorAction SilentlyContinue
-    Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-Object -Last 60
+    Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-Object -Last 200
 }
 exit ([int]($script:fail -gt 0))
