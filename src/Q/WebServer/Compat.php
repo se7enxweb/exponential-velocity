@@ -74,6 +74,16 @@ class Q_WebServer_Compat
 		// wrapper and without a partial stat reaching PHP's stat cache.
 		'filemtime'            => 'Q_WebServer_Compat::_filemtime',
 		'filesize'             => 'Q_WebServer_Compat::_filesize',
+		// Access checks, asked of the operating system. Under a user-space
+		// file wrapper PHP cannot call access(): it takes the wrapper's
+		// stat and compares the mode bits with the process's uid and gid
+		// itself, so root gets no special rights, and an NFS export that
+		// squashes every user, ACLs and capabilities are all invisible --
+		// a directory anyone may write over all_squash read as read-only.
+		'is_writable'          => 'Q_WebServer_Compat::_is_writable',
+		'is_writeable'         => 'Q_WebServer_Compat::_is_writable',
+		'is_readable'          => 'Q_WebServer_Compat::_is_readable',
+		'is_executable'        => 'Q_WebServer_Compat::_is_executable',
 		// The answers above are remembered for the rest of the request, so
 		// "forget what you know about files" has to reach that memory too.
 		'clearstatcache'       => 'Q_WebServer_Compat::_clearstatcache',
@@ -2301,6 +2311,75 @@ class Q_WebServer_Compat
 	}
 
 	/**
+	 * Whether the process may read, write or execute a local path, asked of
+	 * the operating system (access(2)), as PHP does for a path without a
+	 * user-space file wrapper.
+	 *
+	 * With the wrapper installed, PHP answers is_writable() and its kin from
+	 * the wrapper's stat() and the mode bits alone: root is treated like any
+	 * other user, and an NFS export that squashes all users, an ACL or a
+	 * capability never counts. A writable directory then reads as read-only.
+	 * posix_access() calls access() without going through a stream wrapper;
+	 * without the posix extension the check runs with PHP's own file wrapper
+	 * put back for the call. Another wrapper's URL, a non-string and a path
+	 * PHP would refuse anyway go to the native function unchanged.
+	 *
+	 * @method accessCheck
+	 * @static
+	 * @param {mixed} $filename as given to the native function
+	 * @param {integer} $mode POSIX_R_OK, POSIX_W_OK or POSIX_X_OK (4, 2, 1)
+	 * @param {string} $native the native function's name
+	 * @return {boolean}
+	 */
+	static function accessCheck($filename, $mode, $native)
+	{
+		if (!Q_WebServer_CompatFileWrapper::$installed or !is_string($filename)
+			or $filename === '' or strpos($filename, "\0") !== false) {
+			return $native($filename);
+		}
+		$path = $filename;
+		if (strpos($path, '://') !== false) {
+			if (strncmp($path, 'file://', 7) !== 0) return $native($filename);
+			$path = substr($path, 7);
+			if ($path === '') return $native($filename);
+		}
+		if (function_exists('posix_access')) {
+			return posix_access($path, $mode);
+		}
+		return Q_WebServer_CompatFileWrapper::nativeAccess($native, $path);
+	}
+
+	/**
+	 * Replacement for is_writable() and is_writeable(). See accessCheck().
+	 * @method _is_writable
+	 * @static
+	 */
+	static function _is_writable($filename)
+	{
+		return self::accessCheck($filename, 2, 'is_writable');
+	}
+
+	/**
+	 * Replacement for is_readable(). See accessCheck().
+	 * @method _is_readable
+	 * @static
+	 */
+	static function _is_readable($filename)
+	{
+		return self::accessCheck($filename, 4, 'is_readable');
+	}
+
+	/**
+	 * Replacement for is_executable(). See accessCheck().
+	 * @method _is_executable
+	 * @static
+	 */
+	static function _is_executable($filename)
+	{
+		return self::accessCheck($filename, 1, 'is_executable');
+	}
+
+	/**
 	 * Replacement for file_exists().
 	 * @method _file_exists
 	 * @static
@@ -3369,6 +3448,38 @@ class Q_WebServer_CompatFileWrapper
 		$ordered = array();
 		foreach (array_keys($paths) as $key) $ordered[$key] = $out[$key];
 		return $ordered;
+	}
+
+	/**
+	 * One of is_readable(), is_writable() or is_executable() with PHP's own
+	 * file wrapper in place for the call, so that PHP asks access(2) rather
+	 * than comparing the mode bits of this wrapper's stat with the process's
+	 * ids. Used by Q_WebServer_Compat::accessCheck() where posix_access() is
+	 * not available. The wrapper is back in place before this returns, also
+	 * when the call throws.
+	 *
+	 * @method nativeAccess
+	 * @static
+	 * @param {string} $function is_readable, is_writable or is_executable
+	 * @param {string} $path a local path
+	 * @return {boolean}
+	 */
+	static function nativeAccess($function, $path)
+	{
+		$swap = self::$installed;
+		if ($swap) {
+			stream_wrapper_restore('file');
+			self::$installed = false;
+		}
+		try {
+			return (bool) $function(self::bare((string) $path));
+		} finally {
+			if ($swap) {
+				stream_wrapper_unregister('file');
+				stream_wrapper_register('file', __CLASS__);
+				self::$installed = true;
+			}
+		}
 	}
 
 	/** @var array mtime/size answers from includeStat(), for this request */

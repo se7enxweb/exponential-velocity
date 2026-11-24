@@ -169,6 +169,64 @@ stat makes an error handler throw. Nothing is remembered: the answers are the
 files as they are now. Outside a worker, with no wrapper installed, it is
 simply PHP's own stat.
 
+### Access checks: `is_writable()`, `is_readable()`, `is_executable()`
+
+**What.** In a worker, `is_writable()`, `is_writeable()`, `is_readable()` and
+`is_executable()` give the operating system's answer, the same one PHP-FPM or
+Apache gives for the same path and user. Since v0.0.4.62 the transform sends
+these four calls to `Q_WebServer_Compat::_is_writable()`, `_is_readable()` and
+`_is_executable()`, which all go through `Q_WebServer_Compat::accessCheck()`.
+
+**Why.** For a path served by PHP's own file layer, PHP answers these calls with
+`access(2)`, so the kernel decides: root's rights, an NFS export's user
+squashing (`all_squash`, `root_squash`), POSIX ACLs and capabilities all count.
+When a user-space `file://` wrapper is installed -- as
+`Q_WebServer_CompatFileWrapper` is in a worker -- PHP cannot call `access(2)`.
+It takes the wrapper's `stat()` and compares the mode bits with the process's
+uid and gid itself. That comparison does not know about any of the above:
+
+| Path | `access(2)` | mode-bit comparison |
+|---|---|---|
+| another user's 0755 directory, process is root | writable | not writable |
+| NFS directory with `all_squash`, group-writable for a group the process is not in | writable | not writable |
+| file readable through an ACL entry only | readable | not readable |
+
+Up to v0.0.4.61 the worker gave the right-hand answers. An application that
+checks a directory before it writes there -- for example a cluster file handler
+that verifies its NFS mount point at start-up -- then refused a directory it
+could write to.
+
+**How.** `accessCheck()` calls `posix_access()` with `POSIX_R_OK`, `POSIX_W_OK`
+or `POSIX_X_OK`. `posix_access()` calls `access(2)` directly and does not go
+through a stream wrapper; it resolves a relative path against the current
+directory and honours `open_basedir`, as the native functions do. Without the
+posix extension (Windows, a build without it) the native function runs with
+PHP's own file wrapper put back for that one call
+(`Q_WebServer_CompatFileWrapper::nativeAccess()`); the worker's wrapper is in
+place again before it returns, also when the call throws. Left to the native
+function unchanged: a call outside a worker (no wrapper installed), a URL of
+another wrapper (`phar://`, `php://` ...), a non-string, the empty string and a
+path containing a NUL byte. A `file://` URL is checked as its path.
+
+The transform cache is keyed by `Q_WebServer_Compat::rulesHash()`, a hash of
+`Compat.php`, so scripts transformed by an earlier version are transformed
+again on the first start after an upgrade; nothing has to be cleared by hand.
+
+**Verified.** `tests/unit-compat-access-checks.php`:
+
+- the transform rewrites all four calls, including `\is_writable()`, and
+  leaves a method of the same name alone;
+- under the wrapper, the shims give the same answers PHP gives without it, for
+  files and directories in modes 0000 to 0777, a missing path and a `file://`
+  URL;
+- run as root, it creates a directory (0755) and a file (0644) owned by another
+  user, shows that PHP's own `is_writable()` under the wrapper answers `false`
+  for the directory, and that the shims answer `true` for both, as `access(2)`
+  does;
+- the fallback without `posix_access()` gives the same answers and leaves the
+  wrapper in place, also after a call that throws;
+- another wrapper's URL and the empty path get the native answer.
+
 ## Tests
 
 Five test suites, 152 tests total:
