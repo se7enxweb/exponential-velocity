@@ -68,6 +68,15 @@ class Q_WebServer_PortablePool extends Q_WebServer_Pool
 	/** The longest control or greeting line read; anything longer is cut. */
 	const MAX_LINE = 512;
 
+	/**
+	 * Inherited from Q_WebServer_Pool, declared here again (same visibility,
+	 * same default) because this class assigns them and every class's
+	 * assignments are checked against its own declarations
+	 * (tests/unit-dynamic-properties.php).
+	 */
+	protected $workers = array();
+	protected $watchers = array();
+
 	/** @var resource|null the loopback listener workers connect to */
 	protected $listener = null;
 	/** @var string host:port of the listener */
