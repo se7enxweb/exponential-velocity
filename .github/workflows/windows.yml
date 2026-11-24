@@ -1,0 +1,116 @@
+name: windows
+
+# The portable worker pool on real Windows (docs/windows.md): GitHub's
+# Windows Server 2022 and 2025 runners, x64 with PHP 8.1, 8.3 and 8.5 from
+# setup-php, and x86 with the official 32-bit PHP zip from windows.php.net.
+# Each job runs the self-contained unit test of the pool (its server part
+# reads /proc and is skipped here) and tests/windows/smoke.ps1, which starts a
+# real server with two portable workers. Logs are uploaded either way.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  x64:
+    name: ${{ matrix.os }} PHP ${{ matrix.php }} x64
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+        php: ['8.1', '8.3', '8.5']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: sockets, mbstring, openssl, curl, fileinfo
+          ini-values: memory_limit=512M
+          coverage: none
+
+      - name: PHP
+        shell: powershell
+        run: |
+          php -v
+          php -m
+          (Get-Command php).Source
+
+      - name: Portable pool unit test
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path smoke-logs | Out-Null
+          $env:QBIX_TEST_TMP = $env:RUNNER_TEMP
+          cmd /c "php tests\unit-portable-pool.php > smoke-logs\unit-portable-pool.txt 2>&1"
+          $code = $LASTEXITCODE
+          Get-Content smoke-logs\unit-portable-pool.txt
+          exit $code
+
+      - name: Smoke test (real server, portable workers)
+        shell: powershell
+        run: |
+          $php = (Get-Command php).Source
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php $php -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-${{ matrix.os }}-php${{ matrix.php }}-x64
+          path: smoke-logs
+          retention-days: 14
+
+  x86:
+    name: ${{ matrix.os }} PHP ${{ matrix.php }} x86 (32-bit)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022]
+        php: ['8.3']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the official 32-bit PHP (windows.php.net)
+        shell: powershell
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $rel = Invoke-RestMethod -Uri 'https://windows.php.net/downloads/releases/releases.json'
+          $line = $rel.'${{ matrix.php }}'
+          $build = $line.PSObject.Properties | Where-Object { $_.Name -like 'nts-vs*-x86' } | Select-Object -First 1
+          if (-not $build) { throw "no x86 NTS build listed for PHP ${{ matrix.php }}" }
+          $zip = $build.Value.zip.path
+          Write-Host "PHP $($line.version) $($build.Name): $zip"
+          Invoke-WebRequest -Uri "https://windows.php.net/downloads/releases/$zip" -OutFile php.zip
+          Expand-Archive php.zip -DestinationPath C:\php32
+          Copy-Item C:\php32\php.ini-development C:\php32\php.ini
+          Add-Content C:\php32\php.ini "`nextension_dir=C:\php32\ext`nextension=sockets`nextension=mbstring`nextension=openssl`nextension=curl`nextension=fileinfo`nmemory_limit=512M`n"
+          C:\php32\php.exe -v
+          C:\php32\php.exe -r "echo PHP_INT_SIZE * 8, '-bit', PHP_EOL;"
+          C:\php32\php.exe -m
+
+      - name: Portable pool unit test
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path smoke-logs | Out-Null
+          $env:QBIX_TEST_TMP = $env:RUNNER_TEMP
+          cmd /c "C:\php32\php.exe tests\unit-portable-pool.php > smoke-logs\unit-portable-pool.txt 2>&1"
+          $code = $LASTEXITCODE
+          Get-Content smoke-logs\unit-portable-pool.txt
+          exit $code
+
+      - name: Smoke test (real server, portable workers)
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php C:\php32\php.exe -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-${{ matrix.os }}-php${{ matrix.php }}-x86
+          path: smoke-logs
+          retention-days: 14

@@ -17,10 +17,12 @@
 param(
     [string]$Php = "php.exe",
     [int]$Workers = 2,
-    [int]$StartSeconds = 60
+    [int]$StartSeconds = 60,
+    [string]$LogDir = ""
 )
 
-$ErrorActionPreference = "Stop"
+# Not "Stop": a native program writing to standard error must not end the test.
+$ErrorActionPreference = "Continue"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $script:pass = 0
 $script:fail = 0
@@ -65,9 +67,10 @@ Write-Host "PHP:  $(& $Php -v | Select-Object -First 1)"
 Write-Host "Tree: $repo"
 Write-Host "Port: $port   Temp: $base"
 
+function Quote([string]$a) { if ($a -match '[\s"]') { return '"' + ($a -replace '"', '\"') + '"' } return $a }
 $srvArgs = @("$repo\sbin\qbixserver.php", "--root=$web", "--port=$port", "--workers=$Workers",
           "--config=$base\conf.json", "--pid=$pidFile", "--pool-mode=portable")
-$server = Start-Process -FilePath $Php -ArgumentList $srvArgs -PassThru -NoNewWindow `
+$server = Start-Process -FilePath $Php -ArgumentList ($srvArgs | ForEach-Object { Quote $_ }) -PassThru -NoNewWindow `
     -RedirectStandardOutput $log -RedirectStandardError "$log.err"
 
 $up = $false
@@ -79,6 +82,7 @@ for ($i = 0; $i -lt $StartSeconds * 2; $i++) {
 Check "server listens on port $port" $up
 if (-not $up) {
     Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-Object -Last 40
+    if ($LogDir -ne "") { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null; Copy-Item $log, "$log.err" -Destination $LogDir -ErrorAction SilentlyContinue }
     if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     exit 1
 }
@@ -115,7 +119,9 @@ $r = Get-Page $port "/pid.php"
 Check "...and the pool goes on" ($r.Status -eq 200)
 
 $workerPids = @($children | ForEach-Object { $_.ProcessId })
-& $Php "$repo\sbin\qbixserver.php" --stop "--pid=$pidFile" 2>&1 | Write-Host
+$stopProc = Start-Process -FilePath $Php -ArgumentList (@("$repo\sbin\qbixserver.php", "--stop", "--pid=$pidFile") | ForEach-Object { Quote $_ }) `
+    -PassThru -NoNewWindow -Wait -RedirectStandardOutput "$base\stop.out" -RedirectStandardError "$base\stop.err"
+Write-Host "  --stop exit $($stopProc.ExitCode): $((Get-Content "$base\stop.out", "$base\stop.err" -ErrorAction SilentlyContinue) -join ' ')"
 $gone = $server.WaitForExit(20000)
 Check "--stop ends the server" $gone
 Start-Sleep -Seconds 1
@@ -135,4 +141,9 @@ foreach ($p in $left) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
 Write-Host ""
 if ($script:fail -eq 0) { Write-Host "PASS  $($script:pass) passed, 0 failed" } else { Write-Host "FAIL  $($script:pass) passed, $($script:fail) failed" }
 Write-Host "Log: $log"
+if ($LogDir -ne "") {
+    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+    Copy-Item $log, "$log.err" -Destination $LogDir -ErrorAction SilentlyContinue
+    Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-Object -Last 60
+}
 exit ([int]($script:fail -gt 0))
