@@ -463,11 +463,32 @@ class Q_WebServer_Pool
 	}
 
 	/**
+	 * Who this pool's workers are, when the pool has a user of its own
+	 * (Q.webserver.pools): array('name', 'plan' => Q_WebServer_RunAs::planFor(),
+	 * 'ini' => array of ini settings applied in each worker after the switch).
+	 * Null for the server's own pool, whose workers follow Q_WebServer_RunAs::plan().
+	 * @property $identity
+	 * @type array|null
+	 */
+	public $identity = null;
+
+	/**
+	 * Whether the one-time preparation of the parent -- the compat layer, the
+	 * warm-up and the statics snapshot -- has been done. A server with several
+	 * pools does it once, for the first; every pool forks from the same parent.
+	 * @property $prepared
+	 * @static
+	 */
+	static $prepared = false;
+
+	/**
 	 * @method __construct
 	 * @param {integer} [$size=4]
+	 * @param {array} [$identity=null] see $identity
 	 */
-	function __construct($size = null)
+	function __construct($size = null, $identity = null)
 	{
+		$this->identity = is_array($identity) ? $identity : null;
 		// Load Fork abstraction (pcntl on Unix, FFI+dll on Windows)
 		$forkFile = dirname(__DIR__) . '/WebServer/Fork.php';
 		if (!class_exists('Q_WebServer_Fork', false) && is_file($forkFile)) {
@@ -668,6 +689,8 @@ class Q_WebServer_Pool
 		// Q_WebServer_Compat::init() returns immediately when compat is
 		// configured off, so the decision stays with the config key and is
 		// not implied by the fork mode.
+		// Once per server, however many pools it has (see $prepared).
+		if (!self::$prepared) {
 		$compatSet = Q_Config::get('Q', 'compat', 'skipSourceCodeTransform', null);
 		if ($compatSet === null) {
 			Q_Config::set('Q', 'compat', 'skipSourceCodeTransform', false);
@@ -795,6 +818,8 @@ class Q_WebServer_Pool
 				$n = Q_WebServer_Snapshot::take();
 			}
 		}
+		self::$prepared = true;
+		} // !self::$prepared
 	}
 
 	/**
@@ -878,6 +903,33 @@ class Q_WebServer_Pool
 			$this->reapWorker($this->workers[$index]);
 		}
 		$this->forgetWorker($index);
+	}
+
+	/**
+	 * In a freshly forked worker or zygote: become this pool's user (the
+	 * server's worker user, or the pool's own), or end the process. Then the
+	 * pool's ini settings, so open_basedir and the like hold from the first
+	 * line of application code. Each is checked: a setting PHP refuses ends
+	 * the process too, rather than serving without it.
+	 * @method dropToIdentity
+	 * @param {string} $what worker|zygote, for messages
+	 */
+	protected function dropToIdentity($what)
+	{
+		if (!class_exists('Q_WebServer_RunAs', false)) return;
+		if ($this->identity !== null) {
+			Q_WebServer_RunAs::adopt($this->identity['plan']);
+			$what .= ' of pool ' . $this->identity['name'];
+		}
+		Q_WebServer_RunAs::dropOrExit($what);
+		if ($this->identity === null) return;
+		foreach ((array) ($this->identity['ini'] ?? array()) as $k => $v) {
+			if (@ini_set((string) $k, (string) $v) === false and ini_get((string) $k) !== (string) $v) {
+				fwrite(STDERR, date('H:i:s') . " $what " . getmypid() . ": ini $k could not be set, not serving\n");
+				if (function_exists('posix_kill') and defined('SIGKILL')) posix_kill(getmypid(), SIGKILL);
+				exit(78);
+			}
+		}
 	}
 
 	/**
@@ -965,7 +1017,7 @@ class Q_WebServer_Pool
 			// Last before any application code: give up root (Q_WebServer_RunAs).
 			// The sockets above are closed first, so a worker that cannot
 			// switch leaves holding nothing of the server's.
-			if (class_exists('Q_WebServer_RunAs', false)) Q_WebServer_RunAs::dropOrExit('worker');
+			$this->dropToIdentity('worker');
 			self::workerSignals();
 			self::childRun($pair[1], $this->octane, $this->maxRequests);
 			exit(0);
@@ -1041,7 +1093,7 @@ class Q_WebServer_Pool
 			self::closeInheritedSockets(null);
 			// The zygote gives up root itself, so every worker it forks is born
 			// as the worker user and never held root at all.
-			if (class_exists('Q_WebServer_RunAs', false)) Q_WebServer_RunAs::dropOrExit('zygote');
+			$this->dropToIdentity('zygote');
 			self::zygoteMain($ctl[1], $this->octane, $this->maxRequests);
 			exit(0);
 		}

@@ -152,6 +152,18 @@ class Q_WebServer
 
 	/** @property $pool Q_WebServer_Pool|null */
 	static $pool = null;
+
+	/**
+	 * Pools with a user of their own, by name (Q.webserver.pools): one server
+	 * listening once, with each host's PHP run by workers of that host's user,
+	 * as PHP-FPM keeps a pool per site behind one web server.
+	 * @property $pools
+	 * @type array
+	 */
+	static $pools = array();
+
+	/** @property $poolHosts host => pool name */
+	static $poolHosts = array();
 	/** @property $rootDir Document root with trailing DS */
 	public static $rootDir;
 	/**
@@ -615,6 +627,7 @@ class Q_WebServer
 		} elseif ($poolMode === 'fork') {
 			self::$pool = new Q_WebServer_Pool($workers);
 		}
+		self::startPools();
 
 		self::$running = true;
 
@@ -626,6 +639,111 @@ class Q_WebServer
 		if (class_exists('Q_WebServer_GetAllHeaders', false)) {
 			Q_WebServer_GetAllHeaders::register();
 		}
+	}
+
+	/**
+	 * Start the pools that have a user of their own (Q.webserver.pools):
+	 *
+	 *   "pools": {
+	 *     "shop": { "user": "shopuser", "group": "psacln", "workers": 4,
+	 *               "hosts": ["shop.example", "www.shop.example"],
+	 *               "ini": { "open_basedir": "/var/www/shop/:/tmp/" } }
+	 *   }
+	 *
+	 * or "hosts": { "shop.example": { "root": "...", "pool": "shop" } }. Each
+	 * pool's workers switch to its user and group right after they are forked
+	 * (Q_WebServer_RunAs::planFor()), so they never run another host's code or
+	 * read another user's files. A pool that cannot be had -- an unknown user,
+	 * root, a server not started as root, a host naming a pool that does not
+	 * exist -- stops the start: a host is never served by the wrong user.
+	 * @method startPools
+	 * @static
+	 */
+	static function startPools()
+	{
+		$conf = Q_Config::get('Q', 'webserver', 'pools', array());
+		$hostsConf = Q_Config::get('Q', 'webserver', 'hosts', array());
+		$byHost = array();
+		foreach ((array) $hostsConf as $h => $hc) {
+			if (is_array($hc) and isset($hc['pool'])) $byHost[strtolower((string) $h)] = (string) $hc['pool'];
+		}
+		if ((!is_array($conf) or !$conf) and !$byHost) return;
+		$fail = function ($msg) {
+			fwrite(STDERR, "Error: $msg; not starting (a host is never served by the wrong user)\n");
+			exit(1);
+		};
+		if (!Q_WebServer_Fork::available()) $fail('Q.webserver.pools needs fork');
+		foreach ((array) $conf as $name => $p) {
+			$name = (string) $name;
+			if (!is_array($p) or empty($p['user'])) $fail("Q.webserver.pools.$name has no user");
+			$plan = Q_WebServer_RunAs::planFor($p['user'], $p['group'] ?? null, "Q.webserver.pools.$name",
+				!empty($p['allowRoot']));
+			if ($plan['error']) $fail($plan['error']);
+			$ini = isset($p['ini']) && is_array($p['ini']) ? $p['ini'] : array();
+			self::$pools[$name] = new Q_WebServer_Pool(max(1, (int) ($p['workers'] ?? 2)),
+				array('name' => $name, 'plan' => $plan, 'ini' => $ini));
+			foreach ((array) ($p['hosts'] ?? array()) as $h) {
+				self::$poolHosts[strtolower(preg_replace('/:\d+$/', '', (string) $h))] = $name;
+			}
+			echo "  Pool $name: " . self::$pools[$name]->targetSize . " workers as {$plan['user']}:{$plan['group']}"
+				. (empty($p['hosts']) ? '' : ' for ' . implode(', ', (array) $p['hosts'])) . "\n";
+		}
+		foreach ($byHost as $h => $name) {
+			if (!isset(self::$pools[$name])) $fail("Q.webserver.hosts.$h names the pool \"$name\", which is not in Q.webserver.pools");
+			self::$poolHosts[$h] = $name;
+		}
+	}
+
+	/**
+	 * The pool that runs PHP for a host: its own pool when it has one, else
+	 * the server's pool (null when there is none).
+	 * @method poolFor
+	 * @static
+	 * @param {string} $host Host header (a port is ignored)
+	 * @return {Q_WebServer_Pool|null}
+	 */
+	static function poolFor($host)
+	{
+		if (self::$poolHosts) {
+			$h = strtolower(preg_replace('/:\d+$/', '', (string) $host));
+			if (isset(self::$poolHosts[$h])) return self::$pools[self::$poolHosts[$h]];
+		}
+		return self::$pool;
+	}
+
+	/** Every pool: the server's and the named ones. @return Q_WebServer_Pool[] */
+	static function allPools()
+	{
+		$all = array_values(self::$pools);
+		if (self::$pool) array_unshift($all, self::$pool);
+		return $all;
+	}
+
+	/**
+	 * Whether the server may send this file for this host as it is. The server
+	 * process reads static files itself; for a host whose PHP runs in a pool of
+	 * its own user, it sends only files that user owns (after symbolic links
+	 * are resolved), as Apache's SymLinksIfOwnerMatch and nginx's
+	 * disable_symlinks if_not_owner do, so a link in one user's site cannot
+	 * hand out a file of another user or of the system. Q.webserver.pools.<name>
+	 * .ownerMatch: false turns it off for a pool.
+	 * @method ownerAllowed
+	 * @static
+	 * @param {string} $host
+	 * @param {string} $fsPath
+	 * @return {boolean}
+	 */
+	static function ownerAllowed($host, $fsPath)
+	{
+		if (!self::$poolHosts) return true;
+		$h = strtolower(preg_replace('/:\d+$/', '', (string) $host));
+		if (!isset(self::$poolHosts[$h])) return true;
+		$pool = self::$pools[self::$poolHosts[$h]];
+		if (Q_Config::get('Q', 'webserver', 'pools', $pool->identity['name'], 'ownerMatch', true) === false) return true;
+		$real = realpath($fsPath);
+		if ($real === false) return false;
+		$owner = @fileowner($real);
+		return $owner !== false and $owner === (int) $pool->identity['plan']['uid'];
 	}
 
 	/**
@@ -1115,6 +1233,11 @@ class Q_WebServer
 			// A suspended or disabled domain, or a redirect: see handleRequest().
 			// HTTP/2 is only ever spoken after a TLS handshake here.
 			$request['_https'] = true;
+			// A host served by another server (Q.webserver.upstreams) is passed
+			// on over HTTP/1.1 only; it is never run here.
+			if (Q_WebServer_Upstream::target($request['headers']['host'] ?? '') !== null) {
+				return self::http2Error(502, "Bad Gateway: this host is passed on over HTTP/1.1 only\n");
+			}
 			if (($gate = Q_WebServer_Domains::gate($request)) !== null) {
 				return $gate;
 			}
@@ -1159,6 +1282,9 @@ class Q_WebServer
 			if (is_file($fsPath) and self::servedAsFile($decoded)) {
 				$ext = strtolower(pathinfo($fsPath, PATHINFO_EXTENSION));
 				if ($ext !== 'php' and !in_array($ext, self::$allowedExtensions)) {
+					return self::http2Error(403, 'Forbidden');
+				}
+				if ($ext !== 'php' and !self::ownerAllowed($request['headers']['host'] ?? '', $fsPath)) {
 					return self::http2Error(403, 'Forbidden');
 				}
 				if ($ext !== 'php') {
@@ -1228,7 +1354,8 @@ class Q_WebServer
 			// Anything else is the application's. Resolve it the way the HTTP/1.1
 			// path does, then hand it to a worker.
 			$scriptPath = self::resolveScript($decoded, $fsPath);
-			if ($scriptPath === null or !self::$pool) {
+			$hostPool = self::poolFor($request['headers']['host'] ?? '');
+			if ($scriptPath === null or !$hostPool) {
 				return self::http2Error(404, "Not Found\n");
 			}
 
@@ -1298,7 +1425,7 @@ class Q_WebServer
 				return $hit;
 			}
 
-			self::$pool->dispatch($conn->socket, $parsed, $scriptPath,
+			$hostPool->dispatch($conn->socket, $parsed, $scriptPath,
 				function ($resp) use ($key, $stream, $parsed) {
 					// A streaming response arrives in parts: its head, its
 					// pieces, its end (or a reset), and the pool asks now and
@@ -1743,7 +1870,9 @@ class Q_WebServer
 		Q_WebSocket::disconnectAll();
 
 		// 5. Gracefully shut down worker pool (SIGTERM → wait → SIGKILL)
-		if (self::$pool) { self::$pool->shutdown(); self::$pool = null; }
+		foreach (self::allPools() as $p) $p->shutdown();
+		self::$pool = null;
+		self::$pools = array();
 	}
 
 	/**
@@ -1811,7 +1940,8 @@ class Q_WebServer
 		if ($armed !== null and $armed['pid'] === getmypid()) return $armed['seconds'];
 
 		$server = getmypid();
-		$known = self::$pool ? self::$pool->processIds() : array();
+		$known = array();
+		foreach (self::allPools() as $p) $known = array_merge($known, $p->processIds());
 		foreach (array_keys(self::$workerPids) as $pid) $known[] = (int) $pid;
 		$pid = Q_WebServer_Fork::fork();
 		if ($pid === -1 or $pid === false) return 0;
@@ -1827,7 +1957,7 @@ class Q_WebServer
 			}
 			pcntl_signal(SIGCHLD, SIG_DFL);
 		}
-		if (self::$pool) self::$pool->detachInChild();
+		foreach (self::allPools() as $p) $p->detachInChild();
 		self::closeInheritedDescriptors();
 		if (class_exists('Q_WebServer_Pool', false)) Q_WebServer_Pool::closeInheritedSockets(null);
 		if (function_exists('cli_set_process_title')) @cli_set_process_title('qbixserver: shutdown deadline');
@@ -2110,8 +2240,8 @@ class Q_WebServer
 				}
 				// Pooled workers too: the loop above sees only fork-per-request
 				// children, so the limit used to mean nothing to a pool.
-				if (self::$pool and method_exists(self::$pool, 'killOverdue')) {
-					self::$pool->killOverdue($timeout);
+				foreach (self::allPools() as $p) {
+					if (method_exists($p, 'killOverdue')) $p->killOverdue($timeout);
 				}
 			});
 		}
@@ -3568,6 +3698,23 @@ class Q_WebServer
 		$path = $parsed['path'];
 		self::$compressFor = null;
 
+		// A host another server serves (Q.webserver.upstreams) is passed on
+		// before anything here looks at it: no cache, no file, no script of
+		// this server's. The relay owns the connection from now on (true =
+		// the caller lets go of it without closing it) and closes it when the
+		// upstream's answer has been sent.
+		$upstream = Q_WebServer_Upstream::target($parsed['headers']['host'] ?? '');
+		$extra = array();
+		// On a read replica, a request that may write goes to the primary
+		// (Q.webserver.hosts.<host>.writeForward), marked so it is never sent on twice.
+		if ($upstream === null and ($upstream = Q_WebServer_Upstream::writeTarget($parsed)) !== null) {
+			$extra[] = 'X-Qbix-Forwarded-Write: 1';
+		}
+		if ($upstream !== null) {
+			Q_WebServer_Upstream::relay($client, $parsed, $upstream, $extra);
+			return true;
+		}
+
 		// A suspended or disabled domain, or one of its redirects, is answered
 		// here, before the reverse cache could serve a page stored earlier.
 		$meta = is_resource($client) ? @stream_get_meta_data($client) : array();
@@ -4096,6 +4243,12 @@ class Q_WebServer
 				return self::handlePhp($client, $parsed, $fsPath);
 			}
 
+			// A host in a pool of its own user: only that user's files go out as they are.
+			if ($ext !== 'php' && !self::ownerAllowed($parsed['headers']['host'] ?? '', $fsPath)) {
+				self::sendResponse($client, 403, self::renderErrorPage(403, $path), 'text/html; charset=utf-8');
+				return false;
+			}
+
 			// Static file, if Q.web.static.paths lets it be one
 			if ($ext !== 'php' && ($method === 'GET' || $method === 'HEAD')
 				&& self::servedAsFile($path)) {
@@ -4468,7 +4621,9 @@ class Q_WebServer
 				}
 			}
 		}
-		if (!empty($cgiPatterns) && $cgiBinary) {
+		// Never for a host in a pool of its own user: php-cgi would run as the server's user.
+		if (!empty($cgiPatterns) && $cgiBinary
+			&& !isset(self::$poolHosts[strtolower(preg_replace('/:\d+$/', '', (string) ($parsed['headers']['host'] ?? '')))])) {
 			$relPath = '/' . ltrim(str_replace(DS, '/', substr($scriptPath, strlen(self::$rootDir))), '/');
 			foreach ($cgiPatterns as $pattern) {
 				if (@preg_match(self::ensureRegex($pattern), $relPath)) {
@@ -4477,13 +4632,14 @@ class Q_WebServer
 			}
 		}
 
-		if (self::$pool) {
+		$hostPool = self::poolFor($parsed['headers']['host'] ?? '');
+		if ($hostPool) {
 			// -1 = handed on, the parent must not record it now. The pool
 			// answers from its own event and calls recordCompleted() then;
 			// recording here would log dispatch time, status 200 and the
 			// previous response's size for every script.
 			self::$lastStatus = -1;
-			self::$pool->dispatch($client, $parsed, $scriptPath);
+			$hostPool->dispatch($client, $parsed, $scriptPath);
 			$key = (int) $client;
 			if (isset(self::$clientWatchers[$key])) {
 				Q_Evented::cancel(self::$clientWatchers[$key]);

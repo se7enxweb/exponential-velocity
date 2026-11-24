@@ -220,6 +220,77 @@ class Q_WebServer_RunAs
 	}
 
 	/** The document root the server was started with, if any. */
+	/**
+	 * The plan for a pool of its own (Q.webserver.pools): its workers run as
+	 * $user and $group, whatever the server's own worker user is. Stricter than
+	 * plan(): the server must have been started as root (a pool whose workers
+	 * would stay the server's user is an error, never a warning, because its
+	 * whole point is to keep users apart), the user must exist, and root is
+	 * refused unless the pool says allowRoot.
+	 * @method planFor
+	 * @static
+	 * @param {string} $user name or #uid
+	 * @param {string|null} $group name or #gid; the user's primary group when null
+	 * @param {string} $source where it was configured, for messages
+	 * @param {boolean} [$allowRoot=false]
+	 * @return {array} as plan(), 'error' set when it cannot be used
+	 */
+	static function planFor($user, $group, $source, $allowRoot = false)
+	{
+		$plan = array('switch' => false, 'user' => null, 'uid' => -1, 'group' => null, 'gid' => -1,
+			'home' => null, 'source' => $source, 'warning' => null, 'error' => null);
+		if (!function_exists('posix_geteuid') or !function_exists('posix_setuid')) {
+			$plan['error'] = "$source: this PHP has no posix functions, so a pool cannot have a user of its own";
+			return $plan;
+		}
+		$pw = self::lookupUser((string) $user);
+		if (!$pw) {
+			$plan['error'] = "$source: the user \"$user\" does not exist";
+			return $plan;
+		}
+		$plan['user'] = $pw['name'];
+		$plan['uid'] = (int) $pw['uid'];
+		$plan['gid'] = (int) $pw['gid'];
+		$plan['home'] = $pw['dir'] ?? null;
+		if ($group !== null and $group !== '') {
+			$gr = self::lookupGroup((string) $group);
+			if (!$gr) {
+				$plan['error'] = "$source: the group \"$group\" does not exist";
+				return $plan;
+			}
+			$plan['gid'] = (int) $gr['gid'];
+		}
+		$gr = function_exists('posix_getgrgid') ? posix_getgrgid($plan['gid']) : false;
+		$plan['group'] = $gr ? $gr['name'] : (string) $plan['gid'];
+		if ($plan['uid'] === 0 and !$allowRoot) {
+			$plan['error'] = "$source: the user is root; a pool runs as root only with allowRoot";
+			return $plan;
+		}
+		$euid = posix_geteuid();
+		if ($euid === $plan['uid']) return $plan;      // already that user: nothing to switch
+		if ($euid !== 0) {
+			$pwSelf = posix_getpwuid($euid);
+			$plan['error'] = "$source: workers of user {$plan['user']} need a server started as root"
+				. ' (this one runs as ' . ($pwSelf ? $pwSelf['name'] : $euid) . ')';
+			return $plan;
+		}
+		$plan['switch'] = $plan['uid'] !== 0;
+		return $plan;
+	}
+
+	/**
+	 * Use $plan from now on in this process: a worker or zygote of a pool with
+	 * a user of its own calls this right after fork(), before dropOrExit().
+	 * @method adopt
+	 * @static
+	 * @param {array} $plan planFor()'s result
+	 */
+	static function adopt(array $plan)
+	{
+		self::$plan = $plan;
+		self::$saved = null;
+	}
+
 	static function documentRoot()
 	{
 		$opts = class_exists('Q_Config', false) ? (array) Q_Config::get('Q', 'webserver', 'startOptions', array()) : array();

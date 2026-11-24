@@ -248,14 +248,15 @@ class Q_WebServer_GraphQLWs
 			call_user_func(self::$dispatch, $parsed, $c['script'], $responder);
 			return;
 		}
-		if (!Q_WebServer::$pool) {
+		$pool = Q_WebServer::poolFor($parsed['headers']['host'] ?? '');
+		if (!$pool) {
 			self::finish($sk, $id, array(array('message' => 'This server runs no PHP workers.', 'extensions' => array('code' => 'INTERNAL'))));
 			return;
 		}
 		$saved = Q_WebServer::$rootDir;
 		if ($c['root'] !== null) Q_WebServer::$rootDir = $c['root'];
 		try {
-			Q_WebServer::$pool->dispatch($c['socket'], $parsed, $c['script'], $responder);
+			$pool->dispatch($c['socket'], $parsed, $c['script'], $responder);
 		} finally {
 			Q_WebServer::$rootDir = $saved;
 		}
