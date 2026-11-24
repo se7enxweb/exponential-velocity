@@ -79,11 +79,14 @@ if (!defined('QBIX_SERVER_BUILD') && is_file(dirname(__DIR__) . '/qbix-build.php
 // stamp written at build time; running from source there is no stamp, so ask
 // git directly, and fall back to 'source' where even that is unavailable.
 if (!defined('QBIX_SERVER_BUILD')) {
+	// cmd.exe has no /dev/null: it answers "The system cannot find the path
+	// specified." on standard error and runs nothing.
+	$__quiet = DIRECTORY_SEPARATOR === '\\' ? ' 2>NUL' : ' 2>/dev/null';
 	$__sha = @trim((string) @shell_exec('git -C ' . escapeshellarg(dirname(__DIR__))
-		. ' rev-parse --short HEAD 2>/dev/null'));
+		. ' rev-parse --short HEAD' . $__quiet));
 	if ($__sha !== '') {
 		$__dirtyOut = (string) @shell_exec('git -C ' . escapeshellarg(dirname(__DIR__))
-			. ' status --porcelain 2>/dev/null');
+			. ' status --porcelain' . $__quiet);
 		foreach (explode("\n", $__dirtyOut) as $__l) {
 			$__l = trim($__l);
 			if ($__l === '') continue;
@@ -93,7 +96,7 @@ if (!defined('QBIX_SERVER_BUILD')) {
 		}
 	}
 	define('QBIX_SERVER_BUILD', $__sha !== '' ? $__sha : 'source');
-	unset($__sha);
+	unset($__sha, $__quiet);
 }
 if (!defined('QBIX_SERVER_BUILD_DATE')) define('QBIX_SERVER_BUILD_DATE', gmdate('Y-m-d H:i:s') . ' UTC');
 

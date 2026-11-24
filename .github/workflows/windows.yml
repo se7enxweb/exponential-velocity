@@ -51,6 +51,8 @@ jobs:
 
       - name: Smoke test (real server, portable workers)
         shell: powershell
+        env:
+          QBIX_POOL_TRACE: '1'
         run: |
           $php = (Get-Command php).Source
           powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php $php -LogDir "$pwd\smoke-logs"
@@ -104,6 +106,8 @@ jobs:
 
       - name: Smoke test (real server, portable workers)
         shell: powershell
+        env:
+          QBIX_POOL_TRACE: '1'
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php C:\php32\php.exe -LogDir "$pwd\smoke-logs"
           exit $LASTEXITCODE
