@@ -1,19 +1,24 @@
 # Running on Windows
 
-**Status: does not work yet.** The portable worker pool is tested on Linux (with
-the pool forced on) and on GitHub Actions Windows Server 2022 and 2025 runners:
-x64 with PHP 8.1, 8.3 and 8.5, and x86 (32-bit) with PHP 8.3. On those Windows
-runners the server starts, its workers start and connect, and `--stop` ends the
-server and every worker; HTTP requests to PHP scripts are not answered yet. Work
-on this continues. It has not been tried on a Windows 11 desktop or on a
-physical Windows machine.
+**Status: tested on Linux (portable mode forced) and on GitHub Actions Windows
+Server 2022 and 2025 runners; not yet verified on a Windows 11 desktop or on
+physical Windows machines.** On the Windows runners the smoke test
+(`tests/windows/smoke.ps1`, 15 checks) and the portable pool's unit test pass:
+pages are answered by persistent portable workers, a killed worker is replaced,
+a PHP fatal error answers 500, and `--stop` ends the server and every worker
+gracefully with the port free afterwards. What the smoke test does not cover is
+listed under "Known issues and gaps" below.
 
-| Where | Result |
-|---|---|
-| Linux, portable pool forced (PHP 8.0, 8.5) | works: `tests/unit-portable-pool.php` passes |
-| GitHub Actions, Windows Server 2022 / 2025, x64, PHP 8.1, 8.3, 8.5 | does not work yet: workers start, requests are not answered |
-| GitHub Actions, Windows Server 2022, x86, PHP 8.3 | does not work yet: same as x64 |
-| Windows 11 desktop, physical machines | not tried |
+| Where | PHP | Result |
+|---|---|---|
+| Windows Server 2022, x64 (GitHub Actions) | 8.1, 8.3, 8.5 | works: smoke test 15/15, unit test 81/81 |
+| Windows Server 2025, x64 (GitHub Actions) | 8.1, 8.3, 8.5 | works: smoke test 15/15, unit test 81/81 |
+| Windows Server 2022, x86 32-bit (GitHub Actions) | 8.3 | works: smoke test 15/15, unit test 81/81 |
+| Linux, portable pool forced | 8.0, 8.5 (7.4 for the unit test) | works: `tests/unit-portable-pool.php` passes |
+| Windows 11 desktop, physical machines | | not tried yet |
+
+The Windows results are from the `windows` workflow (`.github/workflows/windows.yml`),
+which runs on every push.
 
 A Windows Server VPS (for example on Contabo, with the licence add-on) is planned for
 testing on a real machine; Windows 11 desktop is not yet tested.
@@ -130,8 +135,12 @@ exits non-zero on failure. The same test on Linux is `php tests/unit-portable-po
 
 ## Known issues and gaps
 
-- Windows: requests to PHP scripts are not answered yet (see the status above).
-  `QBIX_POOL_TRACE=1` prints each step of the pool and its workers with the time.
+- The smoke test serves small PHP scripts. A full Exponential installation,
+  HTTPS, uploads and long runs under load have not been run on Windows yet.
+- `QBIX_POOL_TRACE=1` prints each step of the pool and its workers with the
+  time, for a report when something does not work.
+- The server needs the `sqlite3` extension for its metrics; without it the
+  metrics are not stored (it runs on).
 - On Windows a worker's control lines go to a file per worker in the temporary
   directory (`Q.webserver.portable.controlChannel`), not a pipe: on the first
   runs, reading the pipes left the server unresponsive.
