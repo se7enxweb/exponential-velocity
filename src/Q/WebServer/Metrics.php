@@ -61,6 +61,13 @@ class Q_WebServer_Metrics
 		// Open SQLite
 		$dbPath = Q_Config::get('Q', 'webserver', 'metrics', 'db', qbix_data_path('local/metrics.db'));
 		@mkdir(dirname($dbPath), 0755, true);
+		// Without the sqlite3 extension there are no stored metrics, and the
+		// server runs on: "Class SQLite3 not found" is an Error, not an
+		// Exception, and used to end the server at its first loop.
+		if (!class_exists('SQLite3', false)) {
+			self::$db = null;
+			return;
+		}
 		try {
 			self::$db = new \SQLite3($dbPath);
 			self::$db->busyTimeout(1000);
@@ -94,7 +101,7 @@ class Q_WebServer_Metrics
 				avg_ms REAL DEFAULT 0,
 				last_hit TEXT
 			)');
-		} catch (\Exception $e) {
+		} catch (\Throwable $e) {
 			self::$db = null;
 		}
 	}
