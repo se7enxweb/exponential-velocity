@@ -454,12 +454,15 @@ table the same day — and it would be the most interesting entry in it.
 | **Linux** x86_64, aarch64 | `pcntl_fork` | yes — a few MB per worker | persistent or fork-per-request |
 | **macOS** Intel, Apple Silicon | `pcntl_fork` | yes | persistent or fork-per-request |
 | **BSD**, **illumos** | `pcntl_fork` | yes | persistent or fork-per-request |
-| **Windows** x64 (via phar) | `php-cgi` subprocess | no | persistent workers, source-transform shimming |
+| **Windows** x64 (via phar) | portable pool: `proc_open` workers (not yet run on Windows, see [docs/windows.md](docs/windows.md)) | no | persistent workers, source-transform shimming |
 
 On Linux, the BSDs and macOS the server runs COW-forked workers that share the loaded code and each pay for their own private pages -- 1.3–1.9 MB with nothing loaded, ~10 MB for a full CMS ([measured](docs/workers.md#what-a-worker-costs)).
-Windows has no `pcntl`, so it spawns `php-cgi` subprocesses for isolation:
-workers are still persistent and still shimmed, you simply do not get the COW
-memory saving. The 44-function source transform still clears state between
+Windows has no `pcntl`, so it uses the portable pool (`--pool-mode=portable`,
+chosen automatically there): each worker is a PHP process of its own, started
+with `proc_open()`, that boots the application once and then serves request
+after request. Workers are still persistent and still shimmed, you simply do
+not get the COW memory saving. It is tested on Linux, not yet on Windows:
+[docs/windows.md](docs/windows.md). The 44-function source transform still clears state between
 requests.
 
 **PHP 8.6+ (epoll/kqueue):** the server detects PHP 8.6's native `Io\Poll` API
