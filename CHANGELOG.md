@@ -67,6 +67,32 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.63 — a portable worker pool: PHP workers without fork, tested on Windows Server 2022 and 2025
+
+2026-11-24
+
+**Windows status.** The portable pool is tested on Linux (with the pool forced on) and on GitHub Actions Windows Server 2022 and 2025 runners: x64 with PHP 8.1, 8.3 and 8.5, and x86 (32-bit) with PHP 8.3, where the Windows smoke test (15 checks) and the pool's unit test pass. It is not yet verified on a Windows 11 desktop or on physical Windows machines, and a full Exponential installation, HTTPS, uploads and load have not been run on Windows yet. [docs/windows.md](docs/windows.md) has the results, how to run it, and the known gaps; reports are welcome through the "Windows report" issue form.
+
+### Added
+
+- **A portable worker pool for systems without `fork()`: Windows, or any PHP built without pcntl.** `Q.webserver.poolMode` (`--pool-mode`) is `fork` (forked from the server, as before), `portable` (each worker a PHP process of its own, started with `proc_open()`), or `auto` (the default: fork where `pcntl_fork()` exists, portable otherwise). Nothing changes on Linux unless portable is asked for. A portable worker runs the server's own command line again, boots the application itself (compat layer, warm-up, statics snapshot) and serves the same request frames as a forked worker, resetting itself between requests. It connects to the server over a Unix socket (mode 0600) on POSIX and over 127.0.0.1 on Windows, proving itself with a token given on its standard input. Its control channel carries one line per event (`READY <pid>`, `DONE <requests>`, `EXIT <code>`): its standard output on POSIX, a file per worker on Windows. The server replaces a worker that dies, recycles one after `maxRequests`, ends one that does not connect within `Q.webserver.portable.startTimeout`, and backs off after repeated boot failures. On Windows workers start without `cmd.exe` and in a process group of their own. On POSIX every descriptor a worker would inherit is replaced with `/dev/null`, and workers get the server's own `-d` settings. `tests/unit-portable-pool.php` covers it.
+- **Stop, reload and CTRL+C without signals.** Where `posix_kill()` does not exist, `--stop` and `--reload` write a request file beside the pid file (`<pidfile>.stop`, `<pidfile>.reload`), which the server picks up within a second. On a system without `pcntl_exec()` a reload replaces every worker in turn. CTRL+C and CTRL+BREAK in a Windows console take the same graceful stop as SIGINT (`sapi_windows_set_ctrl_handler()`). `Q_WebServer_Process` answers liveness (`tasklist` on Windows) and ends processes (`taskkill /T`).
+- **`QBIX_POOL_MODE` and `QBIX_POOL_TRACE`.** The first is the default for `Q.webserver.poolMode` when the configuration sets none. The second prints each step of the pool and its workers with the time.
+- **A Windows workflow and smoke test.** `.github/workflows/windows.yml` runs `tests/windows/smoke.ps1` and the pool's unit test on Windows Server 2022 and 2025 on every push. The smoke test can also be run by hand (`smoke.ps1`, `smoke.bat`).
+- **[docs/windows.md](docs/windows.md)** and a "Windows report" issue form.
+
+### Fixed
+
+- **The server runs on without the sqlite3 extension.** `Q_WebServer_Metrics::init()` opened its database with `new SQLite3`; on a PHP without the extension that is an `Error`, which the `catch (Exception)` let through, and the server ended at the start of its event loop. Without SQLite3 the metrics are now not stored, and the server runs on.
+- **`--stop` and `--reload` no longer call `posix_kill()` where it does not exist**, and `qbixctl` no longer sends `/dev/null` to `cmd.exe`. It starts the server without a shell on Windows and uses `taskkill` as a last resort.
+- **The version probes at start work under `cmd.exe`.** They sent errors to `/dev/null` and quoted for a POSIX shell, so every start on Windows printed "The system cannot find the path specified."
+- **The zygote forks through `Q_WebServer_Fork`**, and the pool no longer counts on the `qbix_fork.dll` that is not shipped.
+
+### Updated
+
+- **The pool's warm-up and start-up steps are reusable.** `Q_WebServer_Pool::prepareRuntime()`, `Q_WebServer::readLimits()`, `loadPreload()` and `prepareWorkerProcess()` are used by both pool modes.
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.63.
+
 ## v0.0.4.62 — file access checks in a worker follow the operating system, and a worker still busy after its answer gets no new request
 
 2026-11-24
