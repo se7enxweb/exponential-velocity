@@ -28,7 +28,7 @@ jobs:
         uses: shivammathur/setup-php@2.37.2
         with:
           php-version: ${{ matrix.php }}
-          extensions: sockets, mbstring, openssl, curl, fileinfo
+          extensions: sockets, mbstring, openssl, curl, fileinfo, sqlite3, pdo_sqlite
           ini-values: memory_limit=512M
           coverage: none
 
@@ -89,7 +89,7 @@ jobs:
           Invoke-WebRequest -Uri "https://windows.php.net/downloads/releases/$zip" -OutFile php.zip
           Expand-Archive php.zip -DestinationPath C:\php32
           Copy-Item C:\php32\php.ini-development C:\php32\php.ini
-          Add-Content C:\php32\php.ini "`nextension_dir=C:\php32\ext`nextension=sockets`nextension=mbstring`nextension=openssl`nextension=curl`nextension=fileinfo`nmemory_limit=512M`n"
+          Add-Content C:\php32\php.ini "`nextension_dir=C:\php32\ext`nextension=sockets`nextension=mbstring`nextension=openssl`nextension=curl`nextension=fileinfo`nextension=sqlite3`nextension=pdo_sqlite`nmemory_limit=512M`n"
           C:\php32\php.exe -v
           C:\php32\php.exe -r "echo PHP_INT_SIZE * 8, '-bit', PHP_EOL;"
           C:\php32\php.exe -m

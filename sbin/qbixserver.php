@@ -106,7 +106,8 @@ if (!defined('QBIX_SERVER_BUILD_DATE')) define('QBIX_SERVER_BUILD_DATE', gmdate(
 // the upstream number so the label is never empty.
 if (!defined('QBIX_SHIP_VERSION')) {
 	$__ship = @trim((string) @shell_exec('git -C ' . escapeshellarg(dirname(__DIR__))
-		. " describe --tags --abbrev=0 --match 'v0.0.*' 2>/dev/null"));
+		. ' describe --tags --abbrev=0 --match ' . escapeshellarg('v0.0.*')
+		. (DIRECTORY_SEPARATOR === '\\' ? ' 2>NUL' : ' 2>/dev/null')));
 	define('QBIX_SHIP_VERSION', $__ship !== '' ? $__ship : ('v' . QBIX_SERVER_VERSION));
 	unset($__ship);
 }
