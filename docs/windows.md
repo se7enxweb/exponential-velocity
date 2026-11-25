@@ -41,6 +41,20 @@ windows.php.net or `setup-php`. Velocity itself needs the `sockets` and
 `openssl` extensions, `mbstring`, and `sqlite3` for its metrics; Exponential
 adds `intl`, `xsl`, `gd`, `curl`, `fileinfo`, `pdo_sqlite`, `zip` and `exif`.
 
+Two things the zip from windows.php.net does not do by itself, both found by
+the CI:
+
+- **No CA bundle.** PHP for Windows verifies HTTPS certificates but ships no
+  list of trusted CAs, so every outgoing HTTPS request fails: Exponential's
+  installer cannot fetch its site packages ("Retrieving remote site packages
+  list failed"), and ACME cannot reach Let's Encrypt. Download
+  <https://curl.se/ca/cacert.pem> and set `curl.cainfo` and `openssl.cafile` in
+  `php.ini` to it (`tests/windows/install-php.ps1` does).
+- **No OpenSSL legacy provider in the 32-bit build.** A `.pfx` encrypted the
+  old way (TripleDES/RC2, the default of `Export-PfxCertificate` and of many
+  tools) cannot be read there; export with
+  `-CryptoAlgorithmOption AES256_SHA256` (`vcc.ps1 cert-import` does).
+
 ### Results
 
 The last run of the `windows` workflow on the branch this was written on:

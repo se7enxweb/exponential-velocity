@@ -44,4 +44,9 @@ Add-Content "$Dest\php.ini" $ini
 & "$Dest\php.exe" -v
 & "$Dest\php.exe" -m | Out-String | Write-Host
 if ($env:GITHUB_PATH) { Add-Content $env:GITHUB_PATH $Dest }
+# OpenSSL in PHP for Windows reads no configuration unless OPENSSL_CONF names
+# one; key and certificate generation (openssl_pkey_new, openssl_csr_new)
+# need it. The zip ships one in extras\ssl.
+$cnf = "$Dest\extras\ssl\openssl.cnf"
+if ((Test-Path $cnf) -and $env:GITHUB_ENV) { Add-Content $env:GITHUB_ENV "OPENSSL_CONF=$cnf" }
 Write-Output "$Dest\php.exe"
