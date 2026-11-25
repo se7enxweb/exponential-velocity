@@ -28,7 +28,7 @@ on that system on every push and it passes; the results of the last run are in
 |---|---|---|---|
 | Windows Server 2022 | x64 (win64) | 8.1, 8.3, 8.5 | **proven**: unit gate, smoke, HTTPS; with 8.3 also the Exponential site, load and the service |
 | Windows Server 2025 | x64 (win64) | 8.1, 8.3, 8.5 | **proven**: unit gate, smoke, HTTPS; with 8.5 also the Exponential site, load and the service |
-| Windows Server 2022 | x86 (win32, 32-bit PHP) | 8.3 | **proven**: unit gate, smoke, HTTPS with a self-signed certificate; **open**: a `.pfx` from the certificate store was not read by the 32-bit build (it served its self-signed certificate instead), and generating keys failed without `OPENSSL_CONF`; the CI now sets `OPENSSL_CONF`, not yet confirmed on x86 |
+| Windows Server 2022 | x86 (win32, 32-bit PHP) | 8.3 | **proven**: unit gate, smoke, HTTPS (self-signed and the certificate store), with `OPENSSL_CONF` set to the openssl.cnf in the PHP zip (without it the 32-bit build could not generate keys or read the .pfx) |
 | Windows 11 Enterprise 25H2 (build 26200) | ARM64 machine, x64 PHP under emulation | 8.3 | **proven**: unit gate, smoke, HTTPS, Exponential site, load, service |
 | Windows 11 on ARM | native ARM64 PHP | | **not possible yet**: windows.php.net publishes no ARM64 build of PHP (x64 and x86 only); a self-built ARM64 PHP is untested |
 | Windows 11 / 10 desktop | x64 | 8.x | **theory**: same kernel, APIs and PHP builds as the proven Server 2022/2025 and Windows 11 ARM jobs; GitHub has no x64 Windows client runner, so it needs a real machine or VM |
