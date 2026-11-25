@@ -74,7 +74,9 @@ class Q_WebServer_Ctl
 		if (!empty($opts['pid']) and is_string($opts['pid'])) return $opts['pid'];
 		$conf = Q_Config::get('Q', 'webserver', 'pidFile', null);
 		if (is_string($conf) and $conf !== '') return $conf;
-		return (is_dir('/run/qbix') and is_writable('/run/qbix')) ? '/run/qbix/qbixserver.pid'
+		// /run/qbix, or %ProgramData%\qbix\run on Windows (Q_WebServer_Layout::platformDir()).
+		$run = Q_WebServer_Layout::platformDir('/run/qbix');
+		return (is_dir($run) and is_writable($run)) ? $run . '/qbixserver.pid'
 			: sys_get_temp_dir() . '/qbixserver.pid';
 	}
 
@@ -303,6 +305,15 @@ class Q_WebServer_Ctl
 	/**
 	 * Enable or disable a site, conf snippet or module, as a2ensite does:
 	 * a relative symlink in <pair>-enabled to <pair>-available/<name>.conf.
+	 *
+	 * Windows creates a symbolic link only for an administrator or with
+	 * Developer Mode on. Where that is refused, the enabled entry is a hard
+	 * link to the available file (NTFS, no privilege needed), and else a
+	 * copy. Either is recognised as enabled; enabling again refreshes one
+	 * whose content no longer matches the available file (an editor that
+	 * saves by replacing the file breaks a hard link), and disabling removes
+	 * one that still matches. One that differs is left alone, as a regular
+	 * file is on POSIX.
 	 * @return {array} array(ok, message)
 	 */
 	static function toggle($dir, $pair, $name, $enable)
@@ -314,14 +325,33 @@ class Q_WebServer_Ctl
 		$p = $map[$pair];
 		$available = "$dir/$p-available/$name.conf";
 		$link = "$dir/$p-enabled/$name.conf";
+		$windows = Q_WebServer_Layout::onWindows();
+		$sameContent = function () use ($available, $link) {
+			return is_file($available) and is_file($link)
+				and (string) @file_get_contents($available) === (string) @file_get_contents($link);
+		};
 		if ($enable) {
 			if (!is_file($available)) return array(false, "no $p-available/$name.conf");
+			if ($windows and !is_link($link) and is_file($link) and !$sameContent()) {
+				if (!@copy($available, $link)) return array(false, "could not refresh $link");
+				return array(true, "refreshed $pair $name from $p-available; reload to apply");
+			}
 			if (is_link($link) or file_exists($link)) return array(true, "$pair $name already enabled");
 			if (!is_dir(dirname($link))) @mkdir(dirname($link), 0755, true);
-			if (!@symlink("../$p-available/$name.conf", $link)) return array(false, "could not create $link");
-			return array(true, "enabled $pair $name; reload to apply");
+			// PHP for Windows resolves a relative symlink target against the
+			// working directory, not the link's own: give it the full path there.
+			$target = $windows ? (realpath($available) ?: $available) : "../$p-available/$name.conf";
+			if (@symlink($target, $link)) return array(true, "enabled $pair $name; reload to apply");
+			if (!$windows) return array(false, "could not create $link");
+			if (@link($available, $link)) return array(true, "enabled $pair $name (hard link: symbolic links need an administrator or Developer Mode); reload to apply");
+			if (@copy($available, $link)) return array(true, "enabled $pair $name (copy: enable it again after editing $p-available/$name.conf); reload to apply");
+			return array(false, "could not create $link");
 		}
 		if (!is_link($link)) {
+			if ($windows and $sameContent()) {
+				@unlink($link);
+				return array(true, "disabled $pair $name; reload to apply");
+			}
 			return array(true, is_file($link) ? "$link is a file, not a link; left alone" : "$pair $name already disabled");
 		}
 		@unlink($link);
