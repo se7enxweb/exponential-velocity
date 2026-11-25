@@ -2333,6 +2333,16 @@ class Q_WebServer_Compat
 	 */
 	static function accessCheck($filename, $mode, $native)
 	{
+		// access(2) answers for the real user. While the master runs code as
+		// the worker user (Q_WebServer_RunAs::asUser(), the warm-up) the real
+		// user is still root, and an NFS export that squashes root refuses
+		// root where the worker user may write: the warm-up found a cluster's
+		// shared mount "not writeable". Then it is asked as the effective user.
+		if (is_string($filename) and $filename !== '' and strpos($filename, "\0") === false
+			and function_exists('posix_geteuid') and posix_geteuid() !== posix_getuid()
+			and (strpos($filename, '://') === false or strncmp($filename, 'file://', 7) === 0)) {
+			return Q_WebServer_CompatFileWrapper::effectiveAccess($filename, $mode);
+		}
 		if (!Q_WebServer_CompatFileWrapper::$installed or !is_string($filename)
 			or $filename === '' or strpos($filename, "\0") !== false) {
 			return $native($filename);
@@ -3473,6 +3483,71 @@ class Q_WebServer_CompatFileWrapper
 		}
 		try {
 			return (bool) $function(self::bare((string) $path));
+		} finally {
+			if ($swap) {
+				stream_wrapper_unregister('file');
+				stream_wrapper_register('file', __CLASS__);
+				self::$installed = true;
+			}
+		}
+	}
+
+	/**
+	 * access(2) for the effective user rather than the real one (what
+	 * faccessat() with AT_EACCESS does; PHP has no call for it). Tried rather
+	 * than worked out from mode bits, so a squashing NFS export, an ACL or a
+	 * read-only mount count: read opens the file or directory, write on a
+	 * directory creates and removes a probe file, write on a file opens it
+	 * for writing without changing it. Execute is judged by the mode bits
+	 * for the effective ids. PHP's own file wrapper is in place for the call.
+	 *
+	 * @method effectiveAccess
+	 * @static
+	 * @param {string} $path a local path or file:// URL
+	 * @param {integer} $mode 4, 2 or 1
+	 * @return {boolean}
+	 */
+	static function effectiveAccess($path, $mode)
+	{
+		$path = self::bare((string) $path);
+		$swap = self::$installed;
+		if ($swap) {
+			stream_wrapper_restore('file');
+			self::$installed = false;
+		}
+		try {
+			clearstatcache(true, $path);
+			if (!file_exists($path)) return false;
+			$dir = is_dir($path);
+			if ($mode & 4) {
+				$h = $dir ? @opendir($path) : @fopen($path, 'rb');
+				if ($h === false) return false;
+				if ($dir) closedir($h); else fclose($h);
+			}
+			if ($mode & 2) {
+				if ($dir) {
+					$probe = rtrim($path, '/') . '/.vc-access-' . getmypid() . '-' . mt_rand();
+					$h = @fopen($probe, 'xb');
+					if ($h === false) return false;
+					fclose($h);
+					@unlink($probe);
+				} else {
+					$h = @fopen($path, 'r+b');
+					if ($h === false) return false;
+					fclose($h);
+				}
+			}
+			if ($mode & 1) {
+				$st = @stat($path);
+				if (!$st) return false;
+				$uid = posix_geteuid();
+				if ($uid === 0) return $dir or ($st['mode'] & 0111) !== 0;
+				$groups = function_exists('posix_getgroups') ? (array) posix_getgroups() : array();
+				$bit = $st['uid'] === $uid ? 0100
+					: (($st['gid'] === posix_getegid() or in_array($st['gid'], $groups, true)) ? 0010 : 0001);
+				if (($st['mode'] & $bit) === 0) return false;
+			}
+			return true;
 		} finally {
 			if ($swap) {
 				stream_wrapper_unregister('file');
