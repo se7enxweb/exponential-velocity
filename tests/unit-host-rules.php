@@ -55,6 +55,8 @@ Q_Config::set('Q', 'webserver', 'hosts', 'h.test', array(
 		array('dir' => '', 'rules' => array(
 			array('pattern' => '^var/.*\.php$', 'target' => '-', 'flags' => array('F' => true)),
 			array('pattern' => '^gone$', 'target' => '-', 'flags' => array('G' => true)),
+			array('pattern' => '^app\.php(/(.*)|$)', 'target' => '/$2', 'flags' => array('R' => 301, 'L' => true),
+				'conds' => array(array('test' => '%{ENV:REDIRECT_STATUS}', 'pattern' => '^$'))),
 			array('pattern' => '^old/(.*)$', 'target' => 'https://n.example/$1', 'flags' => array('R' => 301, 'L' => true)),
 			array('pattern' => '.', 'target' => '/index.php', 'flags' => array('L' => true), 'conds' => array(
 				array('test' => '%{REQUEST_FILENAME}', 'file' => '-f', 'negate' => true),
@@ -95,6 +97,7 @@ check('[F]', req('/var/cache/x.php'), '403');
 check('[G]', req('/gone'), '410');
 check('external redirect', req('/old/a/b'), '301 https://n.example/a/b');
 check('front controller', req('/clean/url'), 'pass /index.php');
+check('%{ENV:REDIRECT_STATUS} is empty on the request as asked', req('/app.php/abc'), '301 /abc');
 check('existing file', req('/plain.txt'), 'pass /plain.txt');
 check('directory index', req('/docs/'), 'pass /docs/start.html');
 check('subdirectory rules with RewriteBase', req('/sub/x/7'), 'pass /sub/real.txt?k=7');

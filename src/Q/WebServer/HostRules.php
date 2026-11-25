@@ -72,6 +72,8 @@ class Q_WebServer_HostRules
 		if ($a !== null) return $a;
 
 		for ($round = 0; $round < 10; $round++) {
+			// %{ENV:REDIRECT_STATUS}: empty on the request as asked, 200 after an internal rewrite (as Apache).
+			$parsed['_rewriteRound'] = $round;
 			$r = self::rewrite($hc, $root, $rel, $parsed);
 			if (is_array($r) and isset($r['status'])) return $r;
 			if ($r === null) break;
@@ -333,6 +335,7 @@ class Q_WebServer_HostRules
 			'HTTPS' => $https ? 'on' : 'off',
 			'DOCUMENT_ROOT' => $root,
 		);
+		$s = str_replace('%{ENV:REDIRECT_STATUS}', empty($parsed['_rewriteRound']) ? '' : '200', $s);
 		$s = preg_replace_callback('/%\{HTTP:([A-Za-z0-9-]+)\}/', function ($x) use ($h) {
 			return (string) ($h[strtolower($x[1])] ?? '');
 		}, $s);
