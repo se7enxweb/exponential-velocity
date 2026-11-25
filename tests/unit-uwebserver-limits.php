@@ -95,16 +95,6 @@ $raw = uw_raw($port, str_repeat("GET / HTTP/1.1\r\nHost: l\r\n\r\n", 5), 4);
 check('--max-requests=3: three answers on one connection', substr_count($raw, 'HTTP/1.1 200'), 3);
 check('...the third says Connection: close', substr_count($raw, 'Connection: close'), 1);
 
-// --max-connections
-$held = array();
-for ($i = 0; $i < 6; $i++) { $h = stream_socket_client("tcp://127.0.0.1:$port", $e, $es, 2); fwrite($h, "GET / HTTP/1.1\r\nHost: l\r\n\r\n"); $held[] = $h; }
-usleep(300000);
-$t = closed_after($port, '', 3);
-check('--max-connections=6: a seventh connection is closed at once', $t < 1, true);
-foreach ($held as $h) fclose($h);
-usleep(300000);
-check('...and once they are gone, it serves again', uw_get($port, '/')[0], 200);
-
 // A client pipelining requests without reading: its memory stays bounded.
 $rss0 = rss_kb($srv['pid']);
 $fp = stream_socket_client("tcp://127.0.0.1:$port", $e, $es, 2);
@@ -117,6 +107,38 @@ $rss1 = rss_kb($srv['pid']);
 fclose($fp);
 check('pipelined requests never read: the server reads no further than it answers (memory grew < 4 MiB)', $rss0 !== null && $rss1 - $rss0 < 4096);
 check('...the client could not push more than the socket buffers hold', $sent < 32 * 1024 * 1024);
+uw_stop($srv);
+
+// --max-connections, on a server of its own whose time limits are long, so
+// the six held connections are still open when the seventh arrives:
+// closed_after() waits up to a second for the start of one before it
+// connects, longer than the 1 s --keepalive-timeout above.
+//
+// Each held connection counts only once it has been answered. The probe
+// uw_start() makes to see the server listening is closed by the client, and
+// the server counts it until it reads that close; a held connection opened
+// before then was turned away as the sixth, and the seventh then took its
+// place once the probe was gone (CI, and 10 of 15 runs on a busy machine).
+// That is the test's race, not the server's: a turned-away connection is
+// opened again until six are answered.
+$port = uw_free_port();
+$srv = uw_start($bin, array_merge(uw_root_args(), array("--root=$d/www", "--port=$port", '--header-timeout=30',
+	'--keepalive-timeout=30', '--max-connections=6')), $port);
+$held = array();
+for ($try = 0; count($held) < 6 && $try < 20; $try++) {
+	$h = stream_socket_client("tcp://127.0.0.1:$port", $e, $es, 2);
+	if (!$h) continue;
+	fwrite($h, "GET / HTTP/1.1\r\nHost: l\r\n\r\n");
+	stream_set_timeout($h, 3);
+	if (strpos((string) fgets($h), 'HTTP/1.1 200') === 0) $held[] = $h;
+	else { fclose($h); usleep(100000); }
+}
+check('six connections held open, each answered', count($held), 6);
+$t = closed_after($port, '', 3);
+check('--max-connections=6: a seventh connection is closed at once', $t < 1 ? true : sprintf('closed after %.2f s', $t), true);
+foreach ($held as $h) fclose($h);
+usleep(300000);
+check('...and once they are gone, it serves again', uw_get($port, '/')[0], 200);
 uw_stop($srv);
 
 // A TLS handshake that never finishes.
