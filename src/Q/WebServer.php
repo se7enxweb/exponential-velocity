@@ -1295,6 +1295,13 @@ class Q_WebServer
 			// A suspended or disabled domain, or a redirect: see handleRequest().
 			// HTTP/2 is only ever spoken after a TLS handshake here.
 			$request['_https'] = true;
+			// A host in fallback (Q_WebServer_HostFallback): the HTTP/2 path relays
+			// nothing, so it gets the page that says why.
+			if (Q_WebServer_HostFallback::configured()
+				and Q_WebServer_HostFallback::cause($request['headers']['host'] ?? '') !== null) {
+				$fb = Q_WebServer_HostFallback::page($request['headers']['host'] ?? '');
+				if ($fb !== null) return $fb;
+			}
 			// A host served by another server (Q.webserver.upstreams) is passed
 			// on over HTTP/1.1 only; it is never run here.
 			if (Q_WebServer_Upstream::target($request['headers']['host'] ?? '') !== null) {
@@ -3872,6 +3879,14 @@ class Q_WebServer
 		if ($upstream !== null) {
 			Q_WebServer_Upstream::relay($client, $parsed, $upstream, $extra);
 			return true;
+		}
+		// A host in fallback with no previous server to go to: the page that says why.
+		if (Q_WebServer_HostFallback::configured()
+			and ($fb = Q_WebServer_HostFallback::page($parsed['headers']['host'] ?? '')) !== null) {
+			self::sendResponse($client, $fb['status'], $fb['body'], $fb['headers']['Content-Type'],
+				array_diff_key($fb['headers'], array('Content-Type' => 1)), ($parsed['method'] ?? '') === 'HEAD');
+			self::recordCompleted($parsed, $fb['status'], strlen($fb['body']), 0.0, false);
+			return false;
 		}
 
 		// The host's access control and URL rules (Q_WebServer_HostRules),
@@ -6699,6 +6714,9 @@ WORKER;
 	{
 		$status = (int) $status;
 		$bytes = (int) $bytes;
+		if ($status >= 500 and Q_WebServer_HostFallback::configured()) {
+			Q_WebServer_HostFallback::record($parsed['headers']['host'] ?? '', $status, (string) ($parsed['uri'] ?? ''));
+		}
 		Q_WebServer_Dashboard::recordRequest(
 			$parsed['method'] ?? 'GET', $parsed['uri'] ?? '/', $status, $ms, $bytes,
 			$isPhp, '', (int) $memUsed, $parsed['cookies'] ?? array()

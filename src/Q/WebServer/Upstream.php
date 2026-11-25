@@ -51,6 +51,10 @@ class Q_WebServer_Upstream
 	 */
 	static function target($host)
 	{
+		// A host in fallback goes back to the server that served it before.
+		if (Q_WebServer_HostFallback::configured() and ($fb = Q_WebServer_HostFallback::target($host)) !== null) {
+			return $fb;
+		}
 		$map = Q_Config::get('Q', 'webserver', 'upstreams', array());
 		if (!is_array($map) or !$map) return null;
 		$host = strtolower(preg_replace('/:\d+$/', '', (string) $host));
