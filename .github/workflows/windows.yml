@@ -59,6 +59,7 @@ jobs:
           exit $LASTEXITCODE
 
       - name: Smoke test (real server, portable workers)
+        if: ${{ !cancelled() }}
         shell: powershell
         env:
           QBIX_POOL_TRACE: '1'
@@ -67,6 +68,7 @@ jobs:
           exit $LASTEXITCODE
 
       - name: HTTPS (self-signed, Windows certificate store)
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\https-smoke.ps1 -Php (Get-Command php).Source -LogDir "$pwd\smoke-logs"
@@ -105,6 +107,7 @@ jobs:
           exit $LASTEXITCODE
 
       - name: Smoke test (real server, portable workers)
+        if: ${{ !cancelled() }}
         shell: powershell
         env:
           QBIX_POOL_TRACE: '1'
@@ -113,6 +116,7 @@ jobs:
           exit $LASTEXITCODE
 
       - name: HTTPS (self-signed, Windows certificate store)
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\https-smoke.ps1 -Php C:\php32\php.exe -LogDir "$pwd\smoke-logs"
@@ -152,6 +156,7 @@ jobs:
           exit $LASTEXITCODE
 
       - name: Smoke test (real server, portable workers)
+        if: ${{ !cancelled() }}
         shell: powershell
         env:
           QBIX_POOL_TRACE: '1'
@@ -160,6 +165,7 @@ jobs:
           exit $LASTEXITCODE
 
       - name: HTTPS (self-signed, Windows certificate store)
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\https-smoke.ps1 -Php C:\php-arm\php.exe -LogDir "$pwd\smoke-logs"
@@ -172,12 +178,14 @@ jobs:
           exit $LASTEXITCODE
 
       - name: Exponential site under Velocity, with load
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\exponential-site.ps1 -Php C:\php-arm\php.exe -Dir C:\exp -Port 18431 -LogDir "$pwd\smoke-logs"
           exit $LASTEXITCODE
 
       - name: Windows service (vcc.ps1, virtual account), with the Exponential site
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\service.ps1 -Php C:\php-arm\php.exe -ExpDir C:\exp -ExpPort 18431 -LogDir "$pwd\smoke-logs"
@@ -221,12 +229,14 @@ jobs:
           exit $LASTEXITCODE
 
       - name: Exponential site under Velocity, with load
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\exponential-site.ps1 -Php (Get-Command php).Source -Dir C:\exp -Port 18431 -LogDir "$pwd\smoke-logs"
           exit $LASTEXITCODE
 
       - name: Windows service (vcc.ps1, virtual account), with the Exponential site
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\service.ps1 -Php (Get-Command php).Source -ExpDir C:\exp -ExpPort 18431 -LogDir "$pwd\smoke-logs"
