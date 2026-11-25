@@ -819,7 +819,15 @@ try {
 	fwrite(STDERR, "SSL panel settings not applied: " . $e->getMessage() . "\n");
 }
 
-// Framework preset (--preset=laravel, etc.)
+// Framework preset (--preset=laravel, etc.), or Q.compat.preset in the
+// configuration (a site file), as docs/configuration.md has always said:
+// the option wins. A site file naming it used to be ignored, so an
+// Exponential site started from one ran without the kept type registries.
+if (!$opts['preset']) {
+	$__cfgPreset = Q_Config::get('Q', 'compat', 'preset', null);
+	if (is_string($__cfgPreset) and $__cfgPreset !== '') $opts['preset'] = $__cfgPreset;
+	unset($__cfgPreset);
+}
 if ($opts['preset']) {
 	require_once dirname(__DIR__) . '/src/Q/WebServer/Compat.php';
 	Q_WebServer_Compat::loadPreset($opts['preset']);

@@ -83,5 +83,14 @@ check('configured scripts are kept', Q_Config::get('Q', 'webserver', 'scripts', 
 check('an unknown preset returns false',
 	Q_WebServer_Compat::loadPreset('nonesuch'), false);
 
+// The preset named in a site file (Q.compat.preset) is applied too, not only
+// --preset: an Exponential site started from its site file -- the Windows
+// service does that -- otherwise ran without the kept registries and its
+// pages died on eZDataType::create() returning null.
+$src = file_get_contents(__DIR__ . '/../sbin/qbixserver.php');
+$cfgAt = strpos($src, "Q_Config::get('Q', 'compat', 'preset', null)");
+check('qbixserver.php applies Q.compat.preset from the configuration, before loading the preset',
+	$cfgAt !== false and $cfgAt < strpos($src, "Q_WebServer_Compat::loadPreset(\$opts['preset'])"), true);
+
 if ($fail) { printf("\n  FAIL - %d of %d case(s)\n", $fail, $pass + $fail); exit(1); }
 printf("  PASS - %d case(s)\n", $pass);
