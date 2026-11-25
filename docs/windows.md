@@ -57,10 +57,28 @@ the CI:
 
 ### Results
 
-The last run of the `windows` workflow on the branch this was written on:
-see the run linked from the release notes, or the Actions tab. Each job
-uploads its logs (server log, worker trace, the Exponential installation
-log with the password masked) as an artifact.
+Each job uploads its logs (server log, worker trace, the service's log, the
+Exponential installation log with the password masked) as an artifact. What
+the first complete runs measured (November 2026, GitHub-hosted runners, two
+portable workers, response cache off, so every request is rendered by PHP):
+
+| | Server 2022, PHP 8.3 | Server 2025, PHP 8.5 | Windows 11 ARM, x64 PHP 8.3 emulated |
+|---|---|---|---|
+| Exponential installed on SQLite (`exp:install`) | 42 s | | 64 s composer + install |
+| server up, first page | 4 s, 2.9 s | | 9 s, 7.7 s |
+| load, 300 requests at concurrency 8 (pages, login page, CSS) | 26 req/s, p50 420 ms, p95 610 ms | 11 to 14 req/s, p50 200 ms, p95 3 to 4 s | 7 req/s, p50 430 ms, p95 2.6 to 2.9 s |
+| worker private memory, two workers, after rounds 1/2/3 | 198 / 211 / 211 MB | 200 / 205 / 219 MB | 225 / 225 / 245 MB |
+| server handle count, rounds 1 to 3 | 187, unchanged | 221, unchanged | 205, unchanged |
+| failed requests, worker deaths | 0, 0 | 0, 0 | 0, 0 |
+
+These are runner numbers, not a benchmark: shared virtual machines, two
+workers, no cache. They show that nothing fails or leaks under concurrency,
+not how fast a real Windows server is.
+
+Unit tests: 141 of the 195 `tests/unit-*.php` pass on Windows Server 2025
+with PHP 8.3 (51 fail, 3 time out; most of those exercise fork, signals,
+`/proc` or POSIX modes on purpose). The 43 in `tests/windows/unit-windows.txt`
+are the gate every Windows job runs.
 
 ## What the tests prove
 
