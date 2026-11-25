@@ -473,7 +473,7 @@ class Q_WebServer_Ctl
 	/** qbixserver.php's options that start passes on, and restart replaces, when they are given. */
 	static $serverValueOptions = array('conf-dir', 'config', 'root', 'app', 'host', 'port', 'https-port', 'socket',
 		'socket-mode', 'workers', 'distribution', 'preset', 'keep-globals', 'user', 'group');
-	static $serverFlags = array('debug', 'quiet', 'verbose', 'hotreload', 'watchdog', 'allow-root-workers');
+	static $serverFlags = array('debug', 'quiet', 'verbose', 'hotreload', 'watchdog', 'allow-root-workers', 'drop-master');
 
 	/**
 	 * The server options among a command's options, name => value (a flag is
@@ -909,7 +909,7 @@ class Q_WebServer_Ctl
 			'user' => 'User the workers run as', 'group' => 'Group the workers run as',
 			'debug' => array('Verbose logging', false), 'quiet' => array('Report errors only', false),
 			'verbose' => array('Also report every certificate provider tried', false), 'hotreload' => array('Restart on file changes', false),
-			'watchdog' => array('Run under the watchdog', false), 'allow-root-workers' => array('Permit --user=root', false),
+			'watchdog' => array('Run under the watchdog', false), 'allow-root-workers' => array('Permit --user=root', false), 'drop-master' => array('The server itself gives up root after binding its ports', false),
 			'log' => 'Where the server writes its output (default: Q.webserver.log.dir, else var/log, files/log or logs of the document root or the directory above it, else the configuration tree\'s log directory)');
 		$C::add('server:start', 'Start the server, detached', function ($a, $o) use ($say) {
 			self::context($o);

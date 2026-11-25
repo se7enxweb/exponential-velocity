@@ -168,6 +168,7 @@ $opts = array(
 	'user'    => null,  // --user=NAME : the user the workers run as (Apache's User)
 	'group'   => null,  // --group=NAME : the group the workers run as (Apache's Group)
 	'allow-root-workers' => false, // --allow-root-workers : permit --user=root
+	'drop-master' => false, // --drop-master : the server itself gives up root after binding its ports
 	'pool-mode' => null, // --pool-mode=fork|portable|auto : how workers are started (Q.webserver.poolMode)
 );
 
@@ -209,7 +210,7 @@ $argv = qbix_normalize_argv($argv,
 		'preset', 'sign', 'verify', 'key', 'key-id', 'generate-key', 'policy', 'pid', 'pack', 'output',
 		'keep-globals', 'conf-dir', 'distribution', 'deploy', 'signer', 'm', 'user', 'group', 'pool-mode'),
 	array('help', 'version', 'stop', 'reload', 'debug', 'quiet', 'verbose', 'hotreload', 'layout', 'gui', 'open', 'watchdog',
-		'sign-binary', 'verify-binary', 'publish-rekor', 'allow-root-workers'));
+		'sign-binary', 'verify-binary', 'publish-rekor', 'allow-root-workers', 'drop-master'));
 
 foreach ($argv as $i => $arg) {
 	if ($i === 0) continue;
@@ -244,6 +245,8 @@ foreach ($argv as $i => $arg) {
 		echo "                   owner of the document root; never root unless\n";
 		echo "                   --allow-root-workers)\n";
 		echo "  --group=NAME     Group the workers run as (Q.webserver.group, QBIX_RUN_GROUP)\n";
+		echo "  --drop-master    The server itself becomes that user once its ports are bound\n";
+		echo "                   and certificates read (Q.webserver.dropMaster, QBIX_RUN_DROP_MASTER=1)\n";
 		echo "  --hotreload      Watch files, auto-restart on changes\n";
 		echo "  --debug          Verbose logging\n";
 		echo "  --verbose        Also report every certificate provider tried\n";
@@ -301,6 +304,10 @@ foreach ($argv as $i => $arg) {
 	}
 	if ($arg === '--layout') {
 		$opts['layout'] = true;
+		continue;
+	}
+	if ($arg === '--drop-master') {
+		$opts['drop-master'] = true;
 		continue;
 	}
 	if ($arg === '--allow-root-workers') {

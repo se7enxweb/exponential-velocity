@@ -617,6 +617,22 @@ class Q_WebServer
 			if ($n > 0) echo "  Handed to {$runAs['user']}: $dir ($n entries were root's)\n";
 		}
 
+		// The server itself gives up root too (--drop-master): the ports are
+		// bound and the certificates read by now, and the warm-up below then
+		// runs with a real user that is not root.
+		if (Q_WebServer_RunAs::dropMasterWanted() and function_exists('posix_geteuid') and posix_geteuid() === 0) {
+			$ownDirs = array();
+			$logDir = Q_Config::get('Q', 'webserver', 'log', 'dir', null);
+			if (is_string($logDir) and $logDir !== '') $ownDirs[] = $logDir;
+			if (!empty(self::$controlPidFile) and is_string(self::$controlPidFile)) $ownDirs[] = self::$controlPidFile;
+			$err = Q_WebServer_RunAs::dropMaster($ownDirs);
+			if ($err !== null) {
+				fwrite(STDERR, "Error: --drop-master: $err; not starting\n");
+				exit(1);
+			}
+			echo "  Server as: {$runAs['user']}:{$runAs['group']} (root given up after binding)\n";
+		}
+
 		// Forked workers where pcntl exists; workers started as processes of
 		// their own where it does not -- Windows -- or where
 		// Q.webserver.poolMode says "portable" (Q_WebServer_Pool::mode()).

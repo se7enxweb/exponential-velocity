@@ -84,8 +84,77 @@ class Q_WebServer_RunAs
 			'user' => isset($opts['user']) && is_string($opts['user']) && $opts['user'] !== '' ? $opts['user'] : null,
 			'group' => isset($opts['group']) && is_string($opts['group']) && $opts['group'] !== '' ? $opts['group'] : null,
 			'allowRoot' => !empty($opts['allow-root-workers']),
+			'dropMaster' => !empty($opts['drop-master']),
 		);
 		self::$plan = null;
+	}
+
+	/**
+	 * Whether the server process itself is to give up root once its ports
+	 * are bound and its certificates read: --drop-master,
+	 * Q.webserver.dropMaster, <PREFIX>_RUN_DROP_MASTER=1.
+	 * @method dropMasterWanted
+	 * @static
+	 * @return {boolean}
+	 */
+	static function dropMasterWanted()
+	{
+		if (!empty(self::$cli['dropMaster'])) return true;
+		if (class_exists('Q_Config', false) and Q_Config::get('Q', 'webserver', 'dropMaster', false) === true) return true;
+		$e = self::env('DROP_MASTER');
+		return $e !== null && in_array(strtolower($e[0]), array('1', 'yes', 'true', 'on'), true);
+	}
+
+	/**
+	 * Give up root in the server process itself (the master), for good,
+	 * after the listeners are bound and the certificates are in memory.
+	 * Nothing that runs afterwards -- the warm-up, every worker, the
+	 * scheduled tasks -- has root to lose, and the real user is the worker
+	 * user, so access(2) and an NFS export that squashes root answer for it.
+	 *
+	 * What the master writes from then on must be the user's: the log
+	 * directory and the pid file's directory are handed over first. What it
+	 * can no longer do: bind a port below 1024 again (a listener added later,
+	 * e.g. the HTTPS port after a first certificate arrives) and read a
+	 * certificate only root may read (a renewed certificate is picked up by a
+	 * restart). Pools of other users (Q.webserver.pools) need a root master,
+	 * so they refuse this.
+	 *
+	 * @method dropMaster
+	 * @static
+	 * @param {array} $ownDirs directories the master writes (logs, pid file)
+	 * @return {string|null} null when done or nothing to do, else what went wrong
+	 */
+	static function dropMaster(array $ownDirs = array())
+	{
+		if (!function_exists('posix_geteuid') or posix_geteuid() !== 0) return null;
+		$p = self::plan();
+		if ($p['error']) return $p['error'];
+		if (!$p['switch']) return 'the worker user is root (or unknown); there is no user to become';
+		if (class_exists('Q_Config', false) and Q_Config::get('Q', 'webserver', 'pools', array())) {
+			return 'Q.webserver.pools runs workers as other users, which needs a master that stays root';
+		}
+		foreach ($ownDirs as $dir) {
+			if (!is_string($dir) or $dir === '' or $dir[0] !== '/' or is_link($dir)) continue;
+			if (is_file($dir)) {
+				// A file (the pid file): only the file.
+				$fs = @lstat($dir);
+				if ($fs and $fs['uid'] === 0) { @chown($dir, $p['uid']); @chgrp($dir, $p['gid']); }
+				continue;
+			}
+			// Never a shared system directory (/run, /var/log, /tmp): only a
+			// directory at least three levels down (/var/log/vc, /run/vc/x).
+			if (!is_dir($dir) or count(array_filter(explode('/', $dir), 'strlen')) < 3) continue;
+			$st = @stat($dir);
+			if ($st and $st['uid'] === 0) { @chown($dir, $p['uid']); @chgrp($dir, $p['gid']); }
+			foreach ((array) @scandir($dir) as $f) {
+				if ($f === '.' or $f === '..' or !is_string($f)) continue;
+				$path = "$dir/$f";
+				$fs = @lstat($path);
+				if ($fs and $fs['uid'] === 0 and !is_link($path) and is_file($path)) { @chown($path, $p['uid']); @chgrp($path, $p['gid']); }
+			}
+		}
+		return self::drop();
 	}
 
 	/**
