@@ -67,23 +67,32 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
-- Per host, a virtual host's own mod_rewrite rules (`Q.webserver.hosts.<host>.serverRewrite`, Apache's
-  server context as in a Plesk `vhost.conf`), matched against the whole URL path before access control and
-  the directory rules.
-- Per host, Apache's `ErrorDocument` (`errorDocuments`): the body of the server's own 401, 403, 404 ... for
-  that host. A 401 from access control now carries it too.
-- Per host, `followSymlinks` (`true` or `"ifOwnerMatch"`, Apache's `FollowSymLinks` and
-  `SymLinksIfOwnerMatch`) for files reached through a link outside the root.
-- A host with an entry in `Q.webserver.hosts` no longer gets the server's welcome page for a root without an
-  index: it answers 403, as Apache does. Found by comparing a Plesk node's sites under Apache and Velocity:
-  two hosts without an index showed the welcome page where Apache sent 403.
-- Tests: fork per request with pools (each request a fresh worker of its pool's user).
-- The application's page cache (`Q.web.appCache`) is told the peer of the connection (`remoteAddr`). Behind
-  a proxy that ends TLS (Plesk's nginx), Exponential stores a page under https, because the worker believes
-  the proxy's `X-Forwarded-Proto`; the server process asked without the peer, so the contract did not believe
-  the header and looked for http. Nothing was ever found, and every request rendered the page (1-2 s
-  instead of a hit in milliseconds).
+## v0.0.4.65 — Velocity as an Apache replacement: no root needed, a host sent back to the previous server when it cannot be served, and Apache's answers byte for byte
 
+2026-11-25
+
+Running Velocity where Apache ran, on a plain AlmaLinux box or behind nginx: the server process need not stay root, a cluster's shared files are served, a host the server cannot serve goes back to the previous web server on its own and reports it, and a reference site answers exactly as Apache answers it (13 of 14 paths byte for byte, the 14th a redirect to the same place, directly and behind nginx). [docs/running-without-root.md](docs/running-without-root.md), [docs/host-fallback.md](docs/host-fallback.md).
+
+### Added
+
+- **`--drop-master`** (`Q.webserver.dropMaster`, `QBIX_RUN_DROP_MASTER=1`): the server process binds its listeners and reads its certificates as root, then becomes the worker user for good (real, effective and saved ids, root not to be had back) before the warm-up, the workers and the scheduled tasks. Refused with pools of other users. The security model, with systemd units for running as the user from the start (`CAP_NET_BIND_SERVICE` for 80/443, no capability at all behind a proxy) and a capability-bounded root master for pools: `docs/running-without-root.md`.
+- **Host fallback** (`Q.webserver.hostFallback`, per host too): a 5xx storm, or a flag file a tool writes, sends one host back to the previous web server (relayed like an upstream) for a hold time; with no previous server, and over HTTP/2, a 503 page that says why. The report (host, cause, node, the error log's last lines) is written once per episode and handed to a report command. `docs/host-fallback.md`.
+- **Static files from a cluster's shared mount** (`Q.web.static.roots`): a static path the document root does not have is looked for in directories laid out like it, as Apache sends such paths to the cluster gateway. Never a script, never outside the listed directory, never remembered as missing.
+- **Content types from a mime.types file** (`Q.web.mimeTypes`, Apache's `TypesConfig`) with an optional `Q.web.defaultCharset` (`AddDefaultCharset`).
+- Per host, a virtual host's own mod_rewrite rules (`Q.webserver.hosts.<host>.serverRewrite`, Apache's server context as in a Plesk `vhost.conf`), matched against the whole URL path before access control and the directory rules.
+- Per host, Apache's `ErrorDocument` (`errorDocuments`): the body of the server's own 401, 403, 404 ... for that host, sent with its file's type. A 401 from access control now carries it too.
+- Per host, `followSymlinks` (`true` or `"ifOwnerMatch"`, Apache's `FollowSymLinks` and `SymLinksIfOwnerMatch`) for files reached through a link outside the root.
+
+### Fixed
+
+- **The warm-up of a root server failed on an NFS export that squashes root** ("Local DFS mount point ... is not writeable"): `is_writable()` and its kin asked `access(2)` for the real user, root, while the warm-up ran as the worker user. They are now asked as the effective user while the two differ.
+- **The application's page cache is asked with the connection's peer**, so pages stored behind a TLS-ending proxy are found.
+- A host with an entry in `Q.webserver.hosts` no longer gets the server's welcome page for a root without an index: it answers 403, as Apache does.
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.65.
+- Tests: `unit-nonroot-and-static-roots.php`, `unit-host-fallback.php`; fork per request with pools (each request a fresh worker of its pool's user).
 ## v0.0.4.64 — many users behind one server: worker pools per user, upstreams by host, and a site's .htaccess access control and URL rules
 
 2026-11-24
