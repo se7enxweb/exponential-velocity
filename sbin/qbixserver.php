@@ -1120,7 +1120,8 @@ if (!Q_Config::get('Q', 'compat', 'skipSourceCodeTransform', false)) {
 	// A document root directly under / -- a container's /app -- has no
 	// project above it: one level up is the whole filesystem, which the walk
 	// tried to prewarm (and, trimmed to '', crashed on before it could).
-	if ($prewarmDir === DIRECTORY_SEPARATOR || !is_dir($prewarmDir)) $prewarmDir = $webDir;
+	// The same holds for a drive root on Windows (C:\ for --root=C:\site).
+	if ($prewarmDir === DIRECTORY_SEPARATOR || dirname($prewarmDir) === $prewarmDir || !is_dir($prewarmDir)) $prewarmDir = $webDir;
 	$prewarmStarted = microtime(true);
 	// Not in a portable pool worker: each would walk the whole tree again.
 	// It transforms what it loads, as it loads it, through the same cache.

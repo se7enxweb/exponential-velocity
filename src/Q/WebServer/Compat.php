@@ -1283,6 +1283,9 @@ class Q_WebServer_Compat
 		// ValueError on '' and the server died at start.
 		if ($dir === '') return 0;
 		$root = realpath($dir) ?: $dir;
+		// A drive root on Windows (C:\, or C: after the trim) is a filesystem
+		// root too: never walk a whole drive.
+		if (preg_match('~^[A-Za-z]:[\\\\/]?$~', $dir) or dirname($root) === $root) return 0;
 
 		// A previous start already did this work. Nothing about a transform
 		// depends on anything but the file's bytes, so an entry whose size and
@@ -1297,7 +1300,10 @@ class Q_WebServer_Compat
 
 		$iterator = new \RecursiveIteratorIterator(
 			new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-			\RecursiveIteratorIterator::SELF_FIRST
+			\RecursiveIteratorIterator::SELF_FIRST,
+			// A directory it may not read (another user's, a service account's
+			// view of the tree) is skipped, not fatal at start.
+			\RecursiveIteratorIterator::CATCH_GET_CHILD
 		);
 		foreach ($iterator as $file) {
 			if ($count >= $maxFiles) break;
