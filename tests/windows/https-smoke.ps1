@@ -45,7 +45,7 @@ function Run-Part([string]$label, [hashtable]$https, [string]$wantThumb) {
         Check "[$label] HTTPS answers 200" ($r.Status -eq 200) "($($r.Line) $($r.Error))"
         Check "[$label] ...over TLS 1.2 or later" ($r.Protocol -match 'Tls1[23]') "($($r.Protocol))"
         if ($wantThumb -ne "") { Check "[$label] ...presenting the store's certificate" ($r.Thumbprint -eq $wantThumb) "(got $($r.Thumbprint), want $wantThumb)" }
-        else { Check "[$label] ...presenting a certificate" ($r.Thumbprint -ne "") "($($r.Subject))" }
+        else { Check "[$label] ...presenting a certificate" ([string]$r.Thumbprint -ne "") "($($r.Subject))" }
         $ok = 0
         for ($i = 0; $i -lt 10; $i++) { if ((Https-Get $sport "/pid.php").Status -eq 200) { $ok++ } }
         Check "[$label] ten more HTTPS requests answered" ($ok -eq 10) "($ok/10)"

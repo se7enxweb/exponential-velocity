@@ -88,8 +88,11 @@ function Https-Get([int]$port, [string]$path, [string]$sni = "localhost") {
         $line = $reader.ReadLine()
         $result.Line = $line
         if ($line -match '^HTTP/\S+\s+(\d{3})') { $result.Status = [int]$Matches[1] }
-        if ($script:seenCert) {
-            $c2 = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($script:seenCert)
+        # What the server presented, as the stream kept it (the callback's
+        # variables are not reliably visible here).
+        $presented = $ssl.RemoteCertificate
+        if ($presented) {
+            $c2 = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($presented)
             $result.Thumbprint = $c2.Thumbprint; $result.Subject = $c2.Subject
         }
     } catch {
