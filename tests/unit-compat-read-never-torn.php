@@ -61,32 +61,44 @@ if ($pid === 0) {
 		$h = fopen($path, 'w');
 		fwrite($h, version($k));
 		fclose($h);
-		usleep(1000);   // a moment between versions, as a real writer leaves
+		// A moment between versions, as a real writer leaves, and now and
+		// then a longer one. On a CI runner's ext4 disk, closing a file that
+		// was truncated and rewritten starts its writeback, and the next
+		// truncate waits for it with the file already at size 0: the file
+		// was whole for only the 1 ms between versions, and one run saw no
+		// whole version in 4 seconds (0 whole, 0 torn). The pause gives
+		// every run whole versions to read; the race stays the same.
+		usleep($k % 20 === 0 ? 40000 : 1000);
 	}
 	exit(0);
 }
 
 $readWhole = new ReflectionMethod('Q_WebServer_CompatFileWrapper', 'readWhole');
 if (PHP_VERSION_ID < 80100) $readWhole->setAccessible(true);   // PHP 8.0 needs it for a private method
-$chunkedTorn = 0; $wholeTorn = 0; $wholeGood = 0; $example = null;
-$until = microtime(true) + 4.0;
-while (microtime(true) < $until) {
+$chunkedTorn = 0; $wholeTorn = 0; $wholeGood = 0; $wholeCut = 0; $example = null;
+// At least 4 seconds of the race; longer, up to 30, until a whole version
+// has been read, so a slow runner still shows that readWhole() returns one.
+$start = microtime(true);
+while (($now = microtime(true)) < $start + 4.0 or ($wholeGood < 1 and $now < $start + 30.0)) {
 	$b = file_get_contents($path);
 	// Empty or cut reads are what an in-place writer leaves; a torn read is
 	// one that is the full length of some version yet no version at all.
 	if ($b !== '' and whole($b) === null and substr($b, -3) === "';\n") ++$chunkedTorn;
 
 	$b = $readWhole->invoke(null, $path);
-	if ($b === false or $b === '') continue;
+	if ($b === false or $b === '') { ++$wholeCut; continue; }
 	if (whole($b) !== null) ++$wholeGood;
 	elseif (substr($b, -3) === "';\n") { ++$wholeTorn; $example = $example ?? substr($b, 0, 20) . '...' . substr($b, -20); }
+	else ++$wholeCut;
 }
+$took = microtime(true) - $start;
 touch($stop);
 pcntl_waitpid($pid, $status);
 @unlink($stop);
 @unlink($path);
 
-printf("  note  chunked reads torn: %d; readWhole: %d whole, %d torn\n", $chunkedTorn, $wholeGood, $wholeTorn);
+printf("  note  %.1f s; chunked reads torn: %d; readWhole: %d whole, %d torn, %d empty or cut\n",
+	$took, $chunkedTorn, $wholeGood, $wholeTorn, $wholeCut);
 if ($chunkedTorn === 0) {
 	printf("  note  no chunked read tore this time, so a pass here is weaker evidence\n");
 }
