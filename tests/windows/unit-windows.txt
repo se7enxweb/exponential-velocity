@@ -1,0 +1,5 @@
+# Unit tests that must pass on Windows (tests/windows/unit-survey.ps1 -Gate).
+# One file name per line; anything after a space is a comment. The survey job
+# runs every unit test and shows which others pass; move them here once proven.
+unit-portable-pool.php     the portable worker pool
+unit-layout-windows.php    %ProgramData% layout, a2ensite without symlinks
