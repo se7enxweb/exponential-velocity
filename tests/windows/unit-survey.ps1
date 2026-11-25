@@ -28,6 +28,8 @@ foreach ($t in $tests) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $p = Start-Process -FilePath $Php -ArgumentList @(Quote $t.FullName) -PassThru -NoNewWindow `
         -RedirectStandardOutput $out -RedirectStandardError "$out.err" -WorkingDirectory $script:repo
+    # Without the handle taken now, ExitCode reads as null once the process has ended.
+    $null = $p.Handle
     $result = "pass"
     if (-not $p.WaitForExit($Timeout * 1000)) {
         & taskkill.exe /PID $p.Id /T /F 2>&1 | Out-Null
