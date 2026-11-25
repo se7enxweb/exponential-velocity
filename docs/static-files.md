@@ -13,6 +13,22 @@ A request for a file with an allowed extension is answered straight from disk. T
 
 Recently served files are held in an in-memory response cache keyed by path and content encoding, and revalidated against the file's modification time at intervals, so a hot file is not re-read from disk on every request.
 
+### Content types as Apache gives them
+
+`Q.web.mimeTypes` names a `mime.types` file (Apache's `TypesConfig`, `/etc/mime.types` on AlmaLinux and Debian) whose types come first, and `Q.web.defaultCharset` adds `; charset=...` to `text/html` and `text/plain` from it (Apache's `AddDefaultCharset`; unset, none is added, as Apache adds none). An extension the file does not list keeps the server's own type. A host's error document (`errorDocuments`, Apache's `ErrorDocument`) goes out with the type of its file.
+
+### A cluster's shared files (`Q.web.static.roots`)
+
+A cluster keeps what every node makes — packed scripts and stylesheets, text images — on a shared mount rather than in each node's document root, and Apache sends what is not on the local disk to the cluster gateway script. `Q.web.static.roots` lists directories laid out like the document root where a static path is looked for when the document root does not have it:
+
+```json
+"Q": { "web": { "static": { "roots": [
+    { "dir": "/mnt/e1/dfs/alpha", "match": "^/var/([^/]+/)?cache/(texttoimage|public)/" }
+] } } }
+```
+
+Only a path `Q.web.static.paths` serves as a file is looked for, never a script (`.php`, `.phar`), and only a file whose real path stays inside the listed directory; `match` limits an entry to its paths. A missing file is not remembered as missing, since another node may write it any moment.
+
 ## Compression
 
 Text types (HTML, CSS, JavaScript, JSON, SVG and similar) under 5MB are compressed with gzip when the request's `Accept-Encoding` allows it, and the response carries `Vary: Accept-Encoding`.

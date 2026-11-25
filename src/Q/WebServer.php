@@ -1178,6 +1178,7 @@ class Q_WebServer
 		$root = rtrim($root, DIRECTORY_SEPARATOR);
 		if ($real === $root) return true;
 		if (strncmp($real, $root . DIRECTORY_SEPARATOR, strlen($root) + 1) === 0) return true;
+		if (self::inStaticRoot($real)) return true;
 
 		// The request's host may follow links out of its root as Apache's
 		// Options FollowSymLinks (true) or SymLinksIfOwnerMatch ("ifOwnerMatch":
@@ -1332,6 +1333,11 @@ class Q_WebServer
 			// in the older protocol.
 			if (self::isBlocked($decoded)) {
 				return self::http2Error(403, 'Forbidden');
+			}
+
+			// Not on this disk: a cluster's shared copy (Q.web.static.roots).
+			if (!file_exists($fsPath) and ($alt = self::alternateStatic($decoded)) !== null) {
+				$fsPath = $alt;
 			}
 
 			// A file Q.web.static.paths does not list goes to the application
@@ -1619,6 +1625,86 @@ class Q_WebServer
 		$relative = '/' . implode('/', $segments);
 		foreach ($patterns as $pattern) {
 			if (@preg_match(self::ensureRegex((string) $pattern), $relative)) return true;
+		}
+		return false;
+	}
+
+	/**
+	 * The directories a static file is looked for in when the document root
+	 * does not have it: Q.web.static.roots, a list of directories laid out
+	 * like the document root, each a string or {"dir": DIR, "match": REGEX}.
+	 *
+	 * A cluster keeps the files every node makes (packed scripts and
+	 * stylesheets, text images) on a shared mount rather than in each node's
+	 * document root; Apache sends what is not on the local disk to the
+	 * cluster gateway script. Here the server reads the shared copy itself.
+	 *
+	 * @method staticRoots
+	 * @static
+	 * @return {array} list of array('dir' => realpath, 'match' => regex|null)
+	 */
+	static function staticRoots()
+	{
+		static $memo = null, $memoFor = null;
+		$raw = class_exists('Q_Config', false) ? Q_Config::get('Q', 'web', 'static', 'roots', array()) : array();
+		$sig = serialize($raw);
+		if ($memo !== null and $memoFor === $sig) return $memo;
+		$out = array();
+		foreach ((array) $raw as $entry) {
+			$dir = is_array($entry) ? ($entry['dir'] ?? null) : $entry;
+			if (!is_string($dir) or $dir === '' or $dir[0] !== '/') continue;
+			$real = @realpath($dir);
+			$out[] = array('dir' => $real !== false ? $real : rtrim($dir, '/'),
+				'match' => is_array($entry) && !empty($entry['match']) ? (string) $entry['match'] : null);
+		}
+		$memoFor = $sig;
+		return $memo = $out;
+	}
+
+	/**
+	 * The file for a static path from Q.web.static.roots (staticRoots()), or
+	 * null. Only a path Q.web.static.paths serves as a file, never a script,
+	 * and only a file that stays inside the directory it was found in.
+	 *
+	 * @method alternateStatic
+	 * @static
+	 * @param {string} $path the decoded request path
+	 * @return {string|null}
+	 */
+	static function alternateStatic($path)
+	{
+		$roots = self::staticRoots();
+		if (!$roots) return null;
+		$path = '/' . ltrim(str_replace('\\', '/', (string) $path), '/');
+		if (strpos($path, "\0") !== false or self::pathEscapesRoot($path)) return null;
+		$ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+		if ($ext === '' or strpos($ext, 'php') === 0 or $ext === 'phar') return null;
+		if (!self::servedAsFile($path)) return null;
+		foreach ($roots as $r) {
+			if ($r['match'] !== null and !@preg_match(self::ensureRegex($r['match']), $path)) continue;
+			$real = @realpath($r['dir'] . $path);
+			if ($real === false or !is_file($real)) continue;
+			if (strncmp($real, $r['dir'] . '/', strlen($r['dir']) + 1) !== 0) continue;
+			return $real;
+		}
+		return null;
+	}
+
+	/**
+	 * Whether $fsPath lies in one of Q.web.static.roots (and is not a script).
+	 * @method inStaticRoot
+	 * @static
+	 */
+	static function inStaticRoot($fsPath)
+	{
+		$roots = self::staticRoots();
+		if (!$roots) return false;
+		$real = @realpath($fsPath);
+		if ($real === false) return false;
+		$ext = strtolower(pathinfo($real, PATHINFO_EXTENSION));
+		if (strpos($ext, 'php') === 0 or $ext === 'phar') return false;
+		foreach ($roots as $r) {
+			if (strncmp($real, $r['dir'] . '/', strlen($r['dir']) + 1) === 0) return true;
 		}
 		return false;
 	}
@@ -7673,6 +7759,13 @@ WORKER;
 					}
 					$accumulated .= DS;
 				}
+			}
+			// A cluster's shared copy (Q.web.static.roots). Not remembered
+			// as missing: another node may write it any moment.
+			if (!$fsPath and self::staticRoots()) {
+				$alt = self::alternateStatic($urlPath);
+				if ($alt === null) return null;
+				return $alt;
 			}
 			if (!$fsPath) {
 				if (count($pathCache) < 10000) $pathCache[$cacheKey] = null;
