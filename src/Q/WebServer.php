@@ -5870,8 +5870,61 @@ WORKER;
 
 	// ── MIME types ────────────────────────────────────────
 
+	/**
+	 * The types of a mime.types file (Apache's TypesConfig, /etc/mime.types:
+	 * "type ext ext ..." per line), extension => type, read once.
+	 * @method typesFile
+	 * @static
+	 * @param {string} $file
+	 * @return {array}
+	 */
+	static function typesFile($file)
+	{
+		static $memo = array();
+		if (isset($memo[$file])) return $memo[$file];
+		$out = array();
+		$text = @file_get_contents($file);
+		if (is_string($text)) {
+			foreach (preg_split('/\r?\n/', $text) as $line) {
+				$line = trim($line);
+				if ($line === '' or $line[0] === '#') continue;
+				$w = preg_split('/\s+/', $line);
+				$type = array_shift($w);
+				foreach ($w as $e) {
+					$e = strtolower($e);
+					if ($e !== '' and !isset($out[$e])) $out[$e] = $type;
+				}
+			}
+		}
+		return $memo[$file] = $out;
+	}
+
+	/**
+	 * The Content-Type of a static file by its extension.
+	 *
+	 * Q.web.mimeTypes names a mime.types file whose types come first (what
+	 * Apache's TypesConfig does: the same file gives the same answers), and
+	 * Q.web.defaultCharset adds "; charset=..." to text/html and text/plain
+	 * from it (Apache's AddDefaultCharset; unset, none is added, as Apache
+	 * adds none by default). An extension the file does not list, or no file
+	 * configured, gets the server's own type, as before.
+	 *
+	 * @method mimeType
+	 * @static
+	 */
 	static function mimeType($ext)
 	{
+		$file = class_exists('Q_Config', false) ? Q_Config::get('Q', 'web', 'mimeTypes', null) : null;
+		if (is_string($file) and $file !== '') {
+			$listed = self::typesFile($file);
+			$e = strtolower((string) $ext);
+			if (isset($listed[$e])) {
+				$t = $listed[$e];
+				$cs = Q_Config::get('Q', 'web', 'defaultCharset', null);
+				if (is_string($cs) and $cs !== '' and ($t === 'text/html' or $t === 'text/plain')) $t .= '; charset=' . $cs;
+				return $t;
+			}
+		}
 		static $types = array(
 			'html'=>'text/html; charset=utf-8', 'htm'=>'text/html; charset=utf-8',
 			'css'=>'text/css; charset=utf-8', 'js'=>'application/javascript; charset=utf-8',
@@ -6885,6 +6938,17 @@ WORKER;
 			500=>'Internal Server Error', 502=>'Bad Gateway',
 			503=>'Service Unavailable', 504=>'Gateway Timeout'
 		);
+		// The host's error document (Apache's ErrorDocument) goes out with the
+		// type of its file, as Apache sends it, not the type of the designed page.
+		if ($status >= 400 and !$fromScript and is_string($body) and $body !== ''
+			and strncmp((string) $type, 'text/html', 9) === 0
+			and class_exists('Q_WebServer_HostRules', false) and is_array(Q_WebServer_HostRules::$current)
+			and !empty(Q_WebServer_HostRules::$current['errorDocuments'][(string) (int) $status])) {
+			$docFile = (string) Q_WebServer_HostRules::$current['errorDocuments'][(string) (int) $status];
+			if (Q_WebServer_HostRules::errorDocument($status) === $body) {
+				$type = self::mimeType(strtolower(pathinfo($docFile, PATHINFO_EXTENSION)));
+			}
+		}
 		self::$lastStatus = $status;
 		self::$lastBody = $body;
 		$body = (string) $body;
