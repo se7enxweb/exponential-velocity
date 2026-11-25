@@ -32,10 +32,17 @@ function Port-Free([int]$port) {
 function Quote([string]$a) { if ($a -match '[\s"]') { return '"' + ($a -replace '"', '\"') + '"' } return $a }
 
 function Wait-Port([int]$port, [int]$seconds, $proc = $null) {
-    for ($i = 0; $i -lt $seconds * 2; $i++) {
-        try { $c = [System.Net.Sockets.TcpClient]::new("127.0.0.1", $port); $c.Close(); return $true }
-        catch { Start-Sleep -Milliseconds 500 }
+    # By the clock, with a short connect timeout: a refused connection to
+    # localhost can take seconds on Windows (SYN retries).
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ((Get-Date) -lt $deadline) {
+        $c = [System.Net.Sockets.TcpClient]::new()
+        try {
+            $t = $c.ConnectAsync("127.0.0.1", $port)
+            if ($t.Wait(1000) -and $c.Connected) { return $true }
+        } catch { } finally { $c.Close() }
         if ($proc -and $proc.HasExited) { return $false }
+        Start-Sleep -Milliseconds 300
     }
     return $false
 }

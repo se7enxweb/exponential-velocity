@@ -469,7 +469,9 @@ function Cmd-CertImport {
         [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
         $pw = [Convert]::ToBase64String($bytes) -replace '[^A-Za-z0-9]', 'x'
         $sec = ConvertTo-SecureString $pw -AsPlainText -Force
-        Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $sec | Out-Null
+        # AES-256: the default TripleDES/RC2 bundle needs OpenSSL 3's legacy provider,
+        # which not every PHP build loads (the 32-bit one does not).
+        Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $sec -CryptoAlgorithmOption AES256_SHA256 | Out-Null
         [IO.File]::WriteAllText($pwFile, $pw)
     }
     $f = Site-File $Site

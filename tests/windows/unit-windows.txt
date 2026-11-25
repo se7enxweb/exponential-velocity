@@ -3,3 +3,41 @@
 # runs every unit test and shows which others pass; move them here once proven.
 unit-portable-pool.php     the portable worker pool
 unit-layout-windows.php    %ProgramData% layout, a2ensite without symlinks
+unit-cache-entry-format.php
+unit-cache-key.php
+unit-cache-memory-layer.php
+unit-cache-negative.php
+unit-cache-revalidation.php
+unit-cache-skip-cookies.php
+unit-cache-validator-index.php
+unit-compat-transform.php
+unit-compat-transform-prefilter.php
+unit-compat-session-decode.php
+unit-compat-read-is-the-file.php
+unit-compat-wrapper-stat.php
+unit-content-length-every-size.php
+unit-envvars-export.php
+unit-frame.php
+unit-head-requests.php
+unit-host-rules.php
+unit-hpack-malformed.php
+unit-http2-route-order.php
+unit-minify-html.php
+unit-multipart-form-fields.php
+unit-output-capture.php
+unit-path-safety.php
+unit-preset-exponential.php
+unit-proxy-proto.php
+unit-remote-addr.php
+unit-request-body-limit.php
+unit-response-headers.php
+unit-self-signed-cert.php
+unit-session-name-and-cookie-params.php
+unit-set-cookie-lines.php
+unit-sni-certificate-selection.php
+unit-svg-sandbox-headers.php
+unit-tls-certificate-lifecycle.php
+unit-uwebserver-parser.php
+unit-worker-death-never-fails.php
+unit-pool-streaming.php
+unit-race-output-isolation.php

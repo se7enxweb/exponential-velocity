@@ -83,6 +83,24 @@ $r = Vcc @("start", "-Name", $name)
 Check "vcc start" ($r.Code -eq 0)
 $up = Wait-Port $port 90
 Check "the site answers on $port" $up
+if (-not $up) {
+    # Everything that says why, then stop: the rest depends on a running site.
+    Write-Host "  --- service state"
+    Get-CimInstance Win32_Service -Filter "Name='$name'" | Format-List Name, State, ProcessId, StartName, ExitCode, PathName | Out-String | Write-Host
+    Write-Host "  --- processes under it"
+    Get-CimInstance Win32_Process | Where-Object { $_.Name -like "php*" -or $_.Name -like "VcService*" } | Format-Table ProcessId, ParentProcessId, Name, CommandLine -AutoSize -Wrap | Out-String -Width 400 | Write-Host
+    Write-Host "  --- event log"
+    Get-WinEvent -FilterHashtable @{ LogName = "Application"; ProviderName = $name } -MaxEvents 10 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $($_.TimeCreated) $($_.LevelDisplayName): $($_.Message)" }
+    Get-WinEvent -FilterHashtable @{ LogName = "System"; ProviderName = "Service Control Manager" } -MaxEvents 8 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    SCM $($_.TimeCreated): $($_.Message)" }
+    Write-Host "  --- server log"
+    Get-Content (Join-Path $tree "logs\$name-server.log") -Tail 80 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    | $_" }
+    Write-Host "  --- ACLs"
+    icacls $tree | Out-String | Write-Host
+    icacls (Join-Path $tree "run") | Out-String | Write-Host
+    Save-Logs $LogDir @((Join-Path $tree "logs\$name-server.log"))
+    Vcc @("uninstall", "-Name", $name) | Out-Null
+    exit (Done "service")
+}
 $srv = Svc-Server $name
 Check "the service host started the PHP server" ($srv -ne $null)
 Check "...which runs as NT SERVICE\$name" ((Owner $srv) -eq "NT SERVICE\$name") "($(Owner $srv))"

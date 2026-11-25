@@ -76,7 +76,7 @@ if ($cert) {
     $pwPlain = "vc-" + [guid]::NewGuid().ToString("N").Substring(0, 12)
     $pwFile = Join-Path $base "store.pass"
     [IO.File]::WriteAllText($pwFile, $pwPlain)
-    Export-PfxCertificate -Cert $cert -FilePath $pfx -Password (ConvertTo-SecureString $pwPlain -AsPlainText -Force) | Out-Null
+    Export-PfxCertificate -Cert $cert -FilePath $pfx -Password (ConvertTo-SecureString $pwPlain -AsPlainText -Force) -CryptoAlgorithmOption AES256_SHA256 | Out-Null
     Check "...and exported as a .pfx" (Test-Path $pfx)
     Run-Part "cert-store" @{ mode = "pkcs12"; bundle = $pfx; passwordFile = $pwFile; selfSigned = @{ dir = (Join-Path $base "ssl-store") } } $cert.Thumbprint
     Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue

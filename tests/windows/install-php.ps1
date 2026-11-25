@@ -36,7 +36,10 @@ Invoke-WebRequest -Uri "https://windows.php.net/downloads/releases/$zip" -OutFil
 Expand-Archive "$env:TEMP\php-ci.zip" -DestinationPath $Dest -Force
 Copy-Item "$Dest\php.ini-development" "$Dest\php.ini" -Force
 $exts = @("sockets", "mbstring", "openssl", "curl", "fileinfo", "sqlite3", "pdo_sqlite", "intl", "xsl", "gd", "zip", "exif")
-$ini = "`nextension_dir=$Dest\ext`n" + (($exts | Where-Object { Test-Path "$Dest\ext\php_$_.dll" } | ForEach-Object { "extension=$_" }) -join "`n") + "`nmemory_limit=512M`n"
+# PHP for Windows ships no CA bundle: without one every HTTPS request PHP
+# makes (Exponential fetching its site packages, ACME) fails verification.
+Invoke-WebRequest -Uri "https://curl.se/ca/cacert.pem" -OutFile "$Dest\extras\cacert.pem"
+$ini = "`ncurl.cainfo=`"$Dest\extras\cacert.pem`"`nopenssl.cafile=`"$Dest\extras\cacert.pem`"`nextension_dir=$Dest\ext`n" + (($exts | Where-Object { Test-Path "$Dest\ext\php_$_.dll" } | ForEach-Object { "extension=$_" }) -join "`n") + "`nmemory_limit=512M`n"
 Add-Content "$Dest\php.ini" $ini
 & "$Dest\php.exe" -v
 & "$Dest\php.exe" -m | Out-String | Write-Host
