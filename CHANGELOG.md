@@ -67,6 +67,23 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.64 — many users behind one server: worker pools per user, upstreams by host, and a site's .htaccess access control and URL rules
+
+2026-11-24
+
+What a shared hosting server needs to run many sites, each as its own system user, the way Apache does with suEXEC and PHP-FPM pools, and to keep what each site's `.htaccess` enforces. Proven on a Plesk node behind its nginx on a throwaway site: PHP as the site user, access control and URL rules answering exactly as Apache did (16 questions: passwords, denies, `[F]`, a redirect, a user-agent block, the front controller), automatic fallback to Apache when the server stops. [docs/multiuser.md](docs/multiuser.md) has the details.
+
+### Added
+
+- **Worker pools with a user of their own** (`Q.webserver.pools`). One server, one port; each host's PHP runs in a pool whose workers (and zygote) switch to that pool's user and group right after the fork, before any application code, with the pool's `ini` settings (`open_basedir`, limits) applied and checked. A host joins a pool by the pool's `hosts` list or by `hosts.<host>.pool`. Static files of a pooled host go out only when that user owns them after links are resolved (owner match, as `SymLinksIfOwnerMatch`). php-cgi is never used for a pooled host. The start is refused for an unknown user or group, root without `allowRoot`, a server not started as root, or a host naming a pool that does not exist. Fork pools only. `tests/multiuser-pools.sh` (as root).
+- **Upstreams by host** (`Q.webserver.upstreams`). A listed host is passed on to another server on a Unix socket or loopback port before anything else looks at it: headers without the hop-by-hop ones, the body, `X-Forwarded-For/Proto/Host`; the answer streams back. 502 when the upstream cannot be reached, 504 without an answer within `upstreamTimeout`, 501 for an Upgrade; never served locally over HTTP/2. `tests/upstreams.sh`.
+- **Write forwarding to a replicated database's primary** (`Q.webserver.hosts.<host>.writeForward`). On a LiteFS read replica, requests that may write go to the primary named in LiteFS's `.primary` file, marked so they are never forwarded twice.
+- **Per-host access control and URL rules** (`Q.webserver.hosts.<host>.access`, `.rewrite`, `.index`), evaluated by the server for every request before the cache, a file or a script: deny by directory, by file name (`<Files>`) and by pattern (`<FilesMatch>`); HTTP Basic auth per directory with bcrypt, Apache MD5 (`$apr1$`), `{SHA}` and `crypt()` user files, a user file that cannot be read failing closed (500, never open); the mod_rewrite subset sites use (`F`, `G`, `R`, `L`, `NC`, `QSA`, file and regex conditions with `OR`, per-directory sets with `RewriteBase`, `%{ENV:REDIRECT_STATUS}`, internal rewrites run again through access) and `DirectoryIndex`. Paths are judged decoded with dot segments resolved. A tool serving Apache sites writes these from their `.htaccess` files; pooled workers never read `.htaccess` themselves. `tests/unit-host-rules.php`, `tests/host-rules.sh`.
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.64.
+
 ## v0.0.4.63 — a portable worker pool: PHP workers without fork, tested on Windows Server 2022 and 2025
 
 2026-11-24
