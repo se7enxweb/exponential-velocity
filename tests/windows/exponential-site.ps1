@@ -77,10 +77,13 @@ if (Test-Path $pwFile) {
     Remove-Item $form -Force
     $location = ""
     if (Test-Path $hdr) { $location = (Select-String -Path $hdr -Pattern '^Location:\s*(.+)$' | Select-Object -First 1 | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() }) }
-    Check "admin login: POST answers a redirect" ($code -eq 302 -or $code -eq 303) "(got $code, Location $location)"
-    $dash = Http-Body "$url/admin/content/dashboard" @("-c", $jar, "-b", $jar)
-    $loggedIn = $dash -match '(?i)logout'
-    Check "...to the dashboard, logged in" $loggedIn "($($dash.Length) bytes)"
+    Check "admin login: POST answers a redirect away from the login page" (($code -eq 302 -or $code -eq 303) -and $location -notmatch 'user/login') "(got $code, Location $location)"
+    # A fresh installation sends an administrator to set up two-factor
+    # authentication first (/admin/user2fa/setup): logged in, with a session.
+    $next = ""
+    if ($location -ne "") { $next = Http-Body $location @("-c", $jar, "-b", $jar) }
+    $loggedIn = ($next -match '(?i)logout|user2fa') -and ($next -notmatch 'name="Password"[^>]*id="passwordtext"')
+    Check "...to a page only a logged-in administrator gets" $loggedIn "($($next.Length) bytes)"
 } else {
     Check "the administrator's password file exists ($pwFile)" $false
 }
@@ -119,8 +122,8 @@ if ($samples.Count -ge 3) {
     Check "the server does not leak handles (round 1 -> 3 grows under 100)" (($h3 - $h1) -lt 100) "($h1 -> $h3)"
 }
 if ($loggedIn) {
-    $dash = Http-Body "$url/admin/content/dashboard" @("-c", $jar, "-b", $jar)
-    Check "the admin session survives the load" ($dash -match '(?i)logout')
+    $again = Http-Body $location @("-c", $jar, "-b", $jar)
+    Check "the admin session survives the load" (($again -match '(?i)logout|user2fa') -and ($again -notmatch 'name="Password"[^>]*id="passwordtext"'))
 }
 
 # ── Stop ─────────────────────────────────────────────────────────────────

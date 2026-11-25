@@ -180,10 +180,13 @@ if ($ExpDir -ne "") {
         $null = Http-Status "$u/admin/user/login" @("-c", $jar, "-b", $jar)
         $form = Join-Path ([IO.Path]::GetTempPath()) "vc-exp-svc.form"
         [IO.File]::WriteAllText($form, "Login=admin&Password=" + [Uri]::EscapeDataString([IO.File]::ReadAllText($pwFile).Trim()) + "&LoginButton=Login&RedirectURI=")
-        $code = Http-Status "$u/admin/user/login" @("-c", $jar, "-b", $jar, "--data-binary", "@$form")
+        $hdr = Join-Path ([IO.Path]::GetTempPath()) "vc-exp-svc.headers"
+        $code = Http-Status "$u/admin/user/login" @("-c", $jar, "-b", $jar, "--data-binary", "@$form", "-D", $hdr)
         Remove-Item $form -Force
-        $dash = Http-Body "$u/admin/content/dashboard" @("-c", $jar, "-b", $jar)
-        Check "[exp] the administrator logs in to the dashboard" (($code -eq 302 -or $code -eq 303) -and $dash -match '(?i)logout') "(POST $code)"
+        $location = (Select-String -Path $hdr -Pattern '^Location:\s*(.+)$' -ErrorAction SilentlyContinue | Select-Object -First 1 | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() })
+        $next = ""; if ($location) { $next = Http-Body $location @("-c", $jar, "-b", $jar) }
+        $in = ($code -eq 302 -or $code -eq 303) -and $location -notmatch 'user/login' -and ($next -match '(?i)logout|user2fa') -and ($next -notmatch 'name="Password"[^>]*id="passwordtext"')
+        Check "[exp] the administrator logs in" $in "(POST $code -> $location)"
     }
     $r = Vcc @("stop", "-Name", $name)
     Check "[exp] vcc stop" ($r.Code -eq 0)
