@@ -67,6 +67,18 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+- Per host, a virtual host's own mod_rewrite rules (`Q.webserver.hosts.<host>.serverRewrite`, Apache's
+  server context as in a Plesk `vhost.conf`), matched against the whole URL path before access control and
+  the directory rules.
+- Per host, Apache's `ErrorDocument` (`errorDocuments`): the body of the server's own 401, 403, 404 ... for
+  that host. A 401 from access control now carries it too.
+- Per host, `followSymlinks` (`true` or `"ifOwnerMatch"`, Apache's `FollowSymLinks` and
+  `SymLinksIfOwnerMatch`) for files reached through a link outside the root.
+- A host with an entry in `Q.webserver.hosts` no longer gets the server's welcome page for a root without an
+  index: it answers 403, as Apache does. Found by comparing a Plesk node's sites under Apache and Velocity:
+  two hosts without an index showed the welcome page where Apache sent 403.
+- Tests: fork per request with pools (each request a fresh worker of its pool's user).
+
 ## v0.0.4.64 — many users behind one server: worker pools per user, upstreams by host, and a site's .htaccess access control and URL rules
 
 2026-11-24

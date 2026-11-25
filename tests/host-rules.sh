@@ -44,6 +44,7 @@ printf 'log\n' > "$R/debug.log"
 printf '<?php echo "should not run";\n' > "$R/var/cache/x.php"
 printf 'docs index\n' > "$R/docs/start.html"
 printf 'plain\n' > "$R/plain.txt"
+mkdir -p "$TMP/empty"; printf 'custom forbidden' > "$TMP/e403.html"
 # User files: bcrypt from PHP, Apache MD5 from openssl.
 printf '<?php echo "alice:", password_hash("s3cret", PASSWORD_BCRYPT), "\\n";\n' > "$TMP/mk.php"
 "$PHP" "$TMP/mk.php" > "$TMP/bcrypt.users"
@@ -70,7 +71,11 @@ cat > "$TMP/conf.json" <<JSON
                    { "test": "%{REQUEST_FILENAME}", "file": "-d", "negate": true } ] }
     ] } ] },
   "locked.test": { "root": "$R", "access": { "auth": [ { "dir": "", "realm": "Site", "userFile": "$TMP/bcrypt.users" } ] } },
-  "broken.test": { "root": "$R", "access": { "auth": [ { "dir": "", "realm": "Site", "userFile": "$TMP/missing.users" } ] } }
+  "broken.test": { "root": "$R", "access": { "auth": [ { "dir": "", "realm": "Site", "userFile": "$TMP/missing.users" } ] } },
+  "empty.test": { "root": "$TMP/empty", "errorDocuments": { "403": "$TMP/e403.html" } },
+  "moved.test": { "root": "$TMP/empty", "serverRewrite": [
+      { "pattern": "^/\\\\.well-known/acme-challenge/", "target": "-", "flags": { "L": true } },
+      { "pattern": "^/(.*)\$", "target": "https://site.example/\$1", "flags": { "R": 301, "L": true } } ] }
 } } } }
 JSON
 
@@ -112,6 +117,10 @@ b=$(body site.test /some/clean/url)
 [ "$b" = "front /some/clean/url" ] && ok "!-f !-d rewrite to the front controller keeps REQUEST_URI" || bad "front controller: $b"
 [ "$(body site.test /plain.txt)" = "plain" ] && ok "an existing file is served as it is" || bad "existing file"
 [ "$(body site.test /docs/)" = "docs index" ] && ok "DirectoryIndex picks start.html" || bad "dirindex: $(body site.test /docs/)"
+c=$(code empty.test /); b=$(body empty.test /)
+[ "$c" = 403 ] && [ "$b" = "custom forbidden" ] && ok "a configured host with no index: 403 with its error document, never the welcome page" || bad "empty root: $c $(printf '%s' "$b" | head -c 80)"
+l=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 5 -H "Host: moved.test" "http://127.0.0.1:$PORT/a/b?c=1")
+[ "$l" = "301 https://site.example/a/b?c=1" ] && ok "server-context rule redirects the whole host" || bad "server rule: $l"
 
 echo; echo "  passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

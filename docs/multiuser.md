@@ -144,7 +144,26 @@ for every request of that host, before the cache, a file or a script
   `R` (code), `L`/`END`, `NC`, `QSA`. An internal rewrite goes through access and the
   rules again, at most ten times.
 - `index`: the directory index names, first existing wins.
+- `serverRewrite`: the virtual host's own mod_rewrite rules (Apache's server context, as in
+  a Plesk `vhost.conf`): the same rule form as a `rewrite` set, but each `pattern` is
+  matched against the whole URL path with its leading slash, and the rules run first,
+  before access control and before any directory's rules. A redirect or `F`/`G` answers at
+  once; an internal rewrite to a path then meets access control and the directory rules.
+- `errorDocuments`: `{ "401": "/var/www/vhosts/example.com/error_docs/unauthorized.html" }`,
+  Apache's `ErrorDocument`: the body the server sends for that status of its own (401 from
+  access control, 403, 404 ...), status and other headers unchanged. A file that is missing
+  leaves the short plain-text answer.
+- `followSymlinks`: `true` (Apache's `FollowSymLinks`) or `"ifOwnerMatch"`
+  (`SymLinksIfOwnerMatch`: every link on the way has the owner of its target) lets a file
+  reached through a link outside the root be sent or run for this host. Unset, such a file
+  is refused (403), as for every host.
+- A host with an entry here never gets the server's welcome page: a root without an index
+  answers 403, as Apache with `Options -Indexes` does.
 - Paths are judged decoded, with dot segments resolved; a path that climbs out of the
   root is 400.
 
-Tests: `tests/unit-host-rules.php` (23 checks), `tests/host-rules.sh` (26, live server).
+Tests: `tests/unit-host-rules.php` (35 checks), `tests/host-rules.sh` (28, live server).
+
+`Q.webserver.forkPerRequest` applies to pools as well: every request then runs in a fresh
+worker of its pool's user, as PHP-FPM runs an application that keeps nothing between
+requests (`tests/multiuser-pools.sh`, 17 checks).

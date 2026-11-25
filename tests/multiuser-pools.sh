@@ -96,6 +96,25 @@ echo "  worker users: $users"
 [[ "$users" == *"$UB"* ]] && ok "pool pb's workers exist as $UB" || bad "no $UB worker: $users"
 pkill -f "qbixserver.php.*--port=$PORT"; sleep 1
 
+# Fork per request with pools: every request in a fresh worker of its pool's user, nothing kept from the one before
+# (what PHP-FPM gives an application that is not written for persistent workers).
+cat > "$TMP/a/count.php" <<'PHP'
+<?php
+$GLOBALS['n'] = ($GLOBALS['n'] ?? 0) + 1;
+if (!function_exists('once_only')) { function once_only() {} echo "defined "; } else { echo "kept "; }
+echo $GLOBALS['n'], ' ', posix_getpwuid(posix_geteuid())['name'], "\n";
+PHP
+cp "$TMP/a/count.php" "$TMP/b/count.php"; chmod a+r "$TMP/a/count.php" "$TMP/b/count.php"
+sed 's/"user": "'"$UA"'",/"user": "'"$UA"'", "forkPerRequest": true,/' "$TMP/pools.json" > "$TMP/pools-fpr.json"
+( setsid "$PHP" "$WS/sbin/qbixserver.php" --root="$TMP/default" --port=$PORT --host=127.0.0.1 --workers=2 \
+    --config="$TMP/pools-fpr.json" >"$TMP/server-fpr.log" 2>&1 </dev/null & )
+for _ in $(seq 1 40); do sleep 0.3; curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/" && break; done
+r1=$(get a.test /count.php); r2=$(get a.test /count.php); r3=$(get a.test /count.php)
+[ "$r3" = "defined 1 $UA" ] && ok "fork per request: a.test starts fresh every time, as $UA" || bad "fork per request a.test: $r1 | $r2 | $r3"
+r=$(get b.test /count.php); r=$(get b.test /count.php)
+[ "$r" = "defined 1 $UB" ] && ok "fork per request: b.test starts fresh every time, as $UB" || bad "fork per request b.test: $r"
+pkill -f "qbixserver.php.*--port=$PORT"; sleep 1
+
 # Refusals at start.
 bad_cfg() {  # bad_cfg <label> <json> <expected message part>
     printf '%s' "$2" > "$TMP/bad.json"

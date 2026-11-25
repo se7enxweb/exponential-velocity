@@ -60,12 +60,25 @@ class Q_WebServer_HostRules
 		$host = strtolower(preg_replace('/:\d+$/', '', (string) ($parsed['headers']['host'] ?? '')));
 		if ($host === '') return null;
 		$hc = Q_Config::get('Q', 'webserver', 'hosts', $host, null);
-		if (!is_array($hc) or (empty($hc['access']) and empty($hc['rewrite']) and empty($hc['index']))) return null;
+		self::$current = is_array($hc) ? $hc : null;
+		if (!is_array($hc) or (empty($hc['access']) and empty($hc['rewrite']) and empty($hc['index'])
+			and empty($hc['serverRewrite']))) return null;
 		$root = isset($hc['root']) ? rtrim((string) $hc['root'], '/') : '';
 		// What the client asked for (the URI), as Apache's per-directory rules see it; the server may have
 		// resolved a directory to its index in 'path' already.
 		$asked = isset($parsed['uri']) ? (string) parse_url('http://x' . $parsed['uri'], PHP_URL_PATH) : (string) ($parsed['path'] ?? '/');
-		$rel = self::relPath($asked !== '' ? $asked : '/');
+		if ($asked === '') $asked = '/';
+		// The virtual host's own rules (Apache: mod_rewrite in server context, from Plesk's vhost.conf or
+		// vhost_ssl.conf) come first, before access control and before any .htaccess, as in Apache.
+		if (!empty($hc['serverRewrite'])) {
+			$r = self::serverRewrite((array) $hc['serverRewrite'], $root, $asked, $parsed);
+			if (is_array($r)) return $r;
+			if (is_string($r)) {
+				$asked = $r;
+				$parsed['path'] = $r;
+			}
+		}
+		$rel = self::relPath($asked);
 		if ($rel === null) return self::answer(400, 'Bad Request');
 
 		$a = self::access($hc, $rel, $parsed);
@@ -145,8 +158,8 @@ class Q_WebServer_HostRules
 		}
 		if ($best === null or !empty($best['off'])) return null;
 		$realm = str_replace('"', '', (string) ($best['realm'] ?? 'Restricted'));
-		$ask = array('status' => 401, 'headers' => array('WWW-Authenticate' => 'Basic realm="' . $realm . '"',
-			'Content-Type' => 'text/plain; charset=utf-8'), 'body' => "401 Unauthorized\n");
+		$ask = self::answer(401, 'Unauthorized');
+		$ask['headers']['WWW-Authenticate'] = 'Basic realm="' . $realm . '"';
 		$h = (string) ($parsed['headers']['authorization'] ?? '');
 		if (stripos($h, 'basic ') !== 0) return $ask;
 		$pair = base64_decode(trim(substr($h, 6)), true);
@@ -347,8 +360,79 @@ class Q_WebServer_HostRules
 		return $s;
 	}
 
+	/** The current request's host entry (set by apply()), for its error documents. */
+	static $current = null;
+
+	/**
+	 * An answer of the server's own: the host's error document for that status when it names one
+	 * (Q.webserver.hosts.<host>.errorDocuments: {"401": "/var/www/vhosts/example.com/error_docs/unauthorized.html"},
+	 * what Apache's ErrorDocument sends), else a short plain text.
+	 */
 	static function answer($status, $text)
 	{
+		$doc = self::errorDocument($status);
+		if ($doc !== null) {
+			return array('status' => $status, 'headers' => array('Content-Type' => 'text/html'), 'body' => $doc);
+		}
 		return array('status' => $status, 'headers' => array('Content-Type' => 'text/plain; charset=utf-8'), 'body' => "$status $text\n");
+	}
+
+	/** The body of the current host's error document for $status, or null. */
+	static function errorDocument($status)
+	{
+		$docs = is_array(self::$current) ? (self::$current['errorDocuments'] ?? null) : null;
+		if (!is_array($docs)) return null;
+		$file = $docs[(string) (int) $status] ?? null;
+		if (!is_string($file) or $file === '' or !is_file($file)) return null;
+		$body = @file_get_contents($file);
+		return $body === false ? null : $body;
+	}
+
+	/**
+	 * The virtual host's rules (Apache's mod_rewrite in server context): each pattern is matched against the whole
+	 * URL path, leading slash included. Returns null (nothing changed), a new path (internal rewrite, which then
+	 * goes through access control and the per-directory rules) or an answer array.
+	 */
+	static function serverRewrite(array $rules, $root, $path, array &$parsed)
+	{
+		$rel = (string) self::relPath($path);
+		foreach ($rules as $rule) {
+			$flags = (array) ($rule['flags'] ?? array());
+			$re = '#' . str_replace('#', '\#', (string) $rule['pattern']) . '#' . (!empty($flags['NC']) ? 'i' : '');
+			$neg = !empty($rule['negate']);
+			$hit = @preg_match($re, $path, $m);
+			if ($hit === false) continue;
+			if ((bool) $hit === $neg) continue;
+			if ($neg) $m = array($path);
+			$cm = array();
+			if (!self::conds((array) ($rule['conds'] ?? array()), $root, $rel, $parsed, $m, $cm)) continue;
+			$target = (string) ($rule['target'] ?? '-');
+			if (!empty($flags['F'])) return self::answer(403, 'Forbidden');
+			if (!empty($flags['G'])) return self::answer(410, 'Gone');
+			if ($target === '-') {
+				if (!empty($flags['L']) or !empty($flags['END'])) return null;
+				continue;
+			}
+			$sub = self::expand($target, $m, $cm, $parsed, $root, $rel);
+			if (($p = strpos($sub, '?')) !== false) {
+				$q = (string) substr($sub, $p + 1);
+				$sub = substr($sub, 0, $p);
+				if (!empty($flags['QSA']) and (string) ($parsed['query'] ?? '') !== '') $q .= ($q === '' ? '' : '&') . $parsed['query'];
+			} else {
+				$q = (string) ($parsed['query'] ?? '');
+			}
+			$abs = (bool) preg_match('#^https?://#i', $sub);
+			if (!empty($flags['R']) or $abs) {
+				$code = !empty($flags['R']) && (int) $flags['R'] >= 300 ? (int) $flags['R'] : 302;
+				$loc = $abs ? $sub : '/' . ltrim($sub, '/');
+				if ($q !== '') $loc .= '?' . $q;
+				return array('status' => $code, 'headers' => array('Location' => $loc, 'Content-Type' => 'text/html; charset=utf-8'),
+					'body' => '<a href="' . htmlspecialchars($loc, ENT_QUOTES) . '">Moved</a>');
+			}
+			$parsed['query'] = $q;
+			// In server context a substitution is a URL path (Apache also takes a file path; vcc refuses those).
+			return '/' . ltrim($sub, '/');
+		}
+		return null;
 	}
 }

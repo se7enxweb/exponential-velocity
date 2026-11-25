@@ -102,6 +102,47 @@ check('existing file', req('/plain.txt'), 'pass /plain.txt');
 check('directory index', req('/docs/'), 'pass /docs/start.html');
 check('subdirectory rules with RewriteBase', req('/sub/x/7'), 'pass /sub/real.txt?k=7');
 
+// The virtual host's own rules (server context, from vhost.conf): whole URL path, before access and .htaccess.
+file_put_contents("$root/e401.html", '<h1>custom 401</h1>');
+$h = Q_Config::get('Q', 'webserver', 'hosts', 'h.test', array());
+$h['serverRewrite'] = array(
+	array('pattern' => '^/\.well-known/acme-challenge/', 'target' => '-', 'flags' => array('L' => true)),
+	array('pattern' => '^/moved/(.*)$', 'target' => 'https://n.example/$1', 'flags' => array('R' => 301, 'L' => true)),
+	array('pattern' => '^/(.*)$', 'target' => 'https://other.example/$1', 'flags' => array('R' => 301, 'L' => true),
+		'conds' => array(array('test' => '%{HTTP_HOST}', 'pattern' => '^nothere\.example$', 'nocase' => true))),
+	array('pattern' => '^/inside/(.*)$', 'target' => '/docs/$1', 'flags' => array('L' => true)),
+);
+$h['errorDocuments'] = array('401' => "$root/e401.html", '403' => "$root/missing.html");
+Q_Config::set('Q', 'webserver', 'hosts', 'h.test', $h);
+check('server rule redirect, before the password', req('/moved/admin/x'), '301 https://n.example/admin/x');
+check('server rule [L] with "-" goes on to the directory rules', req('/.well-known/acme-challenge/t'), 'pass /index.php');
+check('server rule whose condition fails does nothing', req('/plain.txt'), 'pass /plain.txt');
+check('server rule internal rewrite, then the directory index', req('/inside/'), 'pass /docs/start.html');
+check('server rule internal rewrite still meets the password', req('/inside/../admin/'), '401');
+$p = array('method' => 'GET', 'uri' => '/admin/', 'path' => '/admin/', 'query' => '', 'headers' => array('host' => 'h.test'));
+$r = Q_WebServer_HostRules::apply($p);
+check('401 sends the host\'s error document', $r['body'] ?? null, '<h1>custom 401</h1>');
+check('401 keeps its realm with an error document', $r['headers']['WWW-Authenticate'] ?? null, 'Basic realm="A"');
+$p = array('method' => 'GET', 'uri' => '/private/x', 'path' => '/private/x', 'query' => '', 'headers' => array('host' => 'h.test'));
+$r = Q_WebServer_HostRules::apply($p);
+check('a missing error document falls back to the plain text', $r['body'] ?? null, "403 Forbidden\n");
+@unlink("$root/e401.html");
+
+// SymLinksIfOwnerMatch: a link out of the root counts when it has its target's owner.
+if (!class_exists('Q_WebServer', false)) require_once __DIR__ . '/../src/Q/WebServer.php';
+$outside = "$root.outside";
+@mkdir($outside, 0755);
+file_put_contents("$outside/x.php", '<?php');
+@symlink("$outside/x.php", "$root/linked.php");
+check('a link with its target\'s owner is followed', Q_WebServer::linksOwnerMatch($root, "$root/linked.php"), true);
+check('a path that climbs is not', Q_WebServer::linksOwnerMatch($root, "$root/../x"), false);
+if (function_exists('posix_getuid') and posix_getuid() === 0 and @lchown("$root/linked.php", 65534)) {
+	check('a link owned by another user is not followed', Q_WebServer::linksOwnerMatch($root, "$root/linked.php"), false);
+}
+@unlink("$root/linked.php");
+@unlink("$outside/x.php");
+@rmdir($outside);
+
 array_map('unlink', array_filter((array) glob("$root/*/*/*") + (array) glob("$root/*/*"), 'is_file'));
 @unlink($users);
 echo ($fail ? 'FAIL' : 'PASS') . ": unit-host-rules, $pass passed, $fail failed\n";

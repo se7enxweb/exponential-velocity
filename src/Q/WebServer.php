@@ -1177,8 +1177,53 @@ class Q_WebServer
 
 		$root = rtrim($root, DIRECTORY_SEPARATOR);
 		if ($real === $root) return true;
-		return strncmp($real, $root . DIRECTORY_SEPARATOR,
-			strlen($root) + 1) === 0;
+		if (strncmp($real, $root . DIRECTORY_SEPARATOR, strlen($root) + 1) === 0) return true;
+
+		// The request's host may follow links out of its root as Apache's
+		// Options FollowSymLinks (true) or SymLinksIfOwnerMatch ("ifOwnerMatch":
+		// every link on the way has the owner of what it points to) do.
+		$hc = class_exists('Q_WebServer_HostRules', false) ? Q_WebServer_HostRules::$current : null;
+		$mode = is_array($hc) ? ($hc['followSymlinks'] ?? false) : false;
+		if ($mode === true) return true;
+		if ($mode === 'ifOwnerMatch') return self::linksOwnerMatch(self::$rootDir, $fsPath);
+		return false;
+	}
+
+	/**
+	 * Whether every symbolic link on the way from $root to $fsPath (the path
+	 * as asked, below the root) is owned by the owner of its target, as
+	 * Apache's SymLinksIfOwnerMatch requires.
+	 * @method linksOwnerMatch
+	 * @static
+	 */
+	static function linksOwnerMatch($root, $fsPath)
+	{
+		$root = rtrim(str_replace('\\', '/', (string) $root), '/');
+		$path = str_replace('\\', '/', (string) $fsPath);
+		if (strncmp($path, $root . '/', strlen($root) + 1) !== 0) return false;
+		$cur = $root;
+		foreach (explode('/', substr($path, strlen($root) + 1)) as $seg) {
+			if ($seg === '' or $seg === '.') continue;
+			if ($seg === '..') return false;
+			$cur .= '/' . $seg;
+			if (!is_link($cur)) continue;
+			$link = @lstat($cur);
+			$target = @stat($cur);
+			if ($link === false or $target === false or $link['uid'] !== $target['uid']) return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Whether the request's host has an entry of its own (Q.webserver.hosts):
+	 * such a host never gets the server's welcome page for a root without an
+	 * index, but what Apache sends there, 403.
+	 * @method configuredHost
+	 * @static
+	 */
+	static function configuredHost()
+	{
+		return class_exists('Q_WebServer_HostRules', false) and is_array(Q_WebServer_HostRules::$current);
 	}
 
 	/**
@@ -3420,7 +3465,7 @@ class Q_WebServer
 				// explicitly made listable. The welcome page used to return
 				// unconditionally, which left the listing below unreachable
 				// for '/' however it was configured.
-				if ($path === '/' and !self::isIndexed($path)) {
+				if ($path === '/' and !self::isIndexed($path) and !self::configuredHost()) {
 					$welcome = __DIR__ . DS . 'welcome.php';
 					if (file_exists($welcome)) {
 						ob_start();
@@ -4216,7 +4261,7 @@ class Q_WebServer
 				// explicitly made listable. The welcome page used to return
 				// unconditionally, which left the listing below unreachable
 				// for '/' however it was configured.
-				if ($path === '/' and !self::isIndexed($path)) {
+				if ($path === '/' and !self::isIndexed($path) and !self::configuredHost()) {
 					$welcome = __DIR__ . DS . 'welcome.php';
 					if (file_exists($welcome)) {
 						ob_start();
@@ -7268,8 +7313,13 @@ WORKER;
 	 */
 	static function renderErrorPage($code, $path = '', $message = null)
 	{
-		// The domain's own error document, when it has one for this status
-		// (the caller keeps the status; this only chooses the body).
+		// The host's own error document (Q.webserver.hosts.<host>.errorDocuments,
+		// Apache's ErrorDocument), then the domain's, when either has one for
+		// this status (the caller keeps the status; this only chooses the body).
+		if (class_exists('Q_WebServer_HostRules', false)
+			and ($doc = Q_WebServer_HostRules::errorDocument($code)) !== null) {
+			return $doc;
+		}
 		if (class_exists('Q_WebServer_Domains', false)
 			and ($doc = Q_WebServer_Domains::errorDocument($code)) !== null) {
 			return $doc;
