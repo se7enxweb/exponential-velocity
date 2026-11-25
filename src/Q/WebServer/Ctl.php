@@ -74,6 +74,7 @@ class Q_WebServer_Ctl
 		if (!empty($opts['pid']) and is_string($opts['pid'])) return $opts['pid'];
 		$conf = Q_Config::get('Q', 'webserver', 'pidFile', null);
 		if (is_string($conf) and $conf !== '') return $conf;
+		if (!class_exists('Q_WebServer_Layout', false)) require_once __DIR__ . '/Layout.php';
 		// /run/qbix, or %ProgramData%\qbix\run on Windows (Q_WebServer_Layout::platformDir()).
 		$run = Q_WebServer_Layout::platformDir('/run/qbix');
 		return (is_dir($run) and is_writable($run)) ? $run . '/qbixserver.pid'
@@ -325,6 +326,7 @@ class Q_WebServer_Ctl
 		$p = $map[$pair];
 		$available = "$dir/$p-available/$name.conf";
 		$link = "$dir/$p-enabled/$name.conf";
+		if (!class_exists('Q_WebServer_Layout', false)) require_once __DIR__ . '/Layout.php';
 		$windows = Q_WebServer_Layout::onWindows();
 		$sameContent = function () use ($available, $link) {
 			return is_file($available) and is_file($link)
