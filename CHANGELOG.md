@@ -67,6 +67,19 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.66 — --drop-master keeps HTTPS working
+
+2026-11-25
+
+### Fixed
+
+- **With `--drop-master` every HTTPS handshake failed** (v0.0.4.65): the listener's private copies of the certificate and key were written as root, the key mode 0600, and PHP reads them again for every handshake, so once the server had become its user no handshake could read the key. The copies (the default pair and every SNI pair) are now handed to the user with the log directory and the pid file before root is given up. Found switching a production installation behind nginx; HTTP was unaffected.
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.66.
+- Tests: `unit-nonroot-and-static-roots.php` checks that the certificate copies are handed over (36 checks).
+
 ## v0.0.4.65 — Velocity as an Apache replacement: no root needed, a host sent back to the previous server when it cannot be served, and Apache's answers byte for byte
 
 2026-11-25
