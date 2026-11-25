@@ -135,11 +135,19 @@ if (!function_exists('posix_geteuid') or posix_geteuid() !== 0 or !$nobody or !f
 	file_put_contents("$base/run/vc/server.pid", '1');
 	@mkdir("$base/out", 0777); chmod("$base/out", 0777);
 	$tmp = "$base/out/result";
+	// The listener's certificate copies (0600, root's) go to the user too.
+	if (!class_exists('Q_WebServer_Certs', false)) require_once __DIR__ . '/../src/Q/WebServer/Certs.php';
+	file_put_contents("$base/run/vc/active-8443-x-1.pem", 'cert'); chmod("$base/run/vc/active-8443-x-1.pem", 0644);
+	file_put_contents("$base/run/vc/active-8443-x-1.key", 'key'); chmod("$base/run/vc/active-8443-x-1.key", 0600);
+	Q_WebServer_Certs::$activeCert = "$base/run/vc/active-8443-x-1.pem";
+	Q_WebServer_Certs::$activeKey = "$base/run/vc/active-8443-x-1.key";
+	check('listenerFiles(): the default pair', Q_WebServer_Certs::listenerFiles(),
+		array("$base/run/vc/active-8443-x-1.pem", "$base/run/vc/active-8443-x-1.key"));
 	$R::setCommandLine(array('user' => 'nobody', 'drop-master' => true));
 	Q_Config::set('Q', 'webserver', 'startOptions', array('root' => $root));
 	$pid = pcntl_fork();
 	if ($pid === 0) {
-		$err = $R::dropMaster(array("$base/run/vc/server.pid", '/run', '/tmp'));
+		$err = $R::dropMaster(array_merge(array("$base/run/vc/server.pid", '/run', '/tmp'), Q_WebServer_Certs::listenerFiles()));
 		@file_put_contents($tmp, json_encode(array($err, posix_getuid(), posix_geteuid(), @posix_setuid(0))));
 		posix_kill(getmypid(), SIGKILL);
 	}
@@ -150,6 +158,7 @@ if (!function_exists('posix_geteuid') or posix_geteuid() !== 0 or !$nobody or !f
 	check('dropMaster(): effective uid is the worker user', $r[2] ?? null, (int) $nobody['uid']);
 	check('dropMaster(): root cannot be had back', $r[3] ?? null, false);
 	check('dropMaster(): the pid file is handed over', fileowner("$base/run/vc/server.pid"), (int) $nobody['uid']);
+	check('dropMaster(): the certificate key copy is handed over', fileowner("$base/run/vc/active-8443-x-1.key"), (int) $nobody['uid']);
 	check('dropMaster(): /run is never touched', fileowner('/run'), 0);
 	check('dropMaster(): /tmp is never touched', fileowner('/tmp'), 0);
 

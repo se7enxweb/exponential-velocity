@@ -405,6 +405,30 @@ class Q_WebServer_Certs
 		Q_WebServer_Certificate_Events::emit('error', array('reason' => 'could not write the active certificate copy'));
 		return false;
 	}
+	/**
+	 * The certificate files this process's listener reads: its private copies
+	 * of the default pair and of every SNI pair. A server that gives up root
+	 * (--drop-master) hands these to its user first: PHP reads them again for
+	 * every handshake, and a key only root may read failed every handshake
+	 * once the server was no longer root.
+	 * @method listenerFiles
+	 * @static
+	 * @return {array} paths
+	 */
+	static function listenerFiles()
+	{
+		$files = array();
+		foreach (array(self::$activeCert, self::$activeKey) as $f) {
+			if (is_string($f) and $f !== '') $files[] = $f;
+		}
+		foreach ((array) self::$domainCerts as $d) {
+			foreach (array('activeCert', 'activeKey') as $k) {
+				if (!empty($d[$k]) and is_string($d[$k])) $files[] = $d[$k];
+			}
+		}
+		return array_values(array_unique($files));
+	}
+
 	/** This process's id; getmypid() can be the parent's after a fork. */
 	static function pid()
 	{

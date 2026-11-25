@@ -625,6 +625,10 @@ class Q_WebServer
 			$logDir = Q_Config::get('Q', 'webserver', 'log', 'dir', null);
 			if (is_string($logDir) and $logDir !== '') $ownDirs[] = $logDir;
 			if (!empty(self::$controlPidFile) and is_string(self::$controlPidFile)) $ownDirs[] = self::$controlPidFile;
+			// The listener's certificate copies: read again for every handshake.
+			if (class_exists('Q_WebServer_Certs', false)) {
+				foreach (Q_WebServer_Certs::listenerFiles() as $f) $ownDirs[] = $f;
+			}
 			$err = Q_WebServer_RunAs::dropMaster($ownDirs);
 			if ($err !== null) {
 				fwrite(STDERR, "Error: --drop-master: $err; not starting\n");
