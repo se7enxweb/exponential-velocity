@@ -1243,6 +1243,18 @@ class Q_WebServer
 			}
 			self::applyDomainRoot($request);
 
+			// The host's access control and URL rules, as on HTTP/1.1.
+			$hr = $request;
+			$hrPath = (string) ($request['path'] ?? '/');
+			$hr['query'] = ($qp = strpos($hrPath, '?')) !== false ? (string) substr($hrPath, $qp + 1) : '';
+			$hr['path'] = $qp !== false ? substr($hrPath, 0, $qp) : $hrPath;
+			$ruled = Q_WebServer_HostRules::apply($hr);
+			if ($ruled !== null) {
+				return array('status' => $ruled['status'], 'headers' => array_change_key_case($ruled['headers'], CASE_LOWER),
+					'body' => $ruled['body']);
+			}
+			$request['path'] = $hr['path'] . ($hr['query'] !== '' ? '?' . $hr['query'] : '');
+
 			$path = $request['path'];
 			$query = '';
 			if (($q = strpos($path, '?')) !== false) {
@@ -3714,6 +3726,18 @@ class Q_WebServer
 			Q_WebServer_Upstream::relay($client, $parsed, $upstream, $extra);
 			return true;
 		}
+
+		// The host's access control and URL rules (Q_WebServer_HostRules),
+		// before the cache: a cached page is never a way past a password.
+		$ruled = Q_WebServer_HostRules::apply($parsed);
+		if ($ruled !== null) {
+			$rh = $ruled['headers'];
+			$rt = $rh['Content-Type'] ?? 'text/plain; charset=utf-8';
+			unset($rh['Content-Type']);
+			self::sendResponse($client, $ruled['status'], $ruled['body'], $rt, $rh, $method === 'HEAD');
+			return false;
+		}
+		$path = $parsed['path'];
 
 		// A suspended or disabled domain, or one of its redirects, is answered
 		// here, before the reverse cache could serve a page stored earlier.

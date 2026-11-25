@@ -119,3 +119,32 @@ the primary), a host can send every request that may write to the primary's serv
 - A forwarded request carries `X-Qbix-Forwarded-Write: 1` and is never forwarded
   again, so two nodes that briefly both believe the other is primary cannot loop.
 - HTTP/1.1 only, as upstreams.
+
+---
+
+### Access control and URL rules per host (what a site's .htaccess does)
+
+The server process evaluates `Q.webserver.hosts.<host>.access`, `.rewrite` and `.index`
+for every request of that host, before the cache, a file or a script
+(`Q_WebServer_HostRules`). A tool that serves Apache sites writes them from the sites'
+`.htaccess` files; pooled workers never read `.htaccess` themselves.
+
+- `access.deny`: `{ "dir": "attachments/" }`, `{ "dir": "", "files": ".user.ini" }`,
+  `{ "dir": "", "filesMatch": "\\.log$" }`: 403 for the directory and below, for one file
+  name in it and below (Apache's `<Files>`), or names matching a regex (`<FilesMatch>`).
+- `access.auth`: `{ "dir": "admin/", "realm": "Staff", "userFile": "/path/.htpasswd" }`:
+  HTTP Basic, the deepest block covering the path decides. bcrypt, Apache MD5 (`$apr1$`),
+  `{SHA}` and `crypt()` hashes; a user file that cannot be read gives 500, never access.
+- `rewrite`: sets of mod_rewrite rules per directory (the deepest set covering the path
+  runs, as Apache runs the deepest `.htaccess` with rules): `pattern` (relative to the
+  directory), optional `negate`, `conds` (`%{REQUEST_FILENAME}` with `-f`/`-d`/`-s`/`-e`,
+  or a regex on `%{HTTP_HOST}`, `%{HTTP_USER_AGENT}`, `%{REQUEST_URI}`, `%{QUERY_STRING}`,
+  `%{HTTPS}`, `%{REQUEST_METHOD}`, `%{HTTP_REFERER}`, `%{HTTP_COOKIE}`, `%{HTTP:Name}`, with
+  `nocase` and `or`), `target` (`-`, a path, or a URL; `$n` and `%n`), `flags` `F`, `G`,
+  `R` (code), `L`/`END`, `NC`, `QSA`. An internal rewrite goes through access and the
+  rules again, at most ten times.
+- `index`: the directory index names, first existing wins.
+- Paths are judged decoded, with dot segments resolved; a path that climbs out of the
+  root is 400.
+
+Tests: `tests/unit-host-rules.php` (23 checks), `tests/host-rules.sh` (26, live server).
