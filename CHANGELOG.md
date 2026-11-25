@@ -78,6 +78,11 @@ edited down to what a reader actually needs.
   index: it answers 403, as Apache does. Found by comparing a Plesk node's sites under Apache and Velocity:
   two hosts without an index showed the welcome page where Apache sent 403.
 - Tests: fork per request with pools (each request a fresh worker of its pool's user).
+- The application's page cache (`Q.web.appCache`) is told the peer of the connection (`remoteAddr`). Behind
+  a proxy that ends TLS (Plesk's nginx), Exponential stores a page under https, because the worker believes
+  the proxy's `X-Forwarded-Proto`; the server process asked without the peer, so the contract did not believe
+  the header and looked for http. Nothing was ever found, and every request rendered the page (1-2 s
+  instead of a hit in milliseconds).
 
 ## v0.0.4.64 — many users behind one server: worker pools per user, upstreams by host, and a site's .htaccess access control and URL rules
 

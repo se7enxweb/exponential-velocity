@@ -78,7 +78,7 @@ $A = 'Q_WebServer_AppCache';
 $get = array('method' => 'GET', 'path' => '/a', 'query' => 'x=1', 'headers' => array(
 	'host' => 'example.org', 'cookie' => 'eZSESSID=abc; other=1', 'accept-encoding' => 'gzip',
 	'if-none-match' => '"e"', 'x-forwarded-proto' => 'https', 'x-forwarded-host' => 'www.example.org'),
-	'_https' => true);
+	'_https' => true, '_directIp' => '127.0.0.1');
 
 $A::init();
 check('not configured: not asked', $A::get($get), null);
@@ -105,6 +105,7 @@ check('given: if-none-match', TestAppCache::$last['ifNoneMatch'], '"e"');
 check('given: the forwarded scheme', TestAppCache::$last['headers']['x-forwarded-proto'] ?? null, 'https');
 check('given: the forwarded host', TestAppCache::$last['headers']['x-forwarded-host'] ?? null, 'www.example.org');
 check('given: the listener port', TestAppCache::$last['port'] ?? null, 8787);
+check('given: the peer address (a proxy in front), for the forwarded headers to be believed', TestAppCache::$last['remoteAddr'] ?? null, '127.0.0.1');
 
 $made = TestAppCache::$made;
 $A::get($get);

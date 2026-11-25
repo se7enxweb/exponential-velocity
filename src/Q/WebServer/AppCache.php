@@ -292,6 +292,11 @@ class Q_WebServer_AppCache
 				// page was stored under one key and looked for under another.
 				'headers' => $headers,
 				'port' => class_exists('Q_WebServer', false) ? (int) Q_WebServer::$port : 0,
+				// The peer of the connection (a proxy in front, or the visitor): the application believes
+				// X-Forwarded-Proto and X-Forwarded-For only from a proxy it trusts, as it does in the worker
+				// (REMOTE_ADDR). Without it a page rendered behind a TLS-ending proxy (stored as https) was
+				// looked for as http and never found: every request rendered.
+				'remoteAddr' => (string) ($parsed['_directIp'] ?? ''),
 			));
 		} catch (Throwable $e) {
 			self::$offUntil = microtime(true) + 10;
