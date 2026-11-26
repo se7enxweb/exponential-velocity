@@ -16,6 +16,9 @@ name: windows
 #                packaging/windows/vcc.ps1 under a virtual account, with HTTPS
 #                from the certificate store, recovery, and the same site.
 #   unit-survey  every unit test on Windows, for the record (not a gate).
+#   binaries     Windows Server 2022 and 2025: the committed sbin\qbixserver.phar
+#                (PHP 8.5) and the latest release's static
+#                qbixserver-windows-x64.exe, through the same smoke test.
 #
 # Logs are uploaded as artifacts either way.
 
@@ -78,6 +81,68 @@ jobs:
         if: always()
         with:
           name: windows-${{ matrix.os }}-php${{ matrix.php }}-x64
+          path: smoke-logs
+          retention-days: 14
+
+  # The binaries a Windows user actually runs, not the source tree: the
+  # committed sbin\qbixserver.phar (what a Composer install starts) under
+  # setup-php, and the static qbixserver-windows-x64.exe of the latest
+  # release on its own, without any PHP installed. Same smoke test: start,
+  # pages from portable workers, a killed worker replaced, --stop, port free.
+  binaries:
+    name: ${{ matrix.os }} binaries (phar on PHP ${{ matrix.php }}, static exe)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+        php: ['8.5']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: sockets, mbstring, openssl, curl, fileinfo, sqlite3, pdo_sqlite
+          ini-values: memory_limit=512M
+          coverage: none
+
+      - name: Smoke test (sbin\qbixserver.phar)
+        shell: powershell
+        env:
+          QBIX_POOL_TRACE: '1'
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php (Get-Command php).Source -Server sbin\qbixserver.phar -LogDir "$pwd\smoke-logs\phar"
+          exit $LASTEXITCODE
+
+      - name: Download the latest release's static Windows binary
+        if: ${{ !cancelled() }}
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\vcbin | Out-Null
+          gh release download --repo $env:GITHUB_REPOSITORY --pattern qbixserver-windows-x64.exe --dir C:\vcbin --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release view --repo $env:GITHUB_REPOSITORY --json tagName --jq .tagName
+          Get-Item C:\vcbin\qbixserver-windows-x64.exe | Select-Object Name, Length
+          & C:\vcbin\qbixserver-windows-x64.exe --version
+
+      - name: Smoke test (static qbixserver-windows-x64.exe, on its own)
+        if: ${{ !cancelled() }}
+        shell: powershell
+        env:
+          QBIX_POOL_TRACE: '1'
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Server C:\vcbin\qbixserver-windows-x64.exe -LogDir "$pwd\smoke-logs\exe"
+          exit $LASTEXITCODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-${{ matrix.os }}-binaries
           path: smoke-logs
           retention-days: 14
 

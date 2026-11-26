@@ -12,10 +12,15 @@
 #
 #   powershell -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php C:\php\php.exe
 #
+# -Server runs something else than the source tree: the committed phar
+# (-Server sbin\qbixserver.phar, run by -Php) or a static binary
+# (-Server C:\vc\qbixserver-windows-x64.exe, run on its own, -Php unused).
+#
 # Prints PASS/FAIL per check, exits 1 if any failed.
 
 param(
     [string]$Php = "php.exe",
+    [string]$Server = "",
     [int]$Workers = 2,
     [int]$StartSeconds = 60,
     [string]$LogDir = ""
@@ -62,15 +67,20 @@ Set-Content -Path (Join-Path $base "conf.json") -Value '{"Q":{"web":{"cache":{"e
 $pidFile = Join-Path $base "vc.pid"
 $log = Join-Path $base "server.log"
 $port = FreePort
+if ($Server -eq "") { $Server = "$repo\sbin\qbixserver.php" }
+$Server = (Resolve-Path $Server).Path
+# A static binary is its own interpreter; a script or a phar is run by -Php.
+if ($Server -like "*.exe") { $exe = $Server; $pre = @() } else { $exe = $Php; $pre = @($Server) }
 
-Write-Host "PHP:  $(& $Php -v | Select-Object -First 1)"
+if ($exe -eq $Php) { Write-Host "PHP:  $(& $Php -v | Select-Object -First 1)" }
+Write-Host "Run:  $exe $($pre -join ' ')"
 Write-Host "Tree: $repo"
 Write-Host "Port: $port   Temp: $base"
 
 function Quote([string]$a) { if ($a -match '[\s"]') { return '"' + ($a -replace '"', '\"') + '"' } return $a }
-$srvArgs = @("$repo\sbin\qbixserver.php", "--root=$web", "--port=$port", "--workers=$Workers",
+$srvArgs = $pre + @("--root=$web", "--port=$port", "--workers=$Workers",
           "--config=$base\conf.json", "--pid=$pidFile", "--pool-mode=portable")
-$server = Start-Process -FilePath $Php -ArgumentList ($srvArgs | ForEach-Object { Quote $_ }) -PassThru -NoNewWindow `
+$server = Start-Process -FilePath $exe -ArgumentList ($srvArgs | ForEach-Object { Quote $_ }) -PassThru -NoNewWindow `
     -RedirectStandardOutput $log -RedirectStandardError "$log.err"
 
 $up = $false
@@ -98,7 +108,7 @@ Check "workers reused (at most $Workers pids)" ($pids.Count -le $Workers) "($($p
 
 $victim = [int]($pids.Keys | Where-Object { $_ -gt 0 } | Select-Object -First 1)
 $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $victim" -ErrorAction SilentlyContinue
-Check "a worker is a php process running qbixserver.php" ($proc -and $proc.CommandLine -like "*qbixserver.php*")
+Check "a worker is a process running the server ($(Split-Path -Leaf $Server))" ($proc -and $proc.CommandLine -like "*$(Split-Path -Leaf $Server)*")
 Check "...whose parent is the server" ($proc -and $proc.ParentProcessId -eq $server.Id)
 
 Stop-Process -Id $victim -Force
@@ -119,7 +129,7 @@ $r = Get-Page $port "/pid.php"
 Check "...and the pool goes on" ($r.Status -eq 200)
 
 $workerPids = @($children | ForEach-Object { $_.ProcessId })
-$stopProc = Start-Process -FilePath $Php -ArgumentList (@("$repo\sbin\qbixserver.php", "--stop", "--pid=$pidFile") | ForEach-Object { Quote $_ }) `
+$stopProc = Start-Process -FilePath $exe -ArgumentList (($pre + @("--stop", "--pid=$pidFile")) | ForEach-Object { Quote $_ }) `
     -PassThru -NoNewWindow -Wait -RedirectStandardOutput "$base\stop.out" -RedirectStandardError "$base\stop.err"
 Write-Host "  --stop exit $($stopProc.ExitCode): $((Get-Content "$base\stop.out", "$base\stop.err" -ErrorAction SilentlyContinue) -join ' ')"
 $gone = $server.WaitForExit(20000)
