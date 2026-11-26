@@ -67,6 +67,19 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.68 — a host's `[R=404]` rule answers 404
+
+2026-11-25
+
+### Fixed
+
+- **A host rule `RewriteRule <pattern> - [R=404,L]` let the request through** (v0.0.4.64 to v0.0.4.67): an `R` flag with a 4xx or 5xx status was read as "no redirect", so the request went on and a script the rule was meant to hide ran (Exponential's document-root protection hides `bin/` and every PHP file below the root this way). Such a rule now answers its status, as Apache does: the substitution is dropped. Found switching an Exponential site behind nginx before any visitor reached it.
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.68.
+- Tests: `unit-host-rules.php` (39 checks).
+
 ## v0.0.4.67 — a host's URL rules no longer make its pages share one cache entry
 
 2026-11-25
