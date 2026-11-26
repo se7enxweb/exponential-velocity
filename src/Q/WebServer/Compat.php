@@ -366,6 +366,33 @@ class Q_WebServer_Compat
 	/** @var resource|null Session file handle (held for locking) */
 	private static $sessionFp = null;
 
+	/**
+	 * The current session's place in a Redis/Valkey store when session.save_handler
+	 * is redis: [config of parseRedisSavePath(), key, ttl]; null for files.
+	 * @var array|null
+	 */
+	private static $sessionRedis = null;
+
+	/** @var \Redis|null This worker's connection to the session store (opened on first use) */
+	private static $redisConn = null;
+
+	/** @var int The process that opened $redisConn: a forked child never uses its parent's socket */
+	private static $redisConnPid = 0;
+
+	/** @var string host|port|database|auth of $redisConn */
+	private static $redisConnKey = '';
+
+	/**
+	 * Connections inherited from a parent process. Kept, never closed or
+	 * destroyed here: their socket is the parent's too, and a client that
+	 * talks on it (or a destructor that says QUIT) breaks the parent's.
+	 * @var array
+	 */
+	private static $redisInherited = array();
+
+	/** @var int When a store failure was last written to the error log (one line a minute) */
+	private static $redisLoggedAt = 0;
+
 	/** @var array Request headers (set by the server before dispatch) */
 	private static $requestHeaders = array();
 
@@ -564,8 +591,12 @@ class Q_WebServer_Compat
 				@fclose(self::$sessionFp);
 				self::$sessionFp = null;
 			}
+			self::$sessionRedis = null;
 			self::$sessionActive = false;
 		}
+		// The warm-up runs in the parent: a session store connection it made
+		// must not reach the workers it forks.
+		self::redisClose();
 
 		self::resetRequestState();
 		return $done;
@@ -668,6 +699,7 @@ class Q_WebServer_Compat
 		self::$sessionFile = '';
 		self::$sessionStore = null;
 		self::$sessionFp = null;
+		self::$sessionRedis = null;
 		self::$sessionId = '';
 		self::$sessionName = null;
 		self::$sessionCookieParams = null;
@@ -1741,9 +1773,17 @@ class Q_WebServer_Compat
 	{
 		if (self::$sessionActive) return true;
 
-		self::$sessionStore = self::parseSavePath(
-			$options['save_path'] ?? self::_ini_get('session.save_path')
-		);
+		$rawPath = $options['save_path'] ?? self::_ini_get('session.save_path');
+		$handler = strtolower((string) ($options['save_handler'] ?? self::_ini_get('session.save_handler')));
+		self::$sessionRedis = null;
+		if ($handler === 'redis') {
+			if (class_exists('Redis', false)) {
+				self::$sessionRedis = array(self::parseRedisSavePath($rawPath), '', 0);
+			} else {
+				self::redisLog('session.save_handler is redis, but the redis extension is not loaded; sessions go to files');
+			}
+		}
+		self::$sessionStore = self::parseSavePath(self::$sessionRedis ? '' : $rawPath);
 		$savePath = self::$sessionStore[0];
 		$name = $options['name']
 			?? self::_session_name()
@@ -1770,6 +1810,25 @@ class Q_WebServer_Compat
 		// so every session_start() printed "Session ID cannot be changed
 		// after headers have already been sent" into the response body.
 		self::$sessionId = $id;
+
+		if (self::$sessionRedis) {
+			// The same keys as phpredis's own session handler (PHP-FPM on the
+			// other nodes of a site): prefix + id, the session encoded as PHP's
+			// "php" serializer does, kept for session.gc_maxlifetime. No lock,
+			// as phpredis by default. A store that cannot be reached gives an
+			// empty session for this request -- the page is still served, an
+			// editor sees the login -- and one line in the error log.
+			self::$sessionRedis[1] = self::$sessionRedis[0]['prefix'] . $id;
+			self::$sessionRedis[2] = max(1, $maxLifetime);
+			$_SESSION = array();
+			$data = self::redisCall('get', array(self::$sessionRedis[1]));
+			if (is_string($data) && $data !== '') {
+				$_SESSION = self::unserializeSession($data);
+			}
+			self::$sessionActive = true;
+			return true;
+		}
+
 		self::$sessionFile = self::sessionFilePath(self::$sessionStore, $id);
 
 		// Read with exclusive lock (held until write_close)
@@ -1803,6 +1862,11 @@ class Q_WebServer_Compat
 	static function _session_write_close()
 	{
 		if (!self::$sessionActive) return;
+		if (self::$sessionRedis) {
+			self::redisCall('setex', array(self::$sessionRedis[1], self::$sessionRedis[2],
+				self::serializeSession((array) $_SESSION)));
+			self::$sessionRedis = null;
+		}
 		if (self::$sessionFp) {
 			$data = self::serializeSession($_SESSION);
 			ftruncate(self::$sessionFp, 0);
@@ -1827,6 +1891,23 @@ class Q_WebServer_Compat
 		$oldFile = self::$sessionFile;
 		$oldId = self::$sessionId;
 		$newId = bin2hex(random_bytes(16));
+
+		if (self::$sessionRedis) {
+			// As PHP does: the old session keeps its data (or goes), the data
+			// moves to the new id and is written there at the end.
+			if ($delete_old) {
+				self::redisCall('del', array(self::$sessionRedis[1]));
+			} else {
+				self::redisCall('setex', array(self::$sessionRedis[1], self::$sessionRedis[2],
+					self::serializeSession((array) $_SESSION)));
+			}
+			self::$sessionId = $newId;
+			self::$sessionRedis[1] = self::$sessionRedis[0]['prefix'] . $newId;
+			self::redisCall('setex', array(self::$sessionRedis[1], self::$sessionRedis[2],
+				self::serializeSession((array) $_SESSION)));
+			self::setSessionCookie(self::_session_name(), $newId);
+			return true;
+		}
 
 		// Write current data and release lock on old file
 		if (self::$sessionFp) {
@@ -1875,6 +1956,13 @@ class Q_WebServer_Compat
 
 		$_SESSION = array();
 
+		if (self::$sessionRedis) {
+			self::redisCall('del', array(self::$sessionRedis[1]));
+			self::$sessionRedis = null;
+			self::$sessionActive = false;
+			return true;
+		}
+
 		if (self::$sessionFp) {
 			flock(self::$sessionFp, LOCK_UN);
 			fclose(self::$sessionFp);
@@ -1896,6 +1984,120 @@ class Q_WebServer_Compat
 	{
 		if (self::$sessionActive) return PHP_SESSION_ACTIVE;
 		return PHP_SESSION_NONE;  // Sessions are always available, just not started yet
+	}
+
+	/**
+	 * session.save_path as phpredis's session handler reads it:
+	 * "tcp://host:port?database=N&prefix=P&timeout=S&read_timeout=S&auth=X"
+	 * (or unix:///path?...; auth[]=user&auth[]=pass for an ACL user). Of a
+	 * comma-separated list of servers the first is used.
+	 *
+	 * @return array host, port, database, prefix, timeout, read_timeout, auth
+	 */
+	static function parseRedisSavePath($raw)
+	{
+		$first = trim(explode(',', (string) $raw)[0]);
+		$cfg = array('host' => '127.0.0.1', 'port' => 6379, 'database' => 0, 'prefix' => 'PHPREDIS_SESSION:',
+			'timeout' => 2.0, 'read_timeout' => 0.0, 'auth' => null);
+		$query = '';
+		if (strpos($first, '?') !== false) {
+			list($first, $query) = explode('?', $first, 2);
+		}
+		if (stripos($first, 'unix://') === 0) {
+			$cfg['host'] = substr($first, 7);
+			$cfg['port'] = 0;
+		} elseif ($first !== '') {
+			$u = parse_url(strpos($first, '://') === false ? 'tcp://' . $first : $first);
+			if (!empty($u['host'])) $cfg['host'] = $u['host'];
+			if (!empty($u['port'])) $cfg['port'] = (int) $u['port'];
+		}
+		$q = array();
+		parse_str($query, $q);
+		if (isset($q['database']) && ctype_digit((string) $q['database'])) $cfg['database'] = (int) $q['database'];
+		if (isset($q['prefix']) && is_string($q['prefix'])) $cfg['prefix'] = $q['prefix'];
+		if (isset($q['timeout']) && is_numeric($q['timeout'])) $cfg['timeout'] = (float) $q['timeout'];
+		if (isset($q['read_timeout']) && is_numeric($q['read_timeout'])) $cfg['read_timeout'] = (float) $q['read_timeout'];
+		if (isset($q['auth']) && $q['auth'] !== '' && $q['auth'] !== array()) $cfg['auth'] = $q['auth'];
+		return $cfg;
+	}
+
+	/**
+	 * One command on the session store, connecting on first use in this
+	 * process. On any failure: null, the connection dropped (the next call
+	 * connects again) and one line a minute in the error log; never an
+	 * exception, so a page is served whatever the store does.
+	 */
+	private static function redisCall($method, array $args)
+	{
+		$cfg = self::$sessionRedis[0] ?? null;
+		if (!$cfg) return null;
+		for ($try = 0; $try < 2; $try++) {
+			$r = self::redisConnection($cfg);
+			if (!$r) return null;
+			try {
+				return call_user_func_array(array($r, $method), $args);
+			} catch (\Throwable $e) {
+				// A worker's connection idle past the server's timeout: once more on a new one.
+				self::redisClose();
+				if ($try === 1) {
+					self::redisLog('session ' . $method . ' failed: ' . $e->getMessage());
+				}
+			}
+		}
+		return null;
+	}
+
+	/** This process's connection to the store of $cfg, opened when missing (null when it cannot be). */
+	private static function redisConnection(array $cfg)
+	{
+		$pid = getmypid();
+		$key = $cfg['host'] . '|' . $cfg['port'] . '|' . $cfg['database'] . '|' . md5(serialize($cfg['auth']));
+		if (self::$redisConn && self::$redisConnPid !== $pid) {
+			// Made before a fork: the socket is shared with the parent. Leave it alone.
+			self::$redisInherited[] = self::$redisConn;
+			self::$redisConn = null;
+		}
+		if (self::$redisConn && self::$redisConnKey === $key) {
+			return self::$redisConn;
+		}
+		self::redisClose();
+		try {
+			$r = new \Redis();
+			$ok = $cfg['port'] > 0
+				? $r->connect($cfg['host'], $cfg['port'], $cfg['timeout'], null, 0, $cfg['read_timeout'])
+				: $r->connect($cfg['host'], 0, $cfg['timeout'], null, 0, $cfg['read_timeout']);
+			if (!$ok) throw new \RuntimeException('cannot connect');
+			if ($cfg['auth'] !== null && !$r->auth($cfg['auth'])) throw new \RuntimeException('authentication refused');
+			if ($cfg['database'] && !$r->select($cfg['database'])) throw new \RuntimeException('cannot select database ' . $cfg['database']);
+		} catch (\Throwable $e) {
+			self::redisLog('session store ' . $cfg['host'] . ($cfg['port'] ? ':' . $cfg['port'] : '')
+				. ' not reachable: ' . $e->getMessage() . '; this request has an empty session');
+			return null;
+		}
+		self::$redisConn = $r;
+		self::$redisConnPid = $pid;
+		self::$redisConnKey = $key;
+		return $r;
+	}
+
+	/** Closes this process's own store connection (never one inherited from a parent). */
+	static function redisClose()
+	{
+		if (self::$redisConn && self::$redisConnPid === getmypid()) {
+			try { self::$redisConn->close(); } catch (\Throwable $e) {}
+		} elseif (self::$redisConn) {
+			self::$redisInherited[] = self::$redisConn;
+		}
+		self::$redisConn = null;
+		self::$redisConnKey = '';
+		self::$redisConnPid = 0;
+	}
+
+	private static function redisLog($message)
+	{
+		if (time() - self::$redisLoggedAt < 60) return;
+		self::$redisLoggedAt = time();
+		error_log('Velocity: ' . $message);
 	}
 
 	/**
