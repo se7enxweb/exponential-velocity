@@ -1,6 +1,6 @@
 # Migrating from Apache
 
-If you have an existing Apache + mod_php or Apache + php-fpm setup, Velocity replaces both. Your `.htaccess` files work without changes.
+If you have an existing Apache + mod_php or Apache + php-fpm setup, Velocity replaces both. The URL rewriting in your `.htaccess` files works without changes; the rest of what an `.htaccess` does is written into the server's configuration (below).
 
 ## Quick start
 
@@ -14,17 +14,34 @@ sudo systemctl stop apache2  # or httpd
 
 ## .htaccess compatibility
 
-The server reads `.htaccess` files natively and supports:
+When it routes a request to PHP, the server reads the application's `.htaccess`
+files for their mod_rewrite directives:
 
 - `RewriteEngine On/Off`
-- `RewriteRule` with regex patterns, flags `[L]`, `[R=301]`, `[QSA]`, `[NC]`
-- `RewriteCond` with `%{REQUEST_FILENAME}`, `%{REQUEST_URI}`, `%{HTTP_HOST}`
-- `DirectoryIndex`
-- `ErrorDocument`
-- `Header set/append/unset`
-- `Options -Indexes`
+- `RewriteBase`
+- `RewriteRule` with regex patterns, flags `[L]`, `[R]`/`[R=301]`, `[F]`, `[QSA]`, `[NC]`, `[E=VAR:value]`
+- `RewriteCond` with `%{REQUEST_FILENAME}` (`-f`, `-d`), `%{REQUEST_URI}`, `%{HTTP_HOST}`
 
-Most WordPress, Laravel, Drupal, and Joomla `.htaccess` files work unchanged.
+That covers the front-controller rules of WordPress, Laravel, Drupal and Joomla.
+Other directives in an `.htaccess` are not read from the file. Their equivalents
+are per-host settings, `Q.webserver.hosts.<host>`, which a tool that serves
+Apache sites writes from the sites' `.htaccess` files and virtual hosts
+([multiuser.md](multiuser.md#access-control-and-url-rules-per-host-what-a-sites-htaccess-does)):
+
+| Apache | Velocity (`Q.webserver.hosts.<host>`) |
+|---|---|
+| `Require all denied`, `<Files>`, `<FilesMatch>` | `access.deny` |
+| `AuthType Basic` + `AuthUserFile` | `access.auth` (bcrypt, `$apr1$`, `{SHA}`, `crypt()`) |
+| `DirectoryIndex` | `index` |
+| `ErrorDocument` | `errorDocuments` |
+| `RewriteRule` in the virtual host | `serverRewrite` |
+| `Options FollowSymLinks` / `SymLinksIfOwnerMatch` | `followSymlinks` |
+| `Options -Indexes` | the default for a host listed there: a root without an index answers 403 |
+
+`Header always set` in the server context becomes `Q.webserver.headers` (added to
+every response the server builds, and to scripts' responses too with
+`Q.webserver.headersOnScripts: true`); HSTS is `Q.webserver.hsts`. There is no
+per-directory `Header` equivalent.
 
 ## Configuration mapping
 
@@ -53,30 +70,44 @@ Becomes:
 
 ### mod_rewrite → already supported
 
-Your `.htaccess` RewriteRules work as-is. The server also has built-in front-controller routing that handles the common case (try static file → fall through to index.php) without any rewrite rules.
+Your `.htaccess` RewriteRules work as-is (the directives listed above). The server also has built-in front-controller routing that handles the common case (try static file → fall through to index.php) without any rewrite rules.
 
-### mod_ssl → tls config
-
-```json
-{ "Q": { "webserver": { "tls": "auto" } } }
-```
-
-### ProxyPass → proxy config
+### mod_ssl → https config
 
 ```json
-{ "Q": { "webserver": { "proxy": { "/api/": "http://backend:3000" } } } }
+{ "Q": { "web": { "https": { "mode": "files",
+  "cert": "/etc/ssl/example.com/fullchain.pem", "key": "/etc/ssl/example.com/privkey.pem" } } } }
 ```
+
+Or `"mode": "letsencrypt"` with `"acme": { "email": ..., "domains": [...] }` to have
+the server get and renew the certificate. Every mode is in [https.md](https.md).
+
+### ProxyPass → upstreams by host
+
+```json
+{ "Q": { "webserver": { "upstreams": { "api.example.com": "127.0.0.1:3000" } } } }
+```
+
+A whole host is handed to another server; proxying one path of a site is not
+supported. See [multiuser.md](multiuser.md).
 
 ### What you keep
 
-- `.htaccess` files work unchanged
+- `.htaccess` rewrite rules work unchanged
 - `$_SERVER` superglobals populated identically
-- `php.ini` settings respected via `--php-ini` flag
+- `php.ini` settings: the server runs on the PHP that starts it, so give PHP the ini file as usual (`php -c /path/php.ini sbin/qbixserver.php ...`, or `PHPRC`)
 - File upload handling works the same way
+
+### Running beside Apache, or without root
+
+Velocity can take Apache's ports without running as root, and hand a host it
+cannot serve back to the server that served it before: see
+[running-without-root.md](running-without-root.md) and
+[host-fallback.md](host-fallback.md).
 
 ### What you gain
 
-- 10-100x more concurrent workers via COW memory
+- Workers forked from a preloaded parent, sharing its memory copy-on-write
 - Single binary deployment — no Apache modules to install
 - Built-in cert provisioning and auto-renewal
 - Control panel with framework-aware package management

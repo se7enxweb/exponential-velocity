@@ -37,6 +37,8 @@ Create `config/server.json` next to your `web/` directory, or pass `--config=pat
 | `rateLimit.enabled` | false | Enable per-IP rate limiting |
 | `rateLimit.requests` | 100 | Requests per window |
 | `rateLimit.window` | 60 | Window in seconds |
+| `rateLimit.burstRequests` | 20 | Requests one address may make within `burstWindow` |
+| `rateLimit.burstWindow` | 1 | Burst window in seconds |
 | `webserver.proxy.trusted` | `["127.0.0.1", "::1"]` | Addresses and CIDR ranges of the reverse proxies whose forwarded headers are believed. Only a connection from one of them sets the client address (`REMOTE_ADDR`) from the `ip` header, and `HTTPS` and `REQUEST_SCHEME` from the `proto` header, `CloudFront-Forwarded-Proto` or Cloudflare's `CF-Visitor`; from any other client those headers are ignored. A TLS connection is HTTPS whoever sent it. No CDN or load balancer is in the default: list Cloudflare's published ranges, your load balancer's or your private network's |
 | `webserver.proxy.headers.ip` | `X-Forwarded-For` | Header a trusted proxy gives the client address in; the rightmost address that is not itself trusted is the client |
 | `webserver.proxy.headers.proto` | `X-Forwarded-Proto` | Header a trusted proxy gives the visitor's protocol in, read before `CloudFront-Forwarded-Proto` and `CF-Visitor`; of a comma-separated value the first entry counts |
@@ -76,7 +78,23 @@ Create `config/server.json` next to your `web/` directory, or pass `--config=pat
 | `webserver.scripts` | (all) | Scripts that run when asked for by name, relative to the root (`["/index.php"]`). Any other `.php` goes to the front controller. See [Only the entry points run](#only-the-entry-points-run) |
 | `web.static.paths` | (all) | Patterns on a file's path below the root; only a matching file is sent as it is, any other goes to the front controller. See [Only the entry points run](#only-the-entry-points-run) |
 | `webserver.frontControllers` | `{}` | Path patterns to scripts, checked in order (`{"^/api/": "index_rest.php"}`); anything else goes to `index.php` |
-| `webserver.zygote` | `true` | Fork workers started after the pool from a zygote -- a process forked before the first connection was accepted -- so a worker forked under load inherits no visitor's connection. Needs the `sockets` extension (SCM_RIGHTS), `pcntl` and `posix`; ignored without them, and if the zygote fails the pool forks from the server as before. Set `false` to always fork from the server (the behaviour before it existed). See [workers.md](workers.md#forking-from-a-zygote) |
+| `webserver.zygote` | `true` | Fork workers started after the pool from a zygote -- a process forked before the first connection was accepted -- so a worker forked under load inherits no visitor's connection. Needs the `sockets` extension (SCM_RIGHTS), `pcntl` and `posix`; ignored without them, and if the zygote fails the pool forks from the server as before. Set `false` to always fork from the server (the behavior before it existed). See [workers.md](workers.md#forking-from-a-zygote) |
+| `webserver.workers` | (auto) | Size of a portable worker pool; a forked pool is sized by `--workers` or automatically. See [workers.md](workers.md#how-many-workers) |
+| `webserver.poolMode` | `"auto"` | `fork`, `portable` (workers started with `proc_open`, as on Windows) or `auto`; `--pool-mode`, `QBIX_POOL_MODE`. See [windows.md](windows.md#the-portable-pool) |
+| `webserver.user`, `webserver.group` | owner of the document root | Who the workers run as when the server is started as root; `--user`, `--group`, `QBIX_RUN_USER`, `QBIX_RUN_GROUP`. See [workers.md](workers.md#the-user-the-workers-run-as) |
+| `webserver.dropMaster` | `false` | The server process itself gives up root once its ports are bound and its certificates read; `--drop-master`. See [running-without-root.md](running-without-root.md) |
+| `webserver.keepGlobals` | `[]` | Globals a worker keeps between requests; `--keep-globals`. See [reset.md](reset.md) |
+| `webserver.pools` | `{}` | Worker pools that run as other users, chosen by host. See [multiuser.md](multiuser.md) |
+| `webserver.upstreams` | `{}` | Hosts passed on to another server (`"unix:/path"` or `"host:port"`). See [multiuser.md](multiuser.md#upstreams-by-host) |
+| `webserver.upstreamTimeout` | 300 | Seconds an upstream may take before it starts answering (then 504) |
+| `webserver.hostFallback` | (none) | Hands a failing host back to the server that served it before. See [host-fallback.md](host-fallback.md) |
+| `webserver.hosts.<host>.access`, `.rewrite`, `.errorDocuments` ... | (none) | What a site's `.htaccess` does: access control, rewrite rules, error documents. See [multiuser.md](multiuser.md#access-control-and-url-rules-per-host-what-a-sites-htaccess-does) |
+| `webserver.followSymlinks` | `false` | Serve and run files reached through a symbolic link that leads out of the document root |
+| `web.static.roots` | `[]` | More directories a static path (one `web.static.paths` serves as a file) is looked for in when it is not under the document root: `"/mnt/shared"` or `{"dir": "/mnt/shared", "match": "^/var/storage/"}`. For a cluster's shared storage. See [static-files.md](static-files.md#a-clusters-shared-files-qwebstaticroots) |
+| `webserver.watchdog` | `false` | Restart the server after a crash; `--watchdog`. See [running.md](running.md#watchdog) |
+| `webserver.stateDir` | the tree's (`/var/lib/vc`) | Where state kept between runs goes; `QBIX_STATE_DIR`. See [layout.md](layout.md#the-state-directory) |
+| `webserver.pidFile` | `/run/qbix/qbixserver.pid` | The pid file `qbixctl` uses when `--pid` is not given. See [console.md](console.md#qbixconsole) |
+| `webserver.log` | (off) | Access and error logs. See [deploy.md](deploy.md#logging) |
 | `compat.statTtl` | `0` | Seconds (at most 10) a worker keeps what it knows about files -- whether a path exists, a file's mtime and size -- across requests, like `opcache.revalidate_freq`. `0` forgets at every request boundary. The worker's own writes, `clearstatcache()` and a program it runs are seen at once either way. See [compatibility.md](compatibility.md#remembered-file-facts) |
 
 ### Virtual hosts
@@ -191,7 +209,9 @@ Handler changes take effect immediately — handlers are lazy-loaded, so the nex
 Changes are logged to stderr:
 
 ```
-14:32:07 hot-reload: ~ handlers/chat/message.php 14:32:09 hot-reload: + classes/MyApp/NewFeature.php 14:32:09 hot-reload: restarting server...
+14:32:07 hot-reload: ~ handlers/chat/message.php
+14:32:09 hot-reload: + classes/MyApp/NewFeature.php
+14:32:09 hot-reload: restarting server...
 ```
 
 Polls every 2 seconds. Recommended for development.
@@ -243,7 +263,8 @@ The handler receives `$params['task']` (the task name) and `$params['scheduled']
 
 ```php
 <?php
-// handlers/tasks/cleanup.php function tasks_cleanup(&$params, &$result) {
+// handlers/tasks/cleanup.php
+function tasks_cleanup(&$params, &$result) {
     MyApp\Sessions::expireOld();
     MyApp\Logs::rotate();
 }
@@ -364,7 +385,7 @@ php sbin/qbixserver.phar --root=.      --preset=exponential
 | `symfony` | `index.php` | 60s execution, 256M |
 | `wordpress` | `index.php` | 64M uploads, 300s execution |
 | `drupal` | `index.php` | `?q=` query rewriting, 32M uploads |
-| `exponential` | `index.php` | source-code transform kept ON; the eZ type registries kept across requests (`keepGlobals`) — see below |
+| `exponential` | `index.php` | 64M uploads, 300s execution; source-code transform kept ON; the eZ type registries kept across requests (`keepGlobals`); the entry points and static paths of its `.htaccess` (`webserver.scripts`, `webserver.frontControllers`, `web.static.paths`) where the configuration names none — see below |
 
 `exponential` is the one that carries settings a modern framework does not need
 and would otherwise be found the hard way: its kernel calls `header()` and
@@ -386,7 +407,12 @@ You can run existing PHP applications on Velocity without modifying their code. 
 **WordPress:**
 
 ```
-wordpress-site/ ├── sbin/qbixserver.php          ← copy here ├── src/                    ← copy here ├── config/ │   └── server.json └── web/                    ← symlink or copy of WordPress root
+wordpress-site/
+├── sbin/qbixserver.php     ← copy here
+├── src/                    ← copy here
+├── config/
+│   └── server.json
+└── web/                    ← symlink or copy of WordPress root
     ├── wp-admin/
     ├── wp-content/
     ├── wp-includes/
@@ -413,7 +439,18 @@ The pattern `\.php$` sends all PHP files through `php-cgi`. The fallback sends u
 **Laravel:**
 
 ```
-laravel-app/ ├── sbin/qbixserver.php ├── src/ ├── config/ │   └── server.json ├── web/                    ← symlink to Laravel's public/ │   ├── index.php │   └── .htaccess           ← ignored (no Apache) ├── app/ ├── routes/ ├── storage/ └── vendor/
+laravel-app/
+├── sbin/qbixserver.php
+├── src/
+├── config/
+│   └── server.json
+├── web/                    ← symlink to Laravel's public/
+│   ├── index.php
+│   └── .htaccess           ← ignored (no Apache)
+├── app/
+├── routes/
+├── storage/
+└── vendor/
 ```
 
 ```json
@@ -434,7 +471,17 @@ All requests that don't match a static file go to `index.php`. Laravel's router 
 **Symfony:**
 
 ```
-symfony-app/ ├── sbin/qbixserver.php ├── src/ ├── config/ │   ├── server.json │   └── ...                 ← Symfony config files ├── web/                    ← symlink to Symfony's public/ │   └── index.php ├── src/                    ← Symfony source (separate from Velocity's src/) ├── var/ └── vendor/
+symfony-app/
+├── sbin/qbixserver.php
+├── src/
+├── config/
+│   ├── server.json
+│   └── ...                 ← Symfony config files
+├── web/                    ← symlink to Symfony's public/
+│   └── index.php
+├── src/                    ← Symfony source (separate from Velocity's src/)
+├── var/
+└── vendor/
 ```
 
 Same config pattern. Symfony's front controller (`public/index.php`) handles all routing internally.
@@ -474,10 +521,11 @@ Only specific paths use CGI. New code and simple scripts use fork mode (100–30
 
 In your PHP files, replace:
 ```
-header(       →  Q_Response::header( setcookie(    →  Q_Response::setCookie(
+header(       →  Q_Response::header(
+setcookie(    →  Q_Response::setCookie(
 ```
 
-Two find-replaces. Your code now uses fork mode everywhere — 30× concurrent capacity capacity, preloaded classes, shared-nothing safety.
+Two find-replaces. Your code now uses fork mode everywhere — 30× concurrent capacity, preloaded classes, shared-nothing safety.
 
 ### Installing php-cgi
 

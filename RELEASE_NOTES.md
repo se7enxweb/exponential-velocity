@@ -1,5 +1,12 @@
 # Qbix Server v1.5.0 – Boldly Go
 
+> **A historical note.** This is the release note of the upstream Qbix engine's
+> v1.5.0, the engine Velocity was forked from (the number `QBIX_SERVER_VERSION`
+> still carries). It is not a Velocity release. Velocity's releases are
+> numbered `v0.0.4.N`; what each one changed is in [CHANGELOG.md](CHANGELOG.md)
+> and on the [releases page](https://github.com/se7enxweb/exponential-velocity/releases).
+> Where this note no longer matches the code it says so below.
+
 ## What's New Since v1.3
 
 ### ECDSA P-256 Signing with M-of-N Verification
@@ -138,8 +145,15 @@ A `_certRenewal` task runs every 12 hours via the internal scheduler. Scans all 
 | Linux x86_64 | `qbixserver-linux-x86_64` | pcntl_fork (COW) |
 | Linux ARM64 | `qbixserver-linux-aarch64` | pcntl_fork (COW) |
 | macOS ARM64 | `qbixserver-macos-arm64` | pcntl_fork (COW) |
-| Windows x64 | `qbixserver-windows-x64.exe` | RtlCloneUserProcess (COW) |
+| Windows x64 | `qbixserver-windows-x64.exe` | portable pool: a process per worker (`proc_open`) |
 | Windows x64 | `qbixserver-windows-x64-gui.exe` | Same, no console window |
+
+Now: every release carries these names as copies of the `standard` variant on
+PHP 8.3, beside `qbixserver-<platform>-php<8.2|8.3|8.4|8.5>-<mini|lite|standard|full>`,
+the plain PHP interpreters, `.deb` and `.rpm` packages, the phar and a source kit
+([docs/binaries.md](docs/binaries.md)). On Windows, v1.5.0 described workers cloned
+with `RtlCloneUserProcess` (`qbix_fork.dll`); the worker pool does not use that
+route, and Windows workers are processes of their own ([docs/windows.md](docs/windows.md)).
 
 ## Stats
 

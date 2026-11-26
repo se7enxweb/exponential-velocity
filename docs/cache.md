@@ -248,6 +248,7 @@ Every setting, with its default. All are under `Q.web.cache`.
 | `refreshHeader` | `"x-cache-refresh"` | A request header that renders and stores the page again. |
 | `honorRequestNoCache` | `false` | Send a request carrying `Cache-Control: no-cache` (or `Pragma: no-cache`) to the application instead of answering it from the cache; its answer is stored again. |
 | `generationFile` | `<dir>/.generation` | The generation marker. |
+| `pauseFile` | `""` (none) | While this file exists, neither this cache nor the application's cache answers and nothing is stored: every request goes to the application (a maintenance window, a database being rebuilt). Checked on every lookup and store. |
 | `apcu.enabled` | when APCu is usable | Keep small entries in APCu as well as on disk. Usable means `apcu_enabled()`, so `apc.enable_cli=1` under the CLI. `true` when it is not usable warns and stays off. |
 | `apcu.maxSize` | `65536` | Largest body, in bytes, kept in APCu. |
 | `memory.maxEntries` | `0` | Pages kept in the server's own memory in front of APCu. `0` turns the layer off. |
@@ -320,7 +321,7 @@ cache is configured this way by `exp:velocity` when it is enabled.
 only — this cache would skip it anyway. Any other request is answered by this
 cache first, the faster of the two, and the application's cache is asked when
 it misses; its answer is then kept here too, under this cache's own rules (the
-response's `Cache-Control`), unless it is compressed.
+response's `Cache-Control`), unless it is compressed with a coding other than the one this cache would store for that request (gzip for a client that accepts it, otherwise none).
 
 Because this cache now answers those requests first, it has to hear of the
 application's purges: point `Q.web.cache.generationFile` at a file that every
@@ -349,8 +350,9 @@ or pages this cache kept stay until their own lifetime runs out.
 | `apcu.warnings` | What those checks found, as said at startup. |
 | `apcu.storeFailures` | Stores APCu refused: a full segment, or APCu unusable. |
 | `apcu.memory` | `size`, `available` (bytes) and `usedPercent` of the shared segment. Only while APCu is in use. |
-| `apcu.entries`, `apcu.expunges` | Entries held, and times APCu emptied a full segment. Only while APCu is in use. | See [headers.md](headers.md) for
-what your PHP can send to steer caching.
+| `apcu.entries`, `apcu.expunges` | Entries held, and times APCu emptied a full segment. Only while APCu is in use. |
+
+See [headers.md](headers.md) for what your PHP can send to steer caching.
 
 The opcode cache, caches written during a fault, and other lessons: [lessons.md](lessons.md), [time-consuming-lessons.md](time-consuming-lessons.md).
 

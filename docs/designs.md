@@ -45,10 +45,16 @@ across views costs little.
 | View | Serves | Placeholders |
 |---|---|---|
 | `dashboard` | `/Q/dashboard` | `brand`, `brandHead`, `brandHeader`, `brandName`, `verLabel`, `maintainedBy`, `stats`, `recent`, `tokenParam`, `topPathsHtml`, `sysramHtml`, `sysramDetailHtml` |
-| `panel` | `/Q/panel` | `brand`, `brandHead` |
+| `panel` | `/Q/panel`; `refused.html` is the page shown when the panel is out of reach | `brand`, `brandHead`, `authState`, `viewParams`; `refused.html`: `brand`, `brandHead`, `message` |
 | `docs` | `/Q/docs` | `brand`, `brandHead` |
+| `metrics` | `/Q/metrics` opened in a browser (scrapers get the plain text) | `brand`, `brandHead`, `metricsJson` |
+| `phpinfo` | `/Q/phpinfo` | `brand`, `brandHead`, `brandHeader`, `version`, `jump`, `body` |
 | `listing` | directory listings | `safePath`, `listHtml`, `imagesJson` |
 | `error` | error pages | `brand`, `code`, `title`, `msg` |
+
+`shell/` is not a page: it holds the drop-down console's `shell.css`,
+`shell.js` and its themes (`theme-<name>.json`), which every view loads (see
+[shell.md](shell.md)).
 
 The `error` view is every error page the server writes itself, on HTTP/1.1 and
 HTTP/2 alike: blocked paths (403), missing files (404), a worker that stopped or

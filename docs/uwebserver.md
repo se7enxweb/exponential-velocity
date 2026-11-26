@@ -61,7 +61,7 @@ start it. Its unused former runtime headers (`u_runtime.h`,
 |---|---|
 | `native/uwebserver/uwebserver.c` | the program: configuration, listeners, the event loop, files, processes |
 | `native/uwebserver/u_options.h` | the command line parser (GNU and BSD spellings) |
-| `native/uwebserver/u_http.h` | the request head parser and the path normaliser: pure functions, fuzzed on their own |
+| `native/uwebserver/u_http.h` | the request head parser and the path normalizer: pure functions, fuzzed on their own |
 | `native/uwebserver/u_mime.h` | media types: a built-in table and the `mime.types` reader |
 | `native/uwebserver/u_log.h` | the error and access logs, and the escaping of what a client sent |
 | `native/uwebserver/u_tls.h` | TLS through OpenSSL 3, without blocking |
@@ -70,7 +70,7 @@ start it. Its unused former runtime headers (`u_runtime.h`,
 | `native/uwebserver/fuzz_request.c` | the fuzz harness of the request parsing (libFuzzer, or its own fuzzer) |
 | `native/uwebserver/uwebserver.bash-completion` | bash completion |
 | `docs/uwebserver.1` | the manual page |
-| `sbin/uwebserver` | the built program, committed: built for each release with `make -C native/uwebserver` (GCC 11.5 on EL 9, x86-64, linked against the system's OpenSSL 3). On another system, build it again the same way |
+| `sbin/uwebserver` | the built program, committed: built by hand with `make -C native/uwebserver` (GCC 11.5 on EL 9, x86-64, linked against the system's OpenSSL 3) when its sources change, not at every release; the committed one reports v0.0.4.42, the release its sources last changed in. On another system, build it again the same way |
 | `bin/uwebserver` | a forwarder at the former path that `exec`s `sbin/uwebserver` ([layout.md](layout.md#programs-bin-and-sbin)) |
 
 Nothing in the engine starts it. `src/` never names it, the packages and the
@@ -453,7 +453,7 @@ process and fails the test.
 | # | Severity | Finding | Fix | Test |
 |---|---|---|---|---|
 | 4.1 | medium, 0.0.4.41 | The binary was built with `gcc -O2` alone: a position-dependent executable, partial RELRO, lazy binding, no stack protector, no fortified calls | the Makefile builds with `-D_FORTIFY_SOURCE=2 -fstack-protector-strong -fstack-clash-protection -fcf-protection -fPIE` and links with `-pie -z relro -z now -z noexecstack` (`HARDEN=`/`LDHARDEN=` to leave them out) | `unit-uwebserver-hardening.php` reads the binary with `readelf` and `nm` |
-| 4.2 | info, new | The request parser had no fuzzing | `native/uwebserver/fuzz_request.c`: a libFuzzer entry point and a built-in deterministic fuzzer (seeds from real requests, 6 kinds of mutation, a xorshift generator), checking every promise the server relies on: the head's length and every string inside the input, the path normaliser's output (no `.`/`..` segment, no `//`, no control byte, no hidden name) and that it is stable when normalised again, ranges inside the file, the escapes without a control byte or a bare quote; `make fuzz` | a run in every test (`UWEB_FUZZ_SECONDS`, 10 s) and a ten-minute run under the sanitizers (below) |
+| 4.2 | info, new | The request parser had no fuzzing | `native/uwebserver/fuzz_request.c`: a libFuzzer entry point and a built-in deterministic fuzzer (seeds from real requests, 6 kinds of mutation, a xorshift generator), checking every promise the server relies on: the head's length and every string inside the input, the path normalizer's output (no `.`/`..` segment, no `//`, no control byte, no hidden name) and that it is stable when normalized again, ranges inside the file, the escapes without a control byte or a bare quote; `make fuzz` | a run in every test (`UWEB_FUZZ_SECONDS`, 10 s) and a ten-minute run under the sanitizers (below) |
 | 4.3 | info | Random and mutated requests over real connections | every answer a well-formed head, the server still serving | "random and mutated requests are answered" (400 per run) |
 | 4.4 | low, 0.0.4.41 | `Server: U/1.0`, and error bodies from nowhere in particular | `Server: uwebserver` with no version (`--server-name`, `--no-server-header`); errors say only their status; the ETag is the modification time and size (no inode number, as Apache's once was); no `X-Powered-By` | "a 404 says only 404 Not Found", "no header names the software" |
 | 4.5 | medium | Log injection: a request line or header with CR, LF or other control bytes | the access log escapes them (`\xHH`), the error log replaces any control byte with `?`, and malformed requests are logged without their bytes | "every line of the error log is one of its own", `unit-uwebserver-process.php` |
@@ -462,8 +462,8 @@ process and fails the test.
 The ten-minute fuzz run of 0.0.4.42, under AddressSanitizer and
 UndefinedBehaviorSanitizer with GCC 14: 13 393 920 inputs in 600 seconds (seed
 20260930), no broken promise and no sanitizer report. An earlier run stopped at
-once on a promise of the harness itself that was too strong: that a normalised
-path normalises to itself again. A file may be named `%2e%2e` (requested as
+once on a promise of the harness itself that was too strong: that a normalized
+path normalizes to itself again. A file may be named `%2e%2e` (requested as
 `%252e%252e`), which is decoded once, rightly, and would decode to `..` a
 second time; the harness now encodes a literal `%` before the second pass, and
 the parser was left as it was.
@@ -546,7 +546,7 @@ binding, no stack protector and no `_FORTIFY_SOURCE`.
 
 **Tests.** `tests/pipelining.php` (six cases, against a server started by hand)
 and the three about flags in `tests/unit-moved-programs.php`. None ran
-uwebserver's own behaviour in the suite.
+uwebserver's own behavior in the suite.
 
 What 0.0.4.42 changed is in the [CHANGELOG](../CHANGELOG.md); the program as it
 is now is described in the sections above.

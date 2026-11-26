@@ -18,9 +18,14 @@ A request resolves to a file. If that file, after every symbolic link is
 followed, does not lie under the document root, the request is refused with
 403. This applies to static files and, more importantly, to PHP scripts.
 
-`Q.webserver.followSymlinks` (default `false`) restores the older behaviour of
+`Q.webserver.followSymlinks` (default `false`) restores the older behavior of
 following links wherever they lead, for installations that deliberately serve
-through links that leave the root.
+through links that leave the root. Per host, `Q.webserver.hosts.<host>.followSymlinks`
+does what Apache's `Options` do: `true` (`FollowSymLinks`) or `"ifOwnerMatch"`
+(`SymLinksIfOwnerMatch`: every link on the way must have the owner of what it
+points to). Files under a directory listed in `Q.web.static.roots` (a cluster's
+shared mount, see [static-files.md](static-files.md)) count as inside, scripts
+excepted.
 
 ### Why a request-string check is not enough
 
@@ -86,6 +91,55 @@ link would break real installations for no gain.
 
 ---
 
+## Paths that are never served
+
+Some paths are refused with 403 whatever is on disk (`Q_WebServer::isBlocked()`):
+
+- the directories `/config/`, `/classes/`, `/handlers/`, `/scripts/` and
+  `/settings/` (an application's credentials live there when the document root
+  is the project root);
+- the files `/composer.json`, `/composer.lock`, `/package-lock.json`,
+  `/yarn.lock`, `/Dockerfile` and `/Makefile`;
+- every dotfile and dot directory except `/.well-known/`;
+- every prefix listed in `Q.web.blocked.paths` (`{"private/": true}`).
+
+Files with an extension the server does not serve are refused too; `.log` is
+not one it serves (see [static-files.md](static-files.md)). Two lists narrow
+things further: `Q.webserver.scripts` names the only scripts that may run when
+asked for by name, and `Q.web.static.paths` the only paths served as files;
+anything else goes to the front controller as though the file were not there
+(see [routing.md](routing.md#priority)).
+
+---
+
+## Forwarded headers are believed only from listed proxies
+
+`X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` (and
+`CloudFront-Forwarded-Proto` and `CF-Visitor` for the scheme) are read only on
+a connection whose address is in `Q.webserver.proxy.trusted`, which is
+`["127.0.0.1", "::1"]` by default. From any other client they are ignored, so
+nobody can claim another address or HTTPS by sending a header. Add your load
+balancer's, CDN's or private network's addresses, IPv4 or IPv6, single or in
+CIDR form; `Q.webserver.proxy.headers` (`ip`, `proto`, `host`) renames the
+headers read. A TLS connection is HTTPS from any client.
+
+---
+
+## Running as a user, one user per site
+
+The server can start as root, bind its ports and read its certificates, and run
+every worker as a user of its own (`--user`, `--group`); it never runs workers
+as root unless `--allow-root-workers` says so. With `--drop-master` the server
+process itself becomes that user for good once its ports are bound. Worker
+pools of their own user per host (`Q.webserver.pools`) give each site the
+isolation Apache gets from suEXEC and PHP-FPM pools, and a host's access
+control and URL rules (`Q.webserver.hosts.<host>.access`, `.rewrite`) are
+applied by the server process before the cache, a file or a script. See
+[running-without-root.md](running-without-root.md) and
+[multiuser.md](multiuser.md).
+
+---
+
 ## Contradictory request framing is refused, not resolved
 
 A request carrying both `Content-Length` and `Transfer-Encoding`, or two
@@ -101,7 +155,7 @@ Bare LF line endings are refused for the same reason: a proxy that accepts only
 CRLF and a server that accepts both do not agree about where a header stops.
 
 Refusing them first required being able to see them. `requestComplete()` and
-the read loop recognised only `\r\n\r\n`, so a request using bare LF never
+the read loop recognized only `\r\n\r\n`, so a request using bare LF never
 completed at all — the connection held its slot until the read timeout, from
 one short write that needs no browser or proxy to produce.
 
@@ -139,7 +193,7 @@ it opened, before any of it has been authorised.
 
 **Unknown frame types are still accepted and discarded**, as §4.1 requires.
 That is how the protocol is extended, and a peer that rejects what it does not
-recognise cannot be extended. The test asserts this too, so the checks above
+recognize cannot be extended. The test asserts this too, so the checks above
 cannot quietly grow into it.
 
 ```bash
@@ -152,7 +206,7 @@ php tests/unit-http2-protocol-errors.php
 
 A CR or LF inside a header value ends the line early; what follows is read as a
 further header, or after a blank line as a second response. Values reach the
-serialiser from application output and from stored cache entries, so this is
+serializer from application output and from stored cache entries, so this is
 not a theoretical source.
 
 Every response goes through `Q_WebServer::headerLines()`, which drops a header

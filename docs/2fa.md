@@ -78,8 +78,8 @@ were headed.
 ### How it is stored
 
 The second factor lives in the panel's locked credential store,
-`acl/panel.json`, beside the password hash — the same root-owned `0600` file, in
-the same `0700` directory, behind the same ownership rule that must hold up to
+`acl/panel.json`, beside the password hash — the same `0600` file, owned by the
+user the server runs as, in the same `0700` directory, behind the same ownership rule that must hold up to
 `/` or the panel refuses every sign-in (see
 [passwords.md](passwords.md#how-passwords-are-stored) and
 [dashboard.md](dashboard.md)). It holds:

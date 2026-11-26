@@ -20,7 +20,7 @@
 
 **Static files** are served from an in-memory response cache. The full HTTP response (headers + body) is pre-built and sent in a single `fwrite()` call. The cache is mtime-validated with configurable check intervals. Combined with `TCP_NODELAY`, this delivers sub-millisecond response times.
 
-**PHP scripts** run in-process (single-threaded, suitable for lightweight APIs) or in a pre-fork worker pool (`--workers=N`) for concurrent PHP execution. Workers are forked after class preloading, so they share the base memory footprint via copy-on-write pages.
+**PHP scripts** run in a worker pool for concurrent PHP execution. Its size is `--workers=N`, or by default what fits in RAM (at most 8 per core and 64 in all, never fewer than 4). Workers are forked after class preloading, so they share the base memory footprint via copy-on-write pages. Where there is no `fork()` (Windows, or a PHP without pcntl) the pool is portable: each worker is a PHP process of its own started with `proc_open()` (`--pool-mode=portable`; between 2 and 8 workers by default), which loads the application itself and shares nothing copy-on-write. See [windows.md](windows.md).
 
 **Static files** are served at ~20K req/s (pure PHP, in-memory cache, single `fwrite`). nginx is ~2.5× faster (50K req/s) because it uses `sendfile()` (kernel-space file→socket copy) and compiled C. For production, put nginx or a CDN in front for static files and let Velocity handle PHP execution, WebSocket, and access-controlled file serving.
 
@@ -49,7 +49,7 @@ The parent preloads your framework (classes, config, routes, autoloader), takes 
 | `php://input` | Rewired to new request body | 0ms |
 | Response headers (`Q_WebServer_State`) | Cleared via `State::clear()` | 0ms |
 | `error_get_last()` | Cleared via `error_clear_last()` | 0ms |
-| DB transactions | `ROLLBACK` on all connections (safe no-op if none active) | 0ms |
+| DB transactions | `ROLLBACK` on the Qbix Platform's `Db` connections (a no-op if none active); other database layers are not touched | 0ms |
 | Output buffers | Non-removable buffer drained by `executeScript()` | 0ms |
 
 After reset, the next request sees exactly the same state as the first request this worker ever handled — the same static values, the same empty globals, the same clean superglobals. Secrets from request A (cookies, Authorization headers, POST passwords, session tokens) are guaranteed invisible to request B.
@@ -75,7 +75,8 @@ This is the most common octane pitfall. In fork-per-request mode, every request 
 ```php
 // WORKS in fork mode (process dies after each request)
 // FATAL on the SECOND request (persistent workers) to this script:
-//   "Cannot declare class Counter, because the name is already in use" class Counter {
+//   "Cannot declare class Counter, because the name is already in use"
+class Counter {
     public static $n = 0;
 } Counter::$n++;
 echo Counter::$n;
@@ -84,7 +85,8 @@ echo Counter::$n;
 The fix is a one-line guard:
 
 ```php
-// WORKS in both modes if (!class_exists('Counter', false)) {
+// WORKS in both modes
+if (!class_exists('Counter', false)) {
     class Counter {
         public static $n = 0;
     }
@@ -117,20 +119,23 @@ Scripts that define inline classes (with the `class_exists` guard) are handled a
 A few rules of thumb:
 
 ```php
-// ✅ DO: guard inline class declarations if (!class_exists('MyCache', false)) {
+// ✅ DO: guard inline class declarations
+if (!class_exists('MyCache', false)) {
     class MyCache { public static $data = []; }
 }
 
-// ✅ DO: use statics for per-request state — they reset automatically MyCache::$data['key'] = compute();
+// ✅ DO: use statics for per-request state — they reset automatically
+MyCache::$data['key'] = compute();
 
-// ✅ DO: close resources when done $fh = fopen('/tmp/report.csv', 'w'); fwrite($fh, $csv); fclose($fh)
-;  // don't leave it open
+// ✅ DO: close resources when done
+$fh = fopen('/tmp/report.csv', 'w'); fwrite($fh, $csv); fclose($fh);  // don't leave it open
 
-// ❌ DON'T: declare classes without the guard class Foo {}
+// ❌ DON'T: declare classes without the guard
+class Foo {}
 // fatal on second request
 
-// ❌ DON'T: store secrets in $GLOBALS expecting them to persist $GLOBALS['api_key'] = getenv('API_KEY')
-;  // cleared between requests
+// ❌ DON'T: store secrets in $GLOBALS expecting them to persist
+$GLOBALS['api_key'] = getenv('API_KEY');  // cleared between requests
 
 // ❌ DON'T: rely on static accumulators across requests
 // MyCounter::$total++ will always be 1, not 1, 2, 3...
@@ -141,12 +146,12 @@ A few rules of thumb:
 
 ### Choosing the right mode
 
-| Flag | Model | Best for |
+| Setting | Model | Best for |
 |---|---|---|
-| (default) | fork per request | maximum isolation, simple scripts |
-| `--workers=N` | persistent workers + snapshot | production: throughput + memory efficiency |
+| (default) | persistent workers + snapshot | production: throughput + memory efficiency |
+| `"forkPerRequest": true` | a fresh worker per request | maximum isolation |
 
-Both modes preload your framework before handling requests. The difference is whether the preloaded state is inherited via fork (8ms) or reused in a loop with snapshot restore (about 0.5 ms small, 4–5 ms for a large CMS).
+`--workers=N` sets the pool size in either mode. Both modes preload your framework before handling requests. The difference is whether the preloaded state is inherited via fork (8ms) or reused in a loop with snapshot restore (about 0.5 ms small, 4–5 ms for a large CMS).
 
 ### Configuration
 
@@ -162,15 +167,17 @@ Both modes preload your framework before handling requests. The difference is wh
 }
 ```
 
-- `workers` — number of persistent workers (0 = fork per request)
-- `octane` — enable snapshot restore in the worker loop (default: true when workers > 0)
+- `workers` — number of workers (`--workers`; unset or 0 = sized automatically)
+- `forkPerRequest` — `true` replaces the worker after every request instead of restoring the snapshot (default: `false`)
 - `maxRequests` — recycle workers after this many requests (default: 1000, 0 = unlimited)
-- `zygote` — fork workers started after the pool from a zygote (default: false; see below)
+- `spareWorkers` — start this many and grow the pool under load up to `workers`, retiring idle ones after `idleWorkerTimeout` seconds (default: 0, a fixed pool)
+- `zygote` — fork workers started after the pool from a zygote (default: `true` where it is supported; `false` turns it off; see below)
+- `poolMode` — `auto`, `fork` or `portable` (`--pool-mode`, `QBIX_POOL_MODE`; see above)
 
 ### Where workers come from
 
 ```
-without zygote                         with Q.webserver.zygote
+without zygote                         with Q.webserver.zygote (the default)
 --------------                         ------------------------
 server (parent)                        server (parent)
  ├─ worker   forked at start            ├─ worker   forked at start
@@ -202,7 +209,9 @@ server again. Details and checks: [workers.md](workers.md#forking-from-a-zygote)
 Three files for a complete real-time app:
 
 ```
-handlers/game/join.php       ← adds player to static $players handlers/game/move.php       ← updates static $positions, broadcasts handlers/game/leave.php      ← removes player, notifies room
+handlers/game/join.php       ← adds player to static $players
+handlers/game/move.php       ← updates static $positions, broadcasts
+handlers/game/leave.php      ← removes player, notifies room
 ```
 
 No Redis. No message queue. No pub/sub infrastructure. No WebSocket library. No event loop to learn. Just PHP files in a folder.
@@ -224,7 +233,12 @@ Ephemeral state lives in RAM — static variables in the per-connection process.
 The same `handlers/` directory serves HTTP requests, WebSocket messages, and routed clean URLs. The same `classes/` directory is preloaded and shared across all of them. One server, one codebase, one mental model.
 
 ```
-Static files:    GET /style.css            → web/style.css PHP scripts:     GET /page.php             → web/page.php Routed:          GET /api/users            → handlers/api/users/get.php Socket.IO:       42["chat/message",{...}]  → handlers/chat/message.php Bare WebSocket:  {"event":"chat/message"}  → handlers/chat/message.php Legacy:          GET /wp-admin/post.php    → php-cgi (full compatibility)
+Static files:    GET /style.css            → web/style.css
+PHP scripts:     GET /page.php             → web/page.php
+Routed:          GET /api/users            → handlers/api/users/get.php
+Socket.IO:       42["chat/message",{...}]  → handlers/chat/message.php
+Bare WebSocket:  {"event":"chat/message"}  → handlers/chat/message.php
+Legacy:          GET /wp-admin/post.php    → php-cgi (full compatibility)
 ```
 
 When you outgrow it — when you need the full dispatch pipeline, Streams for real-time data synchronization, or the component-level cache invalidation with Merkle trees — the same handlers run on the [Qbix Platform](https://github.com/Qbix/Platform) without changes. The upgrade path is adding capability, not rewriting architecture.
@@ -233,14 +247,15 @@ When you outgrow it — when you need the full dispatch pipeline, Streams for re
 
 ## Execution model
 
-One request, one PHP process. Qbix and ordinary PHP both assume a process handles a single request and then dies; this server preserves that.
+Qbix and ordinary PHP both assume a process handles a single request and then dies. The server keeps that promise either by resetting a persistent worker to its preloaded state between requests (the default, above) or by giving every request a fresh worker (`forkPerRequest`).
 
-| Platform | Mode | How |
+| Platform | Pool mode | How |
 |---|---|---|
-| Unix (`pcntl`) | fork | Parent preloads classes, config and DB; forks per request; child runs the script and `exit(0)`s. Copy-on-write means no interpreter startup and no framework bootstrap — the memory and isolation advantage comes from this model. The fork itself costs ~7ms, which is the throughput trade-off vs. persistent workers. |
-| Windows / no `pcntl` | `php-cgi` | A real SAPI process per request, spawned via `Q.webserver.cgi.patterns`. Slower (full interpreter startup) but handles arbitrary PHP. |
+| Unix (`pcntl`) | `fork` (the default there) | Parent preloads classes, config and DB, then forks the workers. Copy-on-write means no interpreter startup and no framework bootstrap per worker — the memory and isolation advantage comes from this model. With `forkPerRequest` every request gets a fresh worker; the fork itself costs ~7ms, which is the throughput trade-off vs. persistent workers. |
+| Windows / no `pcntl` | `portable` | Each worker is a PHP process of its own, started with `proc_open()`, which loads the application itself; persistent workers with the same reset. Tested on Windows Server 2022 and 2025. See [windows.md](windows.md). |
+| any, per script | `php-cgi` | A script matching `Q.webserver.cgi.patterns` runs in a real CGI process per request. Slower (full interpreter startup) but handles arbitrary PHP. |
 
-The parent never runs application code. It owns the socket, the reverse cache and static files, and forks. Because no request state is ever populated in the parent, children inherit a clean slate and nothing needs to be reset between requests.
+The parent runs no request's application code. It owns the socket, the response cache and static files, and hands requests to workers. What it does run before the first fork — the preload and the optional warm-up script (`Q.webserver.warmup`) — is cleaned up before the snapshot is taken, so workers inherit a clean baseline; see [reset.md](reset.md#warming-the-pool-in-the-parent-and-the-one-trap-in-it).
 
 ## Event loop backends
 
@@ -413,7 +428,7 @@ segment, as the children of one PHP-FPM pool do. `reusePort` is implied.
 
 ## Benchmarks — Velocity vs nginx+fpm vs Swoole vs FrankenPHP
 
-Full results in [BENCHMARKS.md](docs/BENCHMARKS.md). Key findings:
+Full results in [BENCHMARKS.md](BENCHMARKS.md). Key findings:
 
 **Head-to-head (4 workers each, same scripts, one server at a time):**
 

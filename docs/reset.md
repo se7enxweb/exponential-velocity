@@ -21,9 +21,9 @@ Velocity's persistent-worker mode ("octane mode") keeps workers alive across req
 | **Environment variables** | Shimmed `putenv()` — tracked per request, restored to boot values | ~0 |
 | **Response headers** | `Q_WebServer_State::clear()` + `header_remove()` + `http_response_code(200)` | ~0 |
 
-**Total reset cost: ~0.06ms** — compared to 8ms for `pcntl_fork()`.
+**Total reset cost** is dominated by the static restore in the first row (well under a millisecond for a few hundred classes; the rest is ~0) — compared to about 8ms for `pcntl_fork()`. The cycle collection described [below](#cycles-are-collected-between-requests) runs only when there is something to collect.
 
-**45 PHP functions shimmed** via source transformation (stream wrapper + `token_get_all()`): `header`, `setcookie`, `setrawcookie`, `http_response_code`, `headers_sent`, `headers_list`, `header_remove`, `session_start`, `session_id`, `session_name`, `session_set_cookie_params`, `session_get_cookie_params`, `session_write_close`, `session_regenerate_id`, `session_destroy`, `session_status`, `move_uploaded_file`, `is_uploaded_file`, `ini_get`, `ini_set`, `set_time_limit`, `getallheaders`, `phpinfo`, `apache_request_headers`, `register_shutdown_function`, `set_error_handler`, `set_exception_handler`, `restore_error_handler`, `restore_exception_handler`, `spl_autoload_register`, `spl_autoload_unregister`, `putenv`, and the file stat functions `file_exists`, `is_dir`, `is_file`, `filemtime`, `filesize`, `clearstatcache`, and the process functions `exec`, `system`, `passthru`, `shell_exec`, `proc_close`, `pclose` (they run the real function and then forget what the file wrapper remembered -- see [compatibility.md](compatibility.md#remembered-file-facts)), and `fread`, which on a local file opened through the wrapper reads on until it has the length asked for or the file ends, as the plain file layer does (PHP reads a user-space stream one 8192-byte chunk per call; any other stream keeps its short reads). `exit` and `die` are rewritten too, so they end the request rather than the worker.
+**53 PHP functions shimmed** via source transformation (stream wrapper + `token_get_all()`): `header`, `setcookie`, `setrawcookie`, `http_response_code`, `headers_sent`, `headers_list`, `header_remove`, `session_start`, `session_id`, `session_name`, `session_set_cookie_params`, `session_get_cookie_params`, `session_write_close`, `session_regenerate_id`, `session_destroy`, `session_status`, `move_uploaded_file`, `is_uploaded_file`, `ini_get`, `ini_set`, `set_time_limit`, `getallheaders`, `phpinfo`, `apache_request_headers`, `register_shutdown_function`, `set_error_handler`, `set_exception_handler`, `restore_error_handler`, `restore_exception_handler`, `spl_autoload_register`, `spl_autoload_unregister`, `putenv`, the file stat functions `file_exists`, `is_dir`, `is_file`, `filemtime`, `filesize`, `clearstatcache`, the access checks `is_writable`, `is_writeable`, `is_readable`, `is_executable` (asked of the operating system, so root, NFS squashing and ACLs are seen as PHP-FPM sees them), and the process functions `exec`, `system`, `passthru`, `shell_exec`, `proc_close`, `pclose` (they run the real function and then forget what the file wrapper remembered -- see [compatibility.md](compatibility.md#remembered-file-facts)), and `fread`, which on a local file opened through the wrapper reads on until it has the length asked for or the file ends, as the plain file layer does (PHP reads a user-space stream one 8192-byte chunk per call; any other stream keeps its short reads), and the streaming functions `flush`, `connection_aborted`, `connection_status` and `ignore_user_abort`, which reach the server so a streaming response is sent as it is printed. `exit` and `die` are rewritten too, so they end the request rather than the worker.
 
 ## What persists (by design)
 
@@ -44,7 +44,7 @@ Velocity's persistent-worker mode ("octane mode") keeps workers alive across req
 | **Stream contexts** | Custom SSL/proxy settings persist | Nothing | Avoid `stream_context_set_default()` |
 | **Signal handlers** | Previous request's handlers persist | Nothing | Don't call `pcntl_signal()` in request code |
 | **cURL handles** | Cookies, auth headers persist | Nothing | Don't reuse `curl_init()` across requests |
-| **Framework registries in globals** | A registry filled once via `include_once` empties for the worker's life if its global is cleared | Preserve them by name in `Q.webserver.keepGlobals` | Name any global that holds an include-populated registry; clear everything else |
+| **Framework registries in globals** | A registry filled once via `include_once` empties for the worker's life if its global is cleared | Preserve them by name in `Q.webserver.keepGlobals` (or `--keep-globals=A,B`) | Name any global that holds an include-populated registry; clear everything else |
 
 Previously risky items **now handled automatically** by the compat layer:
 
@@ -77,7 +77,7 @@ php-fpm's `pm.max_requests` exists because statics and globals leak. The snapsho
 
 | | Laravel Octane | Velocity octane mode |
 |---|---|---|
-| Reset mechanism | App-level: `$app->flush()`, `Container::forgetInstances()` | Language-level: `ReflectionProperty::setValue` on all statics + 44 function shims |
+| Reset mechanism | App-level: `$app->flush()`, `Container::forgetInstances()` | Language-level: `ReflectionProperty::setValue` on all statics + 53 function shims |
 | Coverage | Only what Laravel's flusher knows about | **All user-defined classes**, automatically |
 | Lifecycle functions | Must audit manually | **Shimmed**: `register_shutdown_function`, `set_error_handler`, `set_exception_handler`, `spl_autoload_register`, `ini_set`, `putenv` — all tracked and restored |
 | Third-party packages | Must implement `ResetScope` interface | **Covered automatically** — their statics are reset too |
@@ -92,7 +92,8 @@ Laravel Octane's biggest problem is that third-party packages often DON'T implem
 
 These are the same in all persistent-worker systems (fpm, Octane, Swoole):
 
-1. **C extension internal state** — PHP has no API to introspect it 2. **Closures capturing references** — if a closure captured `&$static`,
+1. **C extension internal state** — PHP has no API to introspect it
+2. **Closures capturing references** — if a closure captured `&$static`,
    resetting the property doesn't affect the closure's binding
 3. **Resources** — file handles, DB connections, sockets are kernel objects;
    PHP can only close them, not "reset" them
@@ -240,7 +241,7 @@ lives in a class static the snapshot puts back. A request's `$_SESSION` also
 ends with it now, as under PHP-FPM, so a request that starts no session never
 sees the previous one's.
 
-Verify a warm-up by behaviour, with the pair that exposes a frozen route or
+Verify a warm-up by behavior, with the pair that exposes a frozen route or
 node: **several distinct URLs must return distinct content, each must carry a
 resolving stylesheet.** A single URL never shows a reset bug — it appears only on
 the second, different request.
@@ -268,16 +269,18 @@ Setting `maxRequests` to a non-zero value recycles workers after N requests, as 
 
 ## The escape hatch
 
-If a specific script is known to leak state that snapshot restore can't clean (e.g., a C extension that caches aggressively), route it to fork-per-request mode:
+If a specific script is known to leak state that snapshot restore can't clean (e.g., a C extension that caches aggressively), run it through `php-cgi` instead of a worker. `Q.webserver.cgi.patterns` lists regular expressions on the script's path relative to the document root:
 
 ```json
 {
     "Q": {
         "webserver": {
-            "fork": { "patterns": ["legacy/.*", "unsafe-extension.php"] }
+            "cgi": { "patterns": ["^/legacy/", "^/unsafe-extension\\.php$"] }
         }
     }
 }
 ```
 
-These scripts still get the preloaded classes via COW, but each request forks a fresh child process — guaranteed clean state at the cost of ~8ms fork overhead.
+A matching script runs in a fresh `php-cgi` process per request, where the native `header()`, `setcookie()` and the rest work as they do under PHP-FPM. `Q.webserver.cgi.binary` names the binary; unset, `php-cgi` is looked up on the `PATH`. A host served by a pool of its own user never uses `php-cgi`, which would run as the server's user.
+
+To run every request in a fresh child instead, set `Q.webserver.forkPerRequest` to `true`: the child still inherits the preloaded classes copy-on-write.

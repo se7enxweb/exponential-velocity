@@ -6,7 +6,9 @@ The native sources, GATT UUIDs and chunking format are documented alongside the 
 
 ## PHP runtimes
 
-PHP now runs on both platforms: NativePHP Mobile, php-ios and Phphone embed a PHP 8 interpreter in an app. CI builds `qbixserver-ios-arm64.phar` and `qbixserver-android-arm64.phar` with static-php-cli as experimental jobs; the native shell embeds the phar and starts it on launch.
+PHP now runs on both platforms: NativePHP Mobile, php-ios and Phphone embed a PHP 8 interpreter in an app. The native shell embeds the server's phar (`qbixserver.phar`, the same file every release carries) and starts it on launch. No CI job builds or tests a mobile app or a mobile PHP runtime; the release workflow builds Linux, macOS and Windows binaries only.
+
+The mesh the native code talks to is **off by default**: set `Q.webserver.mesh = true` (or `QBIX_MESH_ENABLED=1`) in the app's server configuration, or every `/Q/sync/*` path answers `404` (see [Mesh.md](Mesh.md)).
 
 ## Transports
 
@@ -46,7 +48,9 @@ The exact XML is in [mobile/README.md](../mobile/README.md#platform-requirements
 
 ## Status
 
-The mobile builds are experimental in CI and the native transport code is exercised by the PHP BLE simulator (`tests/test_mesh_ble.php`) rather than on devices in CI. Direct peer requests over TCP are tested end to end between two servers; see [sync.md](sync.md#current-limitations) for what multi-hop relay does not yet do.
+Experimental. The Swift and Kotlin sources in `mobile/` are not built or run by any CI job, and no test in `tests/` drives them; the one mesh test, `tests/unit-mesh-endpoints.php`, checks that `/Q/sync/*` is closed by default and that, switched on, it refuses requests without an encrypted session.
+
+`Q_WebServer_Transport` (`src/Q/WebServer/Transport.php`) implements the `/Q/api/transport/*` actions (`peers`, `register`, `event`, `connect` and the rest) in its `handleApi()`, but the server does not route `/Q/api/transport/` to it yet: those requests do not reach it, so steps 2 and 3 above need that route before the native bridge can work against a stock server. See [sync.md](sync.md#current-limitations) for what multi-hop relay does not yet do.
 
 ---
 [← Data Sync](sync.md) · [← Mesh Protocol](Mesh.md) · [← Back to README](../README.md)

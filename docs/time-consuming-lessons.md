@@ -2,9 +2,9 @@
 
 The problems below each cost hours or days to find, because the symptom pointed
 somewhere else. Each is written the same way: what it looked like, what it
-seemed to be, what it actually was, how to recognise it next time, and the fix.
+seemed to be, what it actually was, how to recognize it next time, and the fix.
 If you are chasing a symptom that matches one of these, start from the
-"Recognise it" line. The general rules behind them are in
+"Recognize it" line. The general rules behind them are in
 [lessons.md](lessons.md).
 
 - [The JIT that wrote the script twice](#the-jit-that-wrote-the-script-twice)
@@ -34,7 +34,7 @@ If you are chasing a symptom that matches one of these, start from the
   already written, so about the fourth call in a process returned every token
   twice -- two `<?php` tags. PHP 8.4 and later, the tracing JIT and no JIT were
   never affected. `setup-php` turns 1235 on by default, which is why only CI saw it.
-- **Recognise it:** a failure that appears only where `opcache.jit=1235`
+- **Recognize it:** a failure that appears only where `opcache.jit=1235`
   (`php -i | grep opcache.jit`), and output that contains its input twice.
   Reproduce with the function alone in a loop in a `php:8.3` container.
 - **Fix:** the loop is written as a `foreach`, which that JIT compiles correctly
@@ -53,7 +53,7 @@ If you are chasing a symptom that matches one of these, start from the
   opcode cache does not look at a file it holds for that many seconds. The server
   re-checked the files it had served only when a request *ended*, so a file
   rewritten while the worker sat idle was served once more from the old compile.
-- **Recognise it:** it happens once per worker, only within a couple of seconds
+- **Recognize it:** it happens once per worker, only within a couple of seconds
   of the rewrite, and goes away with `opcache.revalidate_freq=0`.
 - **Fix:** the server now also re-checks served files as each request starts
   (v0.0.4.27). See [the opcode cache](lessons.md#the-opcode-cache).
@@ -74,7 +74,7 @@ If you are chasing a symptom that matches one of these, start from the
   override map kept the public design. A worker compiling an admin template
   baked the public paths into the compiled file on disk -- and that file then
   broke every admin page, surviving restarts.
-- **Recognise it:** works under FPM, fails only under this server, and only
+- **Recognize it:** works under FPM, fails only under this server, and only
   with a warm-up. Grep compiled templates for paths from the wrong design.
 - **Fix:** the server forgets the warm-up's stats at the end of the warm-up and
   in each worker after the fork. The application's warm-up must reset statics
@@ -95,7 +95,7 @@ If you are chasing a symptom that matches one of these, start from the
   inherited the same one. In fork-per-request mode each exiting worker also sent
   QUIT over it. An application cache that stored "nothing found" during those
   errors then served empty pages to everyone.
-- **Recognise it:** `ss -xpn | grep "pid=<parent pid>"` (or `ss -tpn`) shows a
+- **Recognize it:** `ss -xpn | grep "pid=<parent pid>"` (or `ss -tpn`) shows a
   database socket held by the parent after start.
 - **Fix:** close the connection explicitly at the end of the warm-up. Then clear
   any application cache that may have stored a failed lookup. Better still,
@@ -119,7 +119,7 @@ Three separate defects, all "tests pass, production drops requests":
   workers included, so a later `waitpid($pid)` for a dead worker returns -1, and
   `posix_kill($pid, 0)` is true for a zombie. A dead worker was counted as alive.
   Ask the pool whether a worker has exited instead.
-- **Recognise them:** anything that changes forking, worker lifecycle or
+- **Recognize them:** anything that changes forking, worker lifecycle or
   descriptors must be tested with concurrent TLS requests while workers are
   forked and retired, not only with plain HTTP. `tests/unit-tls-survives-worker-forks.php`
   does this.
@@ -134,7 +134,7 @@ Three separate defects, all "tests pass, production drops requests":
 - **Actually:** RSS summed over processes. Every worker maps the parent's warmed
   pages copy-on-write, and RSS counts each of those shared pages once per worker:
   380 workers at ~40 MB RSS read as 15 GB, where the real total was about 2.9 GB.
-- **Recognise it:** RSS per worker is high from the moment it forks.
+- **Recognize it:** RSS per worker is high from the moment it forks.
 - **Fix:** measure PSS (`/proc/<pid>/smaps_rollup`); the dashboard does. See
   [measuring memory](lessons.md#measuring-memory).
 
@@ -150,7 +150,7 @@ Three separate defects, all "tests pass, production drops requests":
   its page in it; error handlers pushed onto PHP's hidden handler stack and never
   popped, one of them holding the whole request log; and a stream wrapper
   registration per filesystem call, each a resource freed only at process end.
-- **Recognise it:** memory per worker rises linearly with requests served, even
+- **Recognize it:** memory per worker rises linearly with requests served, even
   for a trivial page. `ob_get_level()` above 1 at the start of a request is the
   first thing to check.
 - **Fix:** one capture buffer per process, handlers unwound to the boot handler,
@@ -170,7 +170,7 @@ Three separate defects, all "tests pass, production drops requests":
   check was applied where the encoder also learns the peer's
   `SETTINGS_HEADER_TABLE_SIZE`: browsers send 65536, curl sends nothing, so only
   browsers were refused.
-- **Recognise it:** works with `curl --http2`, fails in a browser. Every GOAWAY
+- **Recognize it:** works with `curl --http2`, fails in a browser. Every GOAWAY
   the server sends now logs its reason -- read the log first.
 - **Fix:** resets must also be more than half the streams opened to count as an
   attack; the table-size check applies only to size updates inside a header
@@ -188,7 +188,7 @@ Three separate defects, all "tests pass, production drops requests":
   lean build it is about 0.85 MB and nothing was replaced. And the stock `php`
   Docker image has no php.ini, so `display_errors` is on and a harmless warning
   from `header()` landed in the body being compared.
-- **Recognise it:** run the suite in a clean container
+- **Recognize it:** run the suite in a clean container
   (`docker run --rm -v $PWD:/q -w /q php:8.3-cli php tests/run-unit.php`) and
   compare `php -i` between the two machines before suspecting the code.
 - **Fix:** tests now make their own conditions (a request that holds 2 MB) rather
@@ -204,7 +204,7 @@ Three separate defects, all "tests pass, production drops requests":
 - **Actually:** the shipped version is stamped at build time from the nearest
   tag. A release commit is built before its tag exists, so every release phar
   named the release before it.
-- **Recognise it:** `php sbin/qbixserver.phar --version` on the tagged commit
+- **Recognize it:** `php sbin/qbixserver.phar --version` on the tagged commit
   shows the previous tag.
 - **Fix:** build the release phar with the version being cut:
   `QBIX_SHIP_VERSION=vX.Y.Z.N php -d phar.readonly=0 build-phar.php`
@@ -220,7 +220,7 @@ Three separate defects, all "tests pass, production drops requests":
   `CHANGELOG.md`. A tag without one builds, tests and stops -- but Packagist has
   already read it, and a tag once read is a permanent version. It cannot be
   moved or re-cut: anything that resolved it keeps what it found.
-- **Recognise it:** `git tag -l 'v*' --sort=version:refname` and
+- **Recognize it:** `git tag -l 'v*' --sort=version:refname` and
   `gh release list` disagree. Never use plain `tail -1` on tags: `0.0.4.10`
   sorts before `0.0.4.8` by name.
 - **Fix:** write the changelog section before tagging. For a version already
@@ -237,7 +237,7 @@ Three separate defects, all "tests pass, production drops requests":
   worker received an empty frame; and `is_uploaded_file()` was checked against a
   registry the pool's multipart parser never wrote to, so files that had arrived
   whole were refused.
-- **Recognise it:** a hang in a progress dialog is a transport fault until proven
+- **Recognize it:** a hang in a progress dialog is a transport fault until proven
   otherwise. Compare the same upload against another web server byte for byte
   before reading application code.
 - **Fix:** request bodies are framed safely for any bytes, and the parser
@@ -253,7 +253,7 @@ Three separate defects, all "tests pass, production drops requests":
 - **Actually:** the FPM pool that serves the vhost may belong to a different
   master than the default `php-fpm` unit -- a control panel often runs one FPM
   master per PHP version. The reload went to the wrong master.
-- **Recognise it:** `ps -eo pid,etime,cmd | grep "php-fpm: master"` lists more
+- **Recognize it:** `ps -eo pid,etime,cmd | grep "php-fpm: master"` lists more
   than one master, and the one serving the site has been up far longer than your
   reload. Find the pool file that names the vhost under each master's
   `php-fpm.d/`.

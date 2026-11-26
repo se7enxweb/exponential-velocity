@@ -2,6 +2,8 @@
 
 Each WebSocket connection gets **one PHP process**. It stays alive for the entire connection. Static variables persist across messages. When the client disconnects, the process dies — all state wiped.
 
+Connection and room processes are forked with `pcntl_fork()`, so they need a PHP with pcntl (Linux, macOS, the BSDs). On Windows, or any PHP without pcntl, no connection or room process is started, so `handlers/` events are not dispatched; [GraphQL subscriptions](#graphql-subscriptions-graphql-transport-ws), answered by the server process itself, do not need one.
+
 ### How it works
 
 ```
@@ -18,7 +20,8 @@ Browser: connects to ws://localhost/ws
 
 ```php
 <?php
-// handlers/counter/increment.php function counter_increment(&$params, &$result) {
+// handlers/counter/increment.php
+function counter_increment(&$params, &$result) {
     static $count = 0;  // persists across messages from THIS client
     $count++;
     $result = ['count' => $count];
@@ -26,7 +29,9 @@ Browser: connects to ws://localhost/ws
 ```
 
 ```javascript
-// Client — standard socket.io-client import { io } from 'socket.io-client'; const socket = io('http://localhost', {transports: ['websocket']});
+// Client — standard socket.io-client
+import { io } from 'socket.io-client';
+const socket = io('http://localhost', {transports: ['websocket']});
 
 socket.emit('counter/increment', {}, (res) => {
     console.log(res.count); // 1
@@ -41,7 +46,8 @@ The per-connection process is the natural place for auth. Validate once, store i
 
 ```php
 <?php
-// handlers/auth/login.php function auth_login(&$params, &$result) {
+// handlers/auth/login.php
+function auth_login(&$params, &$result) {
     static $user = null;
 
     if ($user) {
@@ -65,7 +71,8 @@ A per-connection handler decides when to join a room. This is your access contro
 
 ```php
 <?php
-// handlers/chat/join.php function chat_join(&$params, &$result) {
+// handlers/chat/join.php
+function chat_join(&$params, &$result) {
     static $user = null;  // set by auth/login handler (shared static scope)
     $socket = $params['socket']; // Q_Socket instance
 
@@ -216,7 +223,8 @@ socket.on('chat/message', function(data) {
     console.log('sent, id=' + res.id);
 });
 
-// Server→client RPC socket.handle('getLocation', function() {
+// Server→client RPC
+socket.handle('getLocation', function() {
     return {lat: 40.7, lng: -74.0};
 });
 </script>
@@ -244,20 +252,21 @@ Namespace    Client emit              Handler path            Room "general" ─
 ```
 
 ```javascript
-// Client connects to namespaces const main = io('http://localhost')
-;          // default / const chat = io('http://localhost/chat')
-;     // /chat const admin = io('http://localhost/admin')
-;   // /admin
+// Client connects to namespaces
+const main = io('http://localhost');          // default /
+const chat = io('http://localhost/chat');     // /chat
+const admin = io('http://localhost/admin');   // /admin
 
-chat.emit('message', {text: 'hello'});   // → handlers/chat/message.php admin.emit('auth', {token: '...'})
-;      // → handlers/admin/auth.php
+chat.emit('message', {text: 'hello'});   // → handlers/chat/message.php
+admin.emit('auth', {token: '...'});      // → handlers/admin/auth.php
 ```
 
 Namespace connect/disconnect handlers are optional. If you define one, it runs as access control. If you don't, the namespace auto-accepts:
 
 ```php
 <?php
-// handlers/admin/connect.php — optional, runs on namespace connect function MyApp_admin_connect(&$params, &$result) {
+// handlers/admin/connect.php — optional, runs on
+namespace connect function MyApp_admin_connect(&$params, &$result) {
     extract($params); // $socket, $data
     if (!MyApp\Auth::isAdmin($data['token'] ?? '')) {
         $result = ['error' => 'forbidden'];
@@ -272,7 +281,8 @@ PHP handlers can call methods on the client using `$socket->methodName()`. The c
 
 ```php
 <?php
-// handlers/location/check.php function MyApp_location_check(&$params, &$result) {
+// handlers/location/check.php
+function MyApp_location_check(&$params, &$result) {
     extract($params); // $socket, $event, $data
 
     $location = $socket->getLocation();
@@ -310,7 +320,8 @@ socket.handle('getLocation', function() {
     return {lat: 40.7, lng: -74.0};
 });
 
-// Async handlers work too socket.handle('getPosition', async function() {
+// Async handlers work too
+socket.handle('getPosition', async function() {
     var pos = await new Promise(function(resolve) {
         navigator.geolocation.getCurrentPosition(resolve);
     });
@@ -340,7 +351,8 @@ Handler file paths stay the same — the app prefix is only on the function name
 
 ```php
 <?php
-// classes/Chess/Game.php namespace Chess; class Game { /* ... */ }
+// classes/Chess/Game.php
+namespace Chess; class Game { /* ... */ }
 ```
 
 If `Q.app` is not set, functions use no prefix: `game_move`, `chat_message`. Small standalone projects don't need it.
@@ -370,7 +382,11 @@ If you use Composer, its autoloader is loaded automatically — `vendor/autoload
 
 The resolution order:
 
-1. `Q.autoload.psr-4` — config-driven PSR-4 mappings 2. `Q.autoload.psr-0` — config-driven PSR-0 mappings (underscores = separators) 3. Internal Q classes — `src/Q/*.php` 4. Project `classes/` directory — the Qbix convention (both `\` and `_` as separators) 5. Composer — `vendor/autoload.php` (if present)
+1. `Q.autoload.psr-4` — config-driven PSR-4 mappings
+2. `Q.autoload.psr-0` — config-driven PSR-0 mappings (underscores = separators)
+3. Internal Q classes — `src/Q/*.php`
+4. Project `classes/` directory — the Qbix convention (both `\` and `_` as separators)
+5. Composer — `vendor/autoload.php` (if present)
 
 ### When to use per-connection
 
@@ -387,9 +403,7 @@ Scripts that set `Content-Type: text/event-stream` automatically stream their ou
 Q_Response::header('Content-Type: text/event-stream');
 Q_Response::header('Cache-Control: no-cache');
 
-for ($i = 1;
-$i <= 100;
-$i++) {
+for ($i = 1; $i <= 100; $i++) {
     echo "data: " . json_encode(['count' => $i, 'time' => date('H:i:s')]) . "\n\n";
     @ob_flush();
     flush();
@@ -405,7 +419,9 @@ Three triggers activate streaming mode (any one is sufficient):
 | `X-Accel-Buffering: no` | Nginx convention, also auto-detected |
 | `Q_Response::setStreaming(true)` | Explicit API call |
 
-The server sends HTTP headers immediately with `Transfer-Encoding: chunked`, then writes each `flush()` output as a chunked frame directly to the client socket. Non-streaming responses are completely unaffected — the detection adds zero overhead (the callback only fires on explicit `ob_flush()`, not per byte).
+The server sends HTTP headers on the first flush, with `Transfer-Encoding: chunked` over HTTP/1.1 (DATA frames over HTTP/2), then writes each `flush()` output to the client as it arrives. A streamed response has no `Content-Length` and is never stored in the response cache. `connection_aborted()` and `connection_status()` report a client that has gone, and with `ignore_user_abort` off, as under PHP-FPM, the next flush ends the request. Non-streaming responses are completely unaffected — the detection adds zero overhead (the callback only fires on explicit `ob_flush()`, not per byte).
+
+In a worker pool a stream holds its worker for as long as it runs, so three settings under `Q.webserver` bound them: `streamTimeout` (seconds one stream may run, default `300`, `0` for no limit), `streamShare` (the share of the pool's workers streams may hold at once, default `0.25`) and `maxStreams` (an absolute cap used instead of the share, default `0`: use the share). A stream past the cap is refused with `503`.
 
 This is useful for AI token streaming (proxying LLM APIs to the browser), real-time logs, progress indicators, and any long-running response where the client should see partial results before the script finishes.
 
@@ -440,9 +456,11 @@ The handshake's own headers (Cookie, Authorization, Origin) go with every
 request too; the WebSocket ones never do. A subscribe before
 `connection_init` is closed with 4401, a second `connection_init` with 4429, a
 duplicate id with 4409, a malformed message with 4400, and a connection that
-sends no `connection_init` within `initTimeout` with 4408. A connection with no
-subscription for `idleTimeout` seconds is closed; the server pings every
-`pingInterval` seconds.
+sends no `connection_init` within `initTimeout` (default 10) seconds with 4408. A connection with no
+subscription for `idleTimeout` (default 60) seconds is closed; the server pings every
+`pingInterval` (default 30) seconds. One connection may hold at most
+`maxSubscriptions` (default 20) subscriptions at once. All four are under
+`Q.webserver.graphqlWs`.
 
 Each open subscription is one pooled stream: `streamShare` and `maxStreams`
 cap them, and `streamTimeout` ends a long one -- after which the server opens
@@ -462,7 +480,15 @@ One process per active room. All members' messages go to the same process. State
 ### The lifecycle
 
 ```
-1. Client A's handler calls $socket->join('chat/general', ['userId'=>1, 'name'=>'Alice']) 2. Parent sees 'chat/general' matches pattern 'chat/$room' 3. Parent forks a room process → init handler fires 4. Parent sends _join to room → join handler fires (with socketId + data) 5. Client B joins the same room → join fires again (no new fork) 6. Both clients' messages are forwarded to the room process 7. Client A disconnects → leave fires (data is empty — unplanned disconnect) 8. Client B disconnects → leave fires → room is empty 9. destroy fires → room process exits
+1. Client A's handler calls $socket->join('chat/general', ['userId'=>1, 'name'=>'Alice'])
+2. Parent sees 'chat/general' matches pattern 'chat/$room'
+3. Parent forks a room process → init handler fires
+4. Parent sends _join to room → join handler fires (with socketId + data)
+5. Client B joins the same room → join fires again (no new fork)
+6. Both clients' messages are forwarded to the room process
+7. Client A disconnects → leave fires (data is empty — unplanned disconnect)
+8. Client B disconnects → leave fires → room is empty
+9. destroy fires → room process exits
 ```
 
 The client never talks to the room process directly. Per-connection handlers call `$socket->join()` — that's the gateway. Access control lives there. User identity flows through the third argument.
@@ -492,7 +518,14 @@ The `handler` value is a path prefix. Each event dispatches to its own handler f
 ```
 "chat/$room": {"handler": "chat/room"}
 
-handlers/chat/room/ ├── init.php          ← room created (first user joins) ├── join.php          ← user enters ├── leave.php         ← user exits or disconnects ├── tick.php          ← timer fired (if configured) ├── destroy.php       ← room shutting down (last user left) ├── message.php       ← "message" event from a member └── typing.php        ← "typing" event from a member
+handlers/chat/room/
+├── init.php          ← room created (first user joins)
+├── join.php          ← user enters
+├── leave.php         ← user exits or disconnects
+├── tick.php          ← timer fired (if configured)
+├── destroy.php       ← room shutting down (last user left)
+├── message.php       ← "message" event from a member
+└── typing.php        ← "typing" event from a member
 ```
 
 Same pattern as HTTP: one file per event, function name matches the path.
@@ -512,7 +545,8 @@ Same pattern as HTTP: one file per event, function name matches the path.
 
 ```php
 <?php
-// handlers/chat/room/join.php function chat_room_join(&$params, &$result) {
+// handlers/chat/room/join.php
+function chat_room_join(&$params, &$result) {
     $room   = $params['room']; // Q_Room instance
     $sid    = $room->socketId;
     $userId = $params['data']['userId'] ?? null;
@@ -545,7 +579,8 @@ Same pattern as HTTP: one file per event, function name matches the path.
 
 ```php
 <?php
-// handlers/chat/room/message.php function chat_room_message(&$params, &$result) {
+// handlers/chat/room/message.php
+function chat_room_message(&$params, &$result) {
     $room = $params['room'];
     $name = ChatRoom::$names[$room->socketId] ?? 'anon';
     $text = $params['data']['text'] ?? '';
@@ -565,7 +600,8 @@ Same pattern as HTTP: one file per event, function name matches the path.
 
 ```php
 <?php
-// handlers/chat/room/leave.php function chat_room_leave(&$params, &$result) {
+// handlers/chat/room/leave.php
+function chat_room_leave(&$params, &$result) {
     $room = $params['room'];
     $sid  = $room->socketId;
     $name = ChatRoom::$names[$sid] ?? 'anon';
@@ -611,7 +647,8 @@ Copy-on-write handles the rest: the parent's `ChatRoom::$users` starts as `[]`. 
 
 ```php
 <?php
-// handlers/game/room/join.php function game_room_join(&$params, &$result) {
+// handlers/game/room/join.php
+function game_room_join(&$params, &$result) {
     $room = $params['room'];
     GameRoom::$players[$room->socketId] = [
         'x' => 0, 'y' => 0, 'hp' => 100,
@@ -625,7 +662,8 @@ Copy-on-write handles the rest: the parent's `ChatRoom::$users` starts as `[]`. 
 
 ```php
 <?php
-// handlers/game/room/move.php — client sends "move" event function game_room_move(&$params, &$result) {
+// handlers/game/room/move.php — client sends "move" event
+function game_room_move(&$params, &$result) {
     $room = $params['room'];
     GameRoom::$players[$room->socketId]['x'] = $params['data']['x'];
     GameRoom::$players[$room->socketId]['y'] = $params['data']['y'];
@@ -635,7 +673,8 @@ Copy-on-write handles the rest: the parent's `ChatRoom::$users` starts as `[]`. 
 
 ```php
 <?php
-// handlers/game/room/tick.php — called every 100ms function game_room_tick(&$params, &$result) {
+// handlers/game/room/tick.php — called every 100ms
+function game_room_tick(&$params, &$result) {
     $room = $params['room'];
     GameRoom::$tick++;
     $room->broadcast([
@@ -647,14 +686,16 @@ Copy-on-write handles the rest: the parent's `ChatRoom::$users` starts as `[]`. 
 
 ```php
 <?php
-// handlers/game/room/leave.php function game_room_leave(&$params, &$result) {
+// handlers/game/room/leave.php
+function game_room_leave(&$params, &$result) {
     unset(GameRoom::$players[$params['room']->socketId]);
 }
 ```
 
 ```php
 <?php
-// classes/GameRoom.php class GameRoom {
+// classes/GameRoom.php
+class GameRoom {
     static $players = [];
     static $tick = 0;
 }
@@ -683,7 +724,21 @@ All three models in one project. HTTP handles pages and login. Per-connection We
 ### Project structure
 
 ```
-chat/ ├── sbin/qbixserver.php ├── config/ │   └── server.json ├── web/ │   ├── index.html              ← static: the chat UI │   └── api/ │   └── api/ │       ├── messages.php        ← HTTP: GET recent messages from DB │       └── login.php           ← HTTP: POST authenticate, return token ├── classes/ │   ├── Chat/ │   │   ├── Auth.php            ← shared: token validation │   │   └── Messages.php        ← shared: DB read/write │   └── ChatRoom.php            ← room state: static properties └── handlers/
+chat/
+├── sbin/qbixserver.php
+├── config/
+│   └── server.json
+├── web/
+│   ├── index.html              ← static: the chat UI
+│   └── api/
+│       ├── messages.php        ← HTTP: GET recent messages from DB
+│       └── login.php           ← HTTP: POST authenticate, return token
+├── classes/
+│   ├── Chat/
+│   │   ├── Auth.php            ← shared: token validation
+│   │   └── Messages.php        ← shared: DB read/write
+│   └── ChatRoom.php            ← room state: static properties
+└── handlers/
     ├── auth/
     │   └── login.php           ← per-connection: authenticate
     ├── chat/
@@ -724,7 +779,8 @@ Note: `message`, `typing` are NOT in the events map. Once a user joins a room, t
 
 ```php
 <?php
-// handlers/auth/login.php — authenticate on connect function auth_login(&$params, &$result) {
+// handlers/auth/login.php — authenticate on connect
+function auth_login(&$params, &$result) {
     $token = $params['data']['token'] ?? '';
     $user = Chat\Auth::validateToken($token);
     if (!$user) {
@@ -739,7 +795,8 @@ Note: `message`, `typing` are NOT in the events map. Once a user joins a room, t
 
 ```php
 <?php
-// handlers/chat/join.php — access control, then join room function chat_join(&$params, &$result) {
+// handlers/chat/join.php — access control, then join room
+function chat_join(&$params, &$result) {
     $socket = $params['socket']; // Q_Socket instance
     $user = $GLOBALS['user'] ?? null;
     if (!$user) {
@@ -761,7 +818,8 @@ Note: `message`, `typing` are NOT in the events map. Once a user joins a room, t
 
 ```php
 <?php
-// handlers/chat/room/join.php function chat_room_join(&$params, &$result) {
+// handlers/chat/room/join.php
+function chat_room_join(&$params, &$result) {
     $room   = $params['room']; // Q_Room instance
     $sid    = $room->socketId;
     $userId = $params['data']['userId'] ?? null;
@@ -790,7 +848,8 @@ Note: `message`, `typing` are NOT in the events map. Once a user joins a room, t
 
 ```php
 <?php
-// handlers/chat/room/message.php function chat_room_message(&$params, &$result) {
+// handlers/chat/room/message.php
+function chat_room_message(&$params, &$result) {
     $room = $params['room'];
     $name = ChatRoom::$names[$room->socketId] ?? 'anon';
     $text = $params['data']['text'] ?? '';
@@ -812,7 +871,8 @@ Note: `message`, `typing` are NOT in the events map. Once a user joins a room, t
 
 ```php
 <?php
-// handlers/chat/room/leave.php function chat_room_leave(&$params, &$result) {
+// handlers/chat/room/leave.php
+function chat_room_leave(&$params, &$result) {
     $room = $params['room'];
     $sid  = $room->socketId;
     $name = ChatRoom::$names[$sid] ?? 'anon';

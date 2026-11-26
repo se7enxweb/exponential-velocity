@@ -2,7 +2,7 @@
 
 Velocity can be packaged as a single executable file containing the PHP runtime, the web server, and your entire application. The binary runs on any machine — nothing to install.
 
-## Why is the binary 5 MB, not 200 MB?
+## Why is the binary 20 MB, not 200 MB?
 
 Electron ships an entire copy of Chromium and Node.js inside every app. That's a full browser engine duplicated for each application on the user's machine.
 
@@ -11,13 +11,13 @@ Velocity opens the browser that's already there. `--open` calls the system brows
 | Component | Electron app | Velocity binary |
 |---|---|---|
 | Browser engine | ~120 MB (Chromium) | 0 — uses system browser |
-| Language runtime | ~30 MB (Node.js + V8) | ~4 MB (static PHP) |
-| Server | bundled in Node | included in the 4 MB |
+| Language runtime | ~30 MB (Node.js + V8) | ~12 MB (static PHP, `mini`) |
+| Server | bundled in Node | the phar, ~6 MB |
 | Dependencies | ~10 MB (node_modules) | 0 — no Composer, no npm |
 | App code | varies | varies |
-| **Typical total** | **~165 MB** | **~5 MB** |
+| **Typical total** | **~165 MB** | **~18 MB** (`mini`) |
 
-The static PHP binary from [static-php-cli](https://github.com/crazywhalecc/static-php-cli) includes pcntl, sockets, sqlite3, openssl, phar, and mbstring in about 4 MB. The phar with all server code adds ~1 MB. Your app code goes on top.
+The static PHP binary from [static-php-cli](https://github.com/crazywhalecc/static-php-cli) in the `mini` variant carries only what the server needs (process isolation, sockets, TLS, sessions, SQLite for its metrics) in about 12 MB on Linux x86-64. The phar with all server code adds about 6 MB. Your app code goes on top. The variants with an application platform's extensions are larger (below): most of that is ICU, the data `intl` carries.
 
 The tradeoff: Electron gives a controlled rendering environment — same browser engine on every machine. Velocity gives whatever browser the user has. For a web app that already works in a browser — which is what PHP apps are — there's no reason to ship another one.
 
@@ -31,15 +31,16 @@ and every build takes its list from there.
 
 | Variant | Carries | Size (Linux x86-64, PHP 8.3) | For |
 |---|---|---|---|
-| `mini` | Only what the server itself needs: process isolation, sockets, TLS, sessions, its own metrics store | 16 MB | Static sites, small scripts, the smallest footprint |
-| `lite` | mini + everything a typical application platform requires: XML, images (gd), MySQL/MariaDB, SQLite, cURL, intl, zip, opcache | 68 MB | Most applications |
-| `standard` | lite + the recommended tier: PostgreSQL, MongoDB, the caches (apcu, redis, memcached, igbinary), LDAP, SOAP, bcmath and more | 73 MB | The default: what the documentation assumes |
-| `full` | Everything static-php-cli can build on that platform, best effort | ~90-120 MB | When you need an extension outside standard |
+| `mini` | Only what the server itself needs: process isolation, sockets, TLS, sessions, its own metrics store | 18 MB | Static sites, small scripts, the smallest footprint |
+| `lite` | mini + everything a typical application platform requires: XML, images (gd), MySQL/MariaDB, SQLite, cURL, intl, zip, opcache | 71 MB | Most applications |
+| `standard` | lite + the recommended tier: PostgreSQL, MongoDB, the caches (apcu, redis, memcached, igbinary), LDAP, SOAP, bcmath and more | 75 MB | The default: what the documentation assumes |
+| `full` | Everything static-php-cli can build on that platform, best effort | ~113 MB | When you need an extension outside standard |
 | `source` | A build kit, not a binary: the phar, the baseline, the console tool and a ready spc recipe for every platform x PHP x variant | — | A platform, architecture or PHP version no release covers |
 
-Most of lite's size is the ICU data `intl` carries; Windows builds are smaller
-(35 MB for standard), since `intl` is not in them. Sizes vary a little by platform
-and PHP version; each release page lists the exact files.
+Sizes are those of v0.0.4.66. Most of lite's size is the ICU data `intl` carries;
+Windows builds are smaller (37 MB for standard on PHP 8.3), since `intl` is not in
+them. Sizes vary a little by platform and PHP version; each release page lists the
+exact files.
 
 `full` is built on a best-effort basis: it depends on every third-party source
 static-php-cli knows, and one that fails on a platform leaves that platform's
@@ -56,7 +57,7 @@ list with reasons):
 | `gmssl` | every platform | the library builds, but the extension is never registered (`php --ri gmssl` fails) |
 | `mysqlnd_ed25519`, `mysqlnd_parsec` | every platform | static-php-cli builds them only as shared extensions |
 | `protobuf` | every platform | conflicts with `grpc`, which `full` carries |
-| `yac` | linux-aarch64, macos-arm64 | finds no atomic compare-and-swap it recognises on arm64 |
+| `yac` | linux-aarch64, macos-arm64 | finds no atomic compare-and-swap it recognizes on arm64 |
 | `yac` | windows-x64 | its bundled igbinary breaks `redis`' igbinary detection |
 | `xlswriter`, `ds` | windows-x64 | static-php-cli's Windows patch or source path no longer matches |
 | `xz` | windows-x64 | the library builds, but the extension is never registered |
@@ -86,6 +87,8 @@ qbixserver-windows-x64-php<version>-<variant>-gui.exe  Windows, no console windo
 qbixserver-source-kit-<release>.tar.gz               the source kit
 exponential-velocity_<release>-1+<distro>_all.deb          OS packages (packages.md)
 exponential-velocity-<release>-1.<distro>.noarch.rpm
+qbixserver.phar                                      the server alone, for any PHP 8
+qbix_fork.dll                                        Windows: the FFI shim (below), when it built
 SHA256SUMS                                           checksums of every file above
 ```
 
@@ -289,20 +292,42 @@ If you're running it yourself on a trusted machine, signing is optional — the 
 
 ## Where Data Is Stored
 
-When running as a packed binary, the server stores runtime data next to the binary:
+When running as a packed binary, the server stores runtime data next to the
+binary, in a directory named after it (`.exe` or `.phar` dropped):
 
 ```
-/opt/myapp              ← the binary
-/opt/myapp.data/        ← created automatically
-  panel.json            ← control panel config and password
-  metrics.db            ← time-series stats (SQLite)
-  logs/access.log       ← buffered access log
-  logs/error.log        ← error log
-  certs/                ← TLS certificates
-  keys/                 ← signing keys
+/opt/myapp                      ← the binary
+/opt/myapp.data/                ← created automatically
+  local/metrics.db              ← time-series stats (SQLite)
+  local/logs/access.log         ← buffered access log
+  local/logs/error.log          ← error log
+  local/keys/                   ← signing keys made with --generate-key
+  certs/, keys/, logs/          ← created at start
 ```
 
-Override with `--data-dir=/path` or set `QBIX_DATA_DIR`.
+There is no option to move the directory itself. The files in it can each be
+moved by their own setting: `Q.webserver.metrics.db`, `.accessLog` and
+`.errorLog`. Where the control panel keeps its password and sessions, and how
+to move them (`Q.panel.aclDir`, `Q.panel.sessionsDir`), is in
+[dashboard.md](dashboard.md#where-the-panel-keeps-its-credentials).
+
+## Signing a Directory
+
+A directory (an application, a plugin, a deploy) can carry a signed
+`manifest.json` with the hash of every file in it:
+
+```bash
+# Hash every file and write DIR/manifest.json; with --policy, require N signatures
+./qbixserver --sign=./myapp --policy=2
+# Add a signature to that manifest (each signer runs this with their own key)
+./qbixserver --sign=./myapp --key=local/keys/alice.pem --key-id=alice
+# Check every file against the manifest and its signatures; exits 1 on any mismatch
+./qbixserver --verify=./myapp
+```
+
+`--key` and `--key-id` must be given together for a signature to be added;
+without them `--sign` only (re)writes the manifest. `--policy=N` stores
+`policy.require = N` in the manifest.
 
 ## Signing Binaries
 
@@ -374,11 +399,11 @@ Each entry says why, and exactly what has to change before it can come back.
 
 | What | On Windows | Why | Needed to bring it back |
 |---|---|---|---|
-| `pcntl`, `posix` | Not built | POSIX-only PHP extensions: there is no `fork()` on Windows. | Nothing can: these do not exist for Windows. Per-request isolation comes from `qbix_fork.dll`, or from php-cgi when that is missing (see below). |
+| `pcntl`, `posix` | Not built | POSIX-only PHP extensions: there is no `fork()` on Windows. | Nothing can: these do not exist for Windows. The workers are the portable pool instead: each one a process of its own, started with `proc_open()` ([windows.md](windows.md#the-portable-pool)). |
 | `intl` | Left out | The ICU bundle spc ships for Windows is ICU 78, whose headers require C++17. PHP 8.3's Windows build compiles `ext/intl` with the compiler's default standard, so the build dies in `intl_convertcpp.cpp` with `icu_78::UnicodeString: use of undefined type`. Raising the standard globally (`CL=/std:c++17`) does not work: it also reaches the C libraries, and libxml2's `/std:c11` rejects it (MSVC error D8016). | Any one of: the PHP Windows build passing `/std:c++17` to `ext/intl`'s C++ sources only; spc supporting that per extension; or spc offering an ICU 74 or earlier bundle for Windows. Then add `intl` back to the Windows `extensions:` list in `.github/workflows/release.yml`. |
 | `xsl` | Left out | spc reports "library [libxslt] is in the lib.json list but not supported to compile" on Windows. | libxslt support in spc's Windows builder. |
 | `ffi` | Built when available | spc's download step asks for `ffi` first and retries without it if that fails. Without FFI there is no `qbix_fork.dll`. | Nothing; it is attempted on every build. |
-| `qbix_fork.dll` | Best effort | A small native shim (`src/fork_shim.c`) that gives copy-on-write worker processes through FFI. It is compiled after PHP, and a failure there does not fail the job. Without it the server uses php-cgi per request, which is slower but correct. | Nothing; it is attempted on every build. |
+| `qbix_fork.dll` | Best effort | A small native shim (`src/fork_shim.c`) meant to give copy-on-write processes through FFI (`Q_WebServer_Fork`). It is compiled after PHP, and a failure there does not fail the job; when it builds it is attached to the release. The worker pool does not use it: cloning a Windows process with open sockets is not something Windows supports, so Windows workers are the portable pool. | Nothing; it is attempted on every build. |
 | Runner image | Pinned to `windows-2022` | `windows-latest` moved to an image with Visual Studio 2026 (version 18), which spc does not look for: it checks fixed paths for VS 2022 and 2019 only, and failed with "Current VS version  is not supported yet!". Its Windows libraries also carry VS 2022 project files. | spc supporting the VS 18 toolset; then the pin can move. |
 
 Releases up to and including v0.0.4.27 were published without a Windows

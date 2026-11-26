@@ -36,6 +36,7 @@ php sbin/qbixserver.php --help
 | `--https-port=PORT` | HTTPS port. See [https.md](https.md). |
 | `--socket=PATH`, `--socket-mode=MODE` | Also listen on a Unix domain socket, with these permissions (default `0660`). |
 | `--workers=N` | Persistent workers. See [workers.md](workers.md). |
+| `--pool-mode=MODE` | How workers are started: `fork`, `portable` (own processes via `proc_open`, as on Windows) or `auto` (default: `fork` where `pcntl` exists, else `portable`). `Q.webserver.poolMode`, `QBIX_POOL_MODE`. See [windows.md](windows.md). |
 | `--config=FILE` | JSON configuration, normally `<conf dir>/sites-enabled/<site>.conf`. |
 | `--conf-dir=DIR` | The configuration directory. See [layout.md](layout.md). |
 | `--distribution=NAME` | Load a distribution's additions. |
@@ -44,12 +45,15 @@ php sbin/qbixserver.php --help
 | `--pid=PATH` | The pid file. |
 | `--user=NAME`, `--group=NAME` | The user and group the workers run as when the server is started as root (Apache's `User`/`Group`). See [workers.md](workers.md#the-user-the-workers-run-as). |
 | `--allow-root-workers` | Permit `--user=root`. |
+| `--drop-master` | The server process itself becomes that user once its ports are bound and its certificates read (`Q.webserver.dropMaster`, `QBIX_RUN_DROP_MASTER=1`). See [running-without-root.md](running-without-root.md). |
+| `--keep-globals=A,B` | Globals the application keeps between requests (`Q.webserver.keepGlobals`). See [workers.md](workers.md). |
+| `--watchdog` | Run under the watchdog, which restarts the server after a crash (`Q.webserver.watchdog`). See [running.md](running.md#watchdog). |
 | `--stop`, `--reload` | Stop the running server, or re-exec it, through its pid file. |
 | `-t` | Test the configuration and exit. |
 | `--hotreload` | Watch files and restart when they change. |
 | `-q`/`--quiet`, `--verbose`, `--debug` | Errors only; also every certificate provider tried; every event. `--debug` also puts the file, line, trace and previous exceptions of an uncaught error into its 500 response (`webserver.debug`). |
 | `--open[=/path]` | Open a browser once the server is ready. |
-| `--version`, `-v` | Print the version. |
+| `--version`, `-v` | Print the version, build, copyright and license (also `--about`, `--copyright`). |
 
 Signing, verifying and packing (`--sign`, `--verify`, `--generate-key`,
 `--sign-binary`, `--verify-binary`, `--pack`) are described in
@@ -81,19 +85,22 @@ qbixconsole ser:stat                 # a unique abbreviation works
 | `mod:enable`, `mod:disable` | `enmod`, `dismod` | Enable or disable a module. |
 | `cache:clear` | — | Invalidate every page in the response cache. See [cache.md](cache.md). |
 | `ssl:show`, `ssl:check`, `ssl:issue`, `ssl:renew` | `ssl` | Certificates. See [https.md](https.md#the-console). |
+| `panel:password`, `panel:2fa`, `panel:check` | — | The control panel's password, its two-factor authentication (`status`, `enroll`, `confirm`, `disable`, `recovery`), and where it keeps its credentials and sessions. See [dashboard.md](dashboard.md). |
+| `ext:check`, `ext:list`, `ext:plan`, `ext:build`, `ext:install-hint` | — | PHP extensions: check this PHP against the standard set, list or plan what a build variant carries, build a static binary, show how to install what is missing. See [extensions.md](extensions.md). |
 
 Every command exits `0` on success. `server:status` exits `3` when the server is not
 running, as LSB init scripts report it, so a monitoring script can tell "stopped"
-from "failed". Output is coloured only when it goes to a terminal.
+from "failed". Output is colored only when it goes to a terminal.
 
 The server commands find the running server by its pid file: `--pid`, else
 `Q.webserver.pidFile`, else `/run/qbix/qbixserver.pid` when that directory is
-writable, else the temporary directory. `server:start` passes on every server
+writable (`%ProgramData%\qbix\run` on Windows), else the temporary directory. `server:start` passes on every server
 option it is given (`--root`, `--app`, `--host`, `--port`, `--https-port`,
 `--socket`, `--socket-mode`, `--workers`, `--config`, `--conf-dir`,
 `--distribution`, `--preset`, `--keep-globals`, `--user`, `--group`, and the
 flags `--debug`, `--quiet`, `--verbose`, `--hotreload`, `--watchdog`,
-`--allow-root-workers`; anything else after `--`) and waits up to `--wait`
+`--allow-root-workers`, `--drop-master`; anything else after `--`, such as
+`--pool-mode`) and waits up to `--wait`
 seconds (`20`) for it to listen.
 
 The server's output goes to `--log`. Without it, it goes to the server's own

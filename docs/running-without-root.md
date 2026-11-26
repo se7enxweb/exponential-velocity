@@ -15,7 +15,8 @@ little root as each setup allows.
 | Started as root, pools of several users (`Q.webserver.pools`) | root (only to switch each pool to its user) | each pool's own user | the master; bound it with `CapabilityBoundingSet` |
 
 Workers never run as root unless asked twice (`--user=root` and
-`--allow-root-workers`): every process that runs application code switches user
+`--allow-root-workers`, which `Q.webserver.allowRootWorkers: true` or
+`QBIX_RUN_ALLOW_ROOT=1` also say): every process that runs application code switches user
 right after it is forked and before it runs anything, and checks that root cannot
 be had back (`Q_WebServer_RunAs`, [multiuser.md](multiuser.md)).
 
@@ -38,6 +39,12 @@ The certificate and key must be readable by the user (group `vc`, mode 0640).
 Behind nginx (Velocity on a Unix socket or 127.0.0.1) not even the capability is
 needed: `CapabilityBoundingSet=` empty. `vcc profile apply standalone|nginx`
 writes these units.
+
+The `.deb` and `.rpm` packages ship a unit of this kind,
+`packaging/systemd/exponential-velocity.service`: `User=qbix`, `Group=qbix`,
+`AmbientCapabilities=CAP_NET_BIND_SERVICE`, `NoNewPrivileges=true`, running
+`/usr/sbin/qbixserver` with the settings of `/etc/default/exponential-velocity`
+(see [packages.md](packages.md)).
 
 ### 2. `--drop-master`: root only for the start
 

@@ -35,7 +35,15 @@ machine and from what a worker costs:
 The server then checks the count against the file descriptor and process limits
 and lowers it when they are too tight; on a terminal it asks before starting.
 Anything beyond the automatic ceiling is a deliberate choice, made with
-`--workers`.
+`--workers`. Where the machine's memory cannot be read, the count is four per core,
+between 4 and 64.
+
+Where PHP has no `fork` (Windows, or a PHP built without `pcntl`), or when
+`--pool-mode=portable` (`Q.webserver.poolMode`, `QBIX_POOL_MODE`) asks for it, the
+pool is a portable one: each worker is a process of its own, started with
+`proc_open()`, that boots the application itself. Without `--workers` it has one
+worker per core, between 2 and 8, or `Q.webserver.workers` when set. See
+[windows.md](windows.md#the-portable-pool).
 
 ```sh
 php sbin/qbixserver.php --root=web --workers=32
@@ -468,10 +476,14 @@ Every setting, with its default. All are under `Q.webserver`.
 | `maxConnections` | `1024` | Connections open at once; beyond it the server answers `503`. |
 | `user`, `group` | owner and group of the document root | Who the workers run as when the server is root. See [The user the workers run as](#the-user-the-workers-run-as). |
 | `allowRootWorkers` | `false` | Permit `user` root. |
+| `dropMaster` | `false` | The server process itself gives up root once its ports are bound. See [running-without-root.md](running-without-root.md). |
+| `poolMode` | `auto` | `fork`, `portable` or `auto` (`fork` where `pcntl` exists). See [windows.md](windows.md#the-portable-pool). |
+| `pools` | `{}` | Pools of workers that run as other users, chosen by host. See [multiuser.md](multiuser.md). |
 | `warmupAsUser` | `true` | Run the warm-up with the worker user's effective ids. |
 | `writable` | `[]` | More directories to hand to the worker user at start. |
 
-The pool size itself is given with `--workers`.
+The pool size itself is given with `--workers`; `Q.webserver.workers` is read
+only by the portable pool.
 
 ---
 

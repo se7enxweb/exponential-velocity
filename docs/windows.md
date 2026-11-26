@@ -75,10 +75,11 @@ These are runner numbers, not a benchmark: shared virtual machines, two
 workers, no cache. They show that nothing fails or leaks under concurrency,
 not how fast a real Windows server is.
 
-Unit tests: 141 of the 195 `tests/unit-*.php` pass on Windows Server 2025
-with PHP 8.3 (51 fail, 3 time out; most of those exercise fork, signals,
-`/proc` or POSIX modes on purpose). The 43 in `tests/windows/unit-windows.txt`
-are the gate every Windows job runs.
+Unit tests: 141 of the 195 `tests/unit-*.php` there were at the time passed
+on Windows Server 2025 with PHP 8.3 (51 failed, 3 timed out; most of those
+exercise fork, signals, `/proc` or POSIX modes on purpose); there are 198 now,
+and the survey job lists the current count. The 40 listed in
+`tests/windows/unit-windows.txt` are the gate every Windows job runs.
 
 ## What the tests prove
 
@@ -108,8 +109,10 @@ as a service (next section).
 
 ## Running it as a Windows service (vcc.ps1)
 
-`packaging\windows\vcc.ps1` is the Windows counterpart of `vcc` ("vc control",
-which runs Plesk sites on Velocity on Linux). It lays out the configuration
+[`packaging\windows\vcc.ps1`](../packaging/windows/vcc.ps1) (with its service
+host, [`VcService.cs`](../packaging/windows/VcService.cs)) is the Windows
+counterpart of `vcc` ("vc control", the cluster controller that runs Plesk sites
+on Velocity on Linux, kept in a repository of its own). It lays out the configuration
 tree, installs one Windows service per site, and gives it a low-privilege
 account. Run it from an elevated PowerShell (Windows PowerShell 5.1 or
 PowerShell 7):
@@ -139,8 +142,12 @@ Every command ends with `PASS`, `FAIL`, `USAGE` or `REFUSED` and exits 0, 1,
 2 or 3, as vcc does; `-DryRun` prints what would be done and changes nothing.
 Options: `-Name` (service name, default `vc`; one service per site), `-Site`
 (site file name, default `default`), `-Php`, `-Root`, `-Port`, `-HttpsPort`,
-`-Workers`, `-Preset`, `-WritableDirs`, `-Account`, `-StartupType`, `-Grace`
-(seconds a stop may take before the process tree is ended, 25).
+`-Workers`, `-Preset`, `-WritableDirs`, `-Account` (with `-Password` for a named
+account), `-StartupType` (`Automatic`, `Manual` or `Disabled`), `-Grace`
+(seconds a stop may take before the process tree is ended, 25), `-Source` (the
+Velocity tree, default the one `vcc.ps1` is in), `-ConfDir` (default
+`%ProgramData%\vc`), `-CertStore` (for `cert-import`, default
+`LocalMachine\My`), `-Tail` (lines for `logs`, 40) and `-Json` (for `status`).
 
 ### How the service works
 
@@ -248,7 +255,7 @@ again.
 | service manager | systemd unit | the SCM, through `VcService.exe` (`ServiceBase`); failure actions for restarts | proven |
 | logging | files, journald | files; the Application event log for the service's start, stop and failures | proven |
 | file locking | `flock()` (advisory) | `flock()` maps to `LockFileEx()` (mandatory: a locked range cannot be read by others); the cache writes whole files by rename, which Windows refuses while the target is open, so a concurrent reader can make a write fail and be retried | load test proven with the response cache off; the cache under concurrent load on Windows is **theory** |
-| paths | `/` | `\` and `/` both accepted by PHP; case-insensitive; the layout normalises both | proven for the layout |
+| paths | `/` | `\` and `/` both accepted by PHP; case-insensitive; the layout normalizes both | proven for the layout |
 | long paths | none | 260 characters unless `LongPathsEnabled` is set in the registry and the program is long-path aware (PHP 7.1+ is); the Exponential tree fits, `core.longpaths` is set for Git | proven for the fixture |
 | users | `setuid()`/`setgid()`, `--user`, per-site pool users | no change of user inside a process: the service's account is the identity; `--user`/`--group` and per-site pools of different users do not apply | proven (virtual account) |
 | permissions | modes (`0600` keys) | ACLs, set by `vcc.ps1`; `chmod()` only toggles the read-only flag | proven |
@@ -345,8 +352,12 @@ the worker count modest: an Exponential worker needs tens of megabytes.
   is unproven; the tests check that the port is free after every stop.
 - Let's Encrypt from a Windows machine, the firewall rule, and Windows Server
   Core: written for, not run.
-- The Windows static binary does not build yet; use `php.exe` with the source
-  tree or the phar.
+- The Windows static binaries (`qbixserver-windows-x64.exe`, the `-gui.exe`
+  build and the per-PHP variants, [binaries.md](binaries.md)) are built by the
+  release workflow and attached to every release, but the `windows` workflow
+  runs `php.exe` with the source tree, not those binaries: they are not proven
+  by the jobs above, and they carry no `intl` (so no Exponential site).
+  `vcc.ps1` installs a service for `php.exe` and the source tree only.
 - Plesk for Windows (IIS) is not a target of the Linux `vcc`: that one reads
   Apache's configuration and drives systemd. `vcc.ps1` is the standalone
   Windows counterpart.

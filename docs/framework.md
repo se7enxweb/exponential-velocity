@@ -5,7 +5,28 @@ Velocity isn't just a static file server with PHP bolted on. It's a micro-framew
 ### Project layout
 
 ```
-myproject/ ├── sbin/qbixserver.php              ← server entry point (or use the PHAR) ├── config/ │   └── server.json             ← server + app configuration ├── web/                        ← document root (publicly accessible) │   ├── index.html              ← static files served directly │   ├── style.css │   ├── api.php                 ← PHP scripts executed on request │   └── uploads/ ├── classes/                    ← your PHP classes (autoloaded when first used) │   ├── MyApp/ │   │   ├── User.php            ← MyApp\User or MyApp_User │   │   ├── Feed.php │   │   └── Auth.php │   └── vendor/ │       └── autoload.php        ← Composer autoloader (optional) ├── handlers/                   ← event handlers (loaded on demand) │   └── MyApp/ │       └── feed/ │           ├── post.php        ← handles "MyApp/feed/post" event │           └── validate.php    ← handles "MyApp/feed/validate" event └── views/                      ← PHP templates for Q::view()
+myproject/
+├── sbin/qbixserver.php              ← server entry point (or use the PHAR)
+├── config/
+│   └── server.json             ← server + app configuration
+├── web/                        ← document root (publicly accessible)
+│   ├── index.html              ← static files served directly
+│   ├── style.css
+│   ├── api.php                 ← PHP scripts executed on request
+│   └── uploads/
+├── classes/                    ← your PHP classes (autoloaded when first used)
+│   ├── MyApp/
+│   │   ├── User.php            ← MyApp\User or MyApp_User
+│   │   ├── Feed.php
+│   │   └── Auth.php
+│   └── vendor/
+│       └── autoload.php        ← Composer autoloader (optional)
+├── handlers/                   ← event handlers (loaded on demand)
+│   └── MyApp/
+│       └── feed/
+│           ├── post.php        ← handles "MyApp/feed/post" event
+│           └── validate.php    ← handles "MyApp/feed/validate" event
+└── views/                      ← PHP templates for Q::view()
     └── MyApp/
         └── feed/
             ├── page.php
@@ -18,7 +39,8 @@ Only `web/` is accessible via HTTP. Everything else is server-side only.
 
 ```php
 <?php
-// web/api.php — no require, no include, no bootstrap use MyApp\User;
+// web/api.php — no require, no include, no bootstrap
+use MyApp\User;
 
 $user = User::find($_GET['id']);
 $feed = Q::event('MyApp/feed/get', ['userId' => $user->id]);
@@ -35,7 +57,7 @@ The server injects the `Q` class into every PHP script automatically. Here's wha
 |---|---|
 | `Q::event($name, $params)` | Fire an event — runs the handler from `handlers/` |
 | `Q::canHandle($name)` | Check if a handler exists for an event |
-| `Q_Response::header($str, $replace, $code)` | Set a response header (use instead of `header()`) |
+| `Q_Response::header($str, $replace, $code)` | Set a response header (works with or without the source transform) |
 | `Q::view($name, $params)` | Render a PHP template from `views/` |
 | `Q::ifset($arr, 'key1', 'key2', $default)` | Safe nested array/object access without isset chains |
 | `Q::getObject($data, ['path', 'to', 'key'], $default)` | Deep access into nested arrays/objects |
@@ -63,16 +85,20 @@ The server injects the `Q` class into every PHP script automatically. Here's wha
 <?php
 // web/settings.php — using Q utilities
 
-// Safe deep access (no "undefined index" warnings) $theme = Q::ifset($_COOKIE, 'theme', 'light');
+// Safe deep access (no "undefined index" warnings)
+$theme = Q::ifset($_COOKIE, 'theme', 'light');
 
-// Read app config from config/server.json $maxUpload = Q_Config::get('MyApp', 'upload', 'maxSize', 10485760);
+// Read app config from config/server.json
+$maxUpload = Q_Config::get('MyApp', 'upload', 'maxSize', 10485760);
 
-// Fire an event with before/after hooks $result = Q::event('MyApp/settings/save', [
+// Fire an event with before/after hooks
+$result = Q::event('MyApp/settings/save', [
     'userId' => $_SESSION['user_id'],
     'theme'  => $_POST['theme'],
 ]);
 
-// Render a view echo Q::view('MyApp/settings/page.php', [
+// Render a view
+echo Q::view('MyApp/settings/page.php', [
     'result' => $result,
     'theme'  => $theme,
 ]);
@@ -80,20 +106,20 @@ The server injects the `Q` class into every PHP script automatically. Here's wha
 
 ### Why `Q_Response::header()` instead of `header()`?
 
-The server runs PHP in CLI SAPI (same as FrankenPHP worker mode and Workerman). PHP's built-in `header()` is silently discarded in CLI mode. `Q_Response::header()` has the exact same signature but captures headers so the server can send them:
+The server runs PHP in CLI SAPI (same as FrankenPHP worker mode and Workerman), where PHP's built-in `header()` does nothing. The compat layer's source transform (on by default) rewrites `header()` calls to a shim, so existing code works; `Q_Response::header()` has the exact same signature and captures headers whether or not the transform is on:
 
 ```php
-Q_Response::header('Content-Type: application/json');   // same as header() but works Q_Response::header('HTTP/1.1 201 Created')
-;             // status line Q_Response::code(201)
-;                                  // or set status directly
+Q_Response::header('Content-Type: application/json');   // same as header() but works
+Q_Response::header('HTTP/1.1 201 Created');             // status line
+Q_Response::code(201);                                  // or set status directly
 
-Q_Response::setHeader('X-Custom', 'value');    // named method Q_Response::code(201)
-;                         // status code Q_Response::setCookie('session', $id)
-;         // cookies Q_Response::redirect('/login')
-;                // redirect
+Q_Response::setHeader('X-Custom', 'value');    // named method
+Q_Response::code(201);                         // status code
+Q_Response::setCookie('session', $id);         // cookies
+Q_Response::redirect('/login');                // redirect
 ```
 
-For existing code that calls `header()` directly, use CGI carveout mode — configure URL patterns in `server.json` under `Q.webserver.cgi.patterns` to run those scripts via `php-cgi` where native `header()` works (see Configuration).
+Existing code that calls `header()` directly works through the source transform. Code that must run without it can use the CGI carveout — configure URL patterns in `server.json` under `Q.webserver.cgi.patterns` to run those scripts via `php-cgi` where native `header()` works (see [compatibility.md](compatibility.md#native-header-and-the-source-transform)).
 
 When you upgrade to the full [Qbix Platform](https://github.com/Qbix/Platform), the `Q` class expands with hundreds more methods — but everything above continues to work identically. Your scripts don't need to change.
 
@@ -103,7 +129,8 @@ Drop a PHP file in `classes/` and it's **autoloaded** — found automatically th
 
 ```php
 <?php
-// classes/MyApp/User.php — namespace style (PSR-4) namespace MyApp;
+// classes/MyApp/User.php —
+namespace style (PSR-4) namespace MyApp;
 
 class User {
     public static function fromSession(): ?self { /* ... */ }
@@ -113,7 +140,8 @@ class User {
 
 ```php
 <?php
-// classes/MyApp/Auth.php — underscore style (Qbix convention) class MyApp_Auth {
+// classes/MyApp/Auth.php — underscore style (Qbix convention)
+class MyApp_Auth {
     static function check(): bool { return !empty($_SESSION['user_id']); }
 }
 ```
@@ -185,7 +213,8 @@ Fire it from anywhere:
 
 ```php
 <?php
-// web/api.php $result = Q::event('MyApp/feed/post', [
+// web/api.php
+$result = Q::event('MyApp/feed/post', [
     'title'  => $_POST['title'],
     'userId' => $_SESSION['user_id'],
 ]);
@@ -223,7 +252,8 @@ You can attach hooks to any event via config — useful for validation, logging,
 
 ```php
 <?php
-// handlers/MyApp/feed/validate.php function MyApp_feed_validate(&$params, &$result) {
+// handlers/MyApp/feed/validate.php
+function MyApp_feed_validate(&$params, &$result) {
     if (empty($params['title'])) {
         $result = ['error' => 'Title required'];
         return false; // stops the event chain — main handler won't fire
@@ -233,7 +263,8 @@ You can attach hooks to any event via config — useful for validation, logging,
 
 ```php
 <?php
-// handlers/MyApp/feed/notify.php function MyApp_feed_notify(&$params, &$result) {
+// handlers/MyApp/feed/notify.php
+function MyApp_feed_notify(&$params, &$result) {
     // Runs after the main handler
     if (!empty($result['saved'])) {
         sendNotification($params['userId'], "Post published: " . $result['title']);
@@ -276,7 +307,8 @@ Render PHP templates from the `views/` directory:
 
 ```php
 <?php
-// web/feed.php $items = MyApp\Feed::latest(10);
+// web/feed.php
+$items = MyApp\Feed::latest(10);
 $html = ''; foreach ($items as $item) {
     $html .= Q::view('MyApp/feed/item.php', $item);
 } echo Q::view('MyApp/feed/page.php', ['content' => $html]);
@@ -296,32 +328,32 @@ Views are just PHP files — full language access, no template DSL to learn.
 
 Classes are **eager**. Handlers are **lazy**. Scripts are **per-request**. Views are **on-demand**. This gives you the right loading strategy for each kind of code without thinking about it — just put files in the right directory.
 
-### Workers: fork-per-request (truly shared-nothing)
+### Workers: persistent, reset between requests (the default)
 
-Each worker handles exactly **one request**, then exits. The parent immediately forks a replacement. This means:
+Workers persist across requests, with all statics, globals, superglobals, and response headers reset between requests via a snapshot restore (about 0.5 ms for a small application, 4–5 ms for a large CMS). A worker is replaced after `maxRequests` requests (default 1000), or at once when it outgrows its memory ceiling. See [reset.md](reset.md) for what resets, what doesn't, and how to write scripts that work in both modes.
+
+### Fork per request (truly shared-nothing)
+
+With `Q.webserver.forkPerRequest` set to `true`, each worker handles exactly **one request**, then exits, and a fresh one is forked from the preloaded parent. This means:
 
 - Static variables — **wiped** (process dies)
 - Global state — **wiped** (process dies)
 - Memory leaks — **impossible** (OS reclaims everything)
 - Secrets in memory — **gone** (no persistence between requests)
 
-This is safer than php-fpm, which reuses workers across requests and relies on `pm.max_requests` to periodically recycle them. With Velocity, every request gets a clean process. The fork cost (~0.5ms) is negligible compared to the bootstrap savings (~10–50ms).
-
-This is the default mode. Workers persist across requests, with all statics, globals, superglobals, and response headers reset between requests via a snapshot restore (about 0.5 ms for a small application, 4–5 ms for a large CMS). See [reset.md](docs/reset.md) for what resets, what doesn't, and how to write scripts that work in both modes.
+The fork costs a few milliseconds per request, far less than a framework bootstrap (~10–50ms), but more than the snapshot restore.
 
 ### How PHP requests are handled
 
-**Fork mode (default, no `--workers`):** On Linux and macOS (where `pcntl_fork` is available), every PHP request is forked — the server forks a child, the child handles the request and exits, the parent continues serving. This means:
+In either mode:
 
-- `exit()` / `die()` in a script only kills the child — the server survives
+- `exit()` / `die()` in a script ends the request, not the server
 - Long-running scripts don't block static file serving
-- Each request is truly isolated
-
-**Default mode:** Persistent workers handle requests in a loop with snapshot restore between them. See [reset.md](docs/reset.md) for what resets, what persists, and how to write scripts for both modes.
+- Each request sees no state from the one before
 
 The `--workers=N` flag sets how many workers the pool pre-forks, for dispatch with no fork latency per request. Without it the server sizes the pool itself -- what fits in RAM, at most 8 per core and 64 in all, never fewer than 4. See [workers.md](workers.md#how-many-workers).
 
-**Windows** doesn't have `pcntl_fork`, so PHP scripts run in a subprocess via `proc_open`. This is safe — `exit()` can't crash the server — but each subprocess starts a fresh PHP interpreter (~50ms), so you don't get the preload speed benefit. Static files, WebSocket, caching, and everything else work identically. Good for development; use Linux/macOS for the full 100–300× concurrent capacity (measured) advantage.
+**Windows** (and any PHP without `pcntl_fork`) uses the portable pool: each worker is a PHP process of its own started with `proc_open()` (`--pool-mode=portable`, between 2 and 8 workers by default). Workers are persistent and reset between requests as on Linux, but each loads the application itself, so nothing is shared copy-on-write and a pool costs more memory. Static files, caching, HTTPS and the rest work the same; WebSocket connection and room processes need `pcntl` (see [websocket.md](websocket.md)). See [windows.md](windows.md).
 
 ### Growing into the full Qbix Platform
 

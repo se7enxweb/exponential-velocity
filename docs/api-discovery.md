@@ -9,7 +9,7 @@ Qbix-native discovery. Returns the server's identity, fingerprint, installed plu
 ```json
 {
     "server": "Exponential Velocity",
-    "version": "1.0.0",
+    "version": "1.5.0",
     "fingerprint": "4af468e461fc2022...",
     "endpoints": {
         "event": "/Q/event",
@@ -23,6 +23,12 @@ Qbix-native discovery. Returns the server's identity, fingerprint, installed plu
     ]
 }
 ```
+
+`version` is the engine's own number (`QBIX_SERVER_VERSION`, `1.5.0`), not the
+Velocity release; `qbixserver --version` shows the release and build. The
+answer also carries `links` (absolute URLs of the same endpoints and of the
+server's OpenClaim). `plugins` is left out with `Q.federation.advertisePlugins:
+false`, and `apps` is added with `Q.federation.advertiseApps: true`.
 
 Other Velocity servers use this for federation — pin the fingerprint, discover endpoints, forward events.
 
@@ -61,11 +67,11 @@ An AI assistant connected to your Velocity server can call your handlers directl
 | Swagger UI | `/.well-known/openapi.json` | Point URL → interactive docs |
 | Redoc | `/.well-known/openapi.json` | Static reference docs |
 | Claude / AI | `/.well-known/mcp.json` | MCP server discovery |
-| Other Qbix | `/.well-known/qbix.json` | Federation + fingerprint pinning |
+| Other Velocity or Qbix servers | `/.well-known/qbix.json` | Federation + fingerprint pinning |
 | curl | `/Q/health` | `curl https://host/Q/health` |
 | Monitoring | `/Q/health` | Uptime checks, Prometheus, etc. |
 
-All three endpoints are configurable. Set `Q.federation.advertise: false` to disable, or selectively hide apps and plugins.
+`Q.federation.advertise: false` turns off `/.well-known/qbix.json` (it then answers 404); `Q.federation.advertisePlugins` and `Q.federation.advertiseApps` choose what it lists.
 
 ### `/.well-known/openclaiming/{hostname}/server.json` — OpenClaiming
 
@@ -78,7 +84,7 @@ Every Velocity server auto-generates a signed [OpenClaim](https://openclaiming.o
     "stm": {
         "type": "server",
         "software": "Exponential Velocity",
-        "version": "1.0.0",
+        "version": "1.5.0",
         "fingerprint": "4af468e461fc2022...",
         "endpoints": {
             "event": "/Q/event",
@@ -149,39 +155,40 @@ If a template already has `key[]` and `sig[]` (partially signed by another party
 
 ## 🌐 HTTP/2 Support
 
-The built-in event loop uses `stream_select` — zero dependencies, works everywhere. But if you install [amphp](https://amphp.org/), the server upgrades to a full HTTP/2 server with no code changes:
+HTTP/2 (RFC 9113) is built into the server, with its own frame parser, HPACK
+coder and flow control (`src/Q/WebServer/Http2/`). Nothing has to be installed:
+earlier versions described an upgrade through amphp's HTTP server, which the
+server no longer uses.
 
-```bash
-composer require amphp/http-server amphp/socket php sbin/qbixserver.php --port=8443
+It is off unless asked for, and is offered over TLS only, through ALPN
+(`h2,http/1.1`):
+
+```json
+{ "Q": { "web": { "http2": { "enabled": true } } } }
 ```
 
-The server detects amphp automatically and switches to its event loop and HTTP driver. You get:
+A client that negotiates `h2` gets an HTTP/2 connection; every other client
+keeps HTTP/1.1 on the same port. Both go through the same routing, so the
+response cache, static files, the worker pool and access control behave the
+same on either.
 
-| | HTTP/1.1 (built-in) | HTTP/2 (amphp) |
+| | HTTP/1.1 | HTTP/2 |
 |---|---|---|
 | Connections per page load | ~6 parallel | 1 multiplexed |
 | Header overhead | Full headers per request | HPACK compressed |
-| Event loop | `stream_select` (portable) | `epoll`/`kqueue` via Revolt |
-| TLS | `stream_socket_enable_crypto` | amphp native TLS |
-| Server push | No | Yes (push static assets before browser asks) |
+| TLS | required for HTTP/2 only | ALPN `h2` |
+| Server push | No | No: the server announces `SETTINGS_ENABLE_PUSH=0`, and a client `PUSH_PROMISE` is a protocol error |
+| `PRIORITY` frames | | accepted and ignored |
 
-### How it works
+### The event loop
 
-The server has a clean two-layer architecture. `Q_WebServer::route()` handles all request logic (static files, PHP dispatch, cache, access control) and returns a `[status, headers, body]` array. The transport layer is pluggable:
+Both protocols run on the `Q_Evented` loop. Its backend is chosen once per
+process (`Q.webserver.eventLoop`, or the `QBIX_EVENT_LOOP` environment
+variable): `auto` (the default) takes Revolt when `revolt/event-loop` is
+installed, else `stream_select()`, which needs nothing; `iopoll` (PHP 8.6's
+`Io\Poll`, epoll/kqueue) is used only when asked for.
 
-```
-Built-in:   stream_select → accept → fread → route() → fwrite amphp:      Revolt loop → amphp HTTP server → route() → amphp response
-```
-
-All the server's features — response cache, X-Accel-Redirect, component cache invalidation, keep-alive, compression — work identically on both transports. The `Q_Evented` facade abstracts the event loop, so timers, signals, and socket watchers work the same way whether you're on `stream_select` or Revolt.
-
-### When to use which
-
-**Built-in (default):** Zero dependencies. Works on any PHP 8.0+ installation. Good for development, small-to-medium sites, and environments where you can't install Composer packages.
-
-**amphp:** Better performance under high concurrency thanks to `epoll`/`kqueue`. HTTP/2 multiplexing reduces connection overhead for asset-heavy pages. Required if you need server push or HTTP/2-only clients.
-
-**Either way:** You can always put Cloudflare, CloudFront, or nginx in front as a reverse proxy. The CDN terminates HTTP/2 (and HTTP/3) for you, forwarding HTTP/1.1 to the backend. In that configuration, the built-in transport is all you need — the CDN handles the protocol upgrade.
+**Either way:** You can always put Cloudflare, CloudFront, or nginx in front as a reverse proxy. The CDN terminates HTTP/2 (and HTTP/3) for you, forwarding HTTP/1.1 to the backend.
 
 ---
 

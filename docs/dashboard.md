@@ -47,10 +47,10 @@ The `/Q/stats` JSON includes everything the dashboard shows, plus `sparkline` (6
   stall the event loop that serves the dashboard.
 - **System RAM** is used = Total − MemAvailable (reclaimable cache counts as
   free, as `free` reports it). When the host has swap it adds
-  **swap used / total** — `swap 8.7 GB / 12 GB` — coloured by what actually
+  **swap used / total** — `swap 8.7 GB / 12 GB` — colored by what actually
   slows the server rather than by how much is parked there:
 
-  | Colour | When | Why |
+  | Color | When | Why |
   |---|---|---|
   | dim | swap in use but idle | pages moved out earlier and not needed back cost nothing |
   | amber | 1 MB/s or more read back from swap, or swap 90% full | the box is short of memory, or has nowhere left to move pages |
@@ -60,7 +60,7 @@ The `/Q/stats` JSON includes everything the dashboard shows, plus `sparkline` (6
   hovering the swap figure says in plain words which case it is. The rate is
   `pswpin` from `/proc/vmstat`, sampled with the stats (at most once a second)
   and reported as `systemRam.swapInKBps` in `/Q/health`; it is `null` until
-  there are two samples, and then only fullness decides the colour.
+  there are two samples, and then only fullness decides the color.
 - **Durations** — the slowest-request figure and every row in the live log — are
   rounded to one decimal; a `microtime()` difference is otherwise thirteen.
 - **The live log** carries column headings, and the **status filter** lists every
@@ -159,7 +159,7 @@ tab and the autohost, so the three always agree. It looks in:
 
 It never walks deeper, and stops after 400 directories in one scan.
 
-| Recognised | By | Release read from |
+| Recognized | By | Release read from |
 |---|---|---|
 | Laravel | `artisan` | `vendor/laravel/framework/…/Application.php` (`VERSION`), else `composer.lock` |
 | Symfony | `bin/console` + Symfony in `composer.json` | `vendor/symfony/http-kernel/Kernel.php` (`VERSION`) |
@@ -355,8 +355,10 @@ API (signed in): `GET domains/traffic?domain=…` returns `requests`, `bytes`,
 `classes`, `top` (path, count), `last`, `since`, `window` and the `names` it
 covers.
 
-**Planned** (not built yet): password-protected
-directories, hotlink protection, a PHP version and settings per domain, limits,
+**Planned** (not built yet in the panel): password-protected
+directories (per-host HTTP Basic areas exist in the configuration,
+`Q.webserver.hosts.<host>.access.auth`, see
+[multiuser.md](multiuser.md#access-control-and-url-rules-per-host-what-a-sites-htaccess-does)), hotlink protection, a PHP version and settings per domain, limits,
 quotas and disk usage, backups, web statistics history, IP address assignment,
 a read-only DNS view, cron per domain, and a file manager.
 
@@ -373,7 +375,7 @@ what the Domains tab shows per domain.
 - **Certificates by expiry**: every certificate the server knows (served,
   configured, the self-signed store, each one issued under the ACME
   directory), each listed once with all its roles, soonest-expiring first and
-  coloured: red when expired or 7 days or fewer are left, amber at 21 or
+  colored: red when expired or 7 days or fewer are left, amber at 21 or
   fewer, green otherwise.
 - **Settings**: the mode, the ACME email, directory and host names, and
   *renew at* (the share of the lifetime left when renewal starts). Each value
@@ -446,7 +448,7 @@ the browser, one or two clicks for each thing, with no file to edit.
 Where the settings live: in the panel store, `acl/panel.json`, under the key
 `cache`, nested like `Q.web.cache`. They win over the configuration file,
 are applied at once, and are laid over the configuration again every time the
-server starts, before the cache is initialised. Nothing else in `Q.web.cache`
+server starts, before the cache is initialized. Nothing else in `Q.web.cache`
 is taken from the store. Changes apply in the server process, which is the one
 that answers from the cache.
 
@@ -483,7 +485,7 @@ The Logs tab keeps its filters in the address too, for example
 ### Logs tab
 
 The server's access and error logs, newest last, as a table for the access
-log (time, method, path, status coloured by class, size, duration; the user
+log (time, method, path, status colored by class, size, duration; the user
 agent on hover) and as lines for the error log.
 
 - **Filters**: free text, HTTP method, and status: an exact code (`404`) or
@@ -510,7 +512,7 @@ needs a signed-in panel session like every other panel API.
 
 **Plugins tab** — reads the app's `config/app.json` for declared plugins, `local/plugins.json` for installed versions, and scans the Platform's `plugins/` directory. Shows version, dependencies, and DB connections for each.
 
-**Playground tab** — PHP REPL with all Q classes preloaded. Write code, hit Run (or Ctrl+Enter), see output. Sandboxed in a forked process with disabled filesystem writes, no network, 32MB memory limit, 5 second timeout.
+**Playground tab** — PHP REPL with all Q classes preloaded. Write code, hit Run (or Ctrl+Enter), see output. Runs in a separate PHP process (`proc_open`) with file writes, program execution and outgoing connections disabled (`disable_functions`), `open_basedir` limited to the temporary directory and the server's tree, a 32MB memory limit and a 5 second timeout.
 
 **System tab** — PHP version, OS, extensions, memory limit. One-click Platform install: clones `github.com/Qbix/Platform`, runs `git submodule update --recursive`, sets up `local/paths.json`.
 

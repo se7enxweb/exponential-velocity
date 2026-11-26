@@ -4,14 +4,18 @@ Velocity serves files from the document root directly, without running PHP. It h
 
 ## Serving
 
-A request for a file with an allowed extension is answered straight from disk. The list covers text and data (`html`, `htm`, `txt`, `md`, `json`, `xml`, `yaml`, `yml`, `csv`, `tsv`, `log`), code (`css`, `js`, `mjs`, `map`, `wasm`), images (`png`, `gif`, `webp`, `jpg`, `jpeg`, `svg`, `bmp`, `ico`, `avif`), fonts (`woff`, `woff2`, `ttf`, `otf`), media (`mp3`, `wav`, `ogg`, `mp4`, `webm`) and `pdf` and `zip`. The response includes:
+A request for a file with an allowed extension is answered straight from disk. The list covers text and data (`html`, `htm`, `txt`, `md`, `json`, `xml`, `yaml`, `yml`, `csv`, `tsv`), code (`css`, `js`, `mjs`, `map`, `wasm`), images (`png`, `gif`, `webp`, `jpg`, `jpeg`, `svg`, `bmp`, `ico`, `avif`), fonts (`woff`, `woff2`, `ttf`, `otf`, `eot`), media (`mp3`, `wav`, `ogg`, `mp4`, `webm`) and `pdf` and `zip`. `.log` is not on it, so a log file under the document root is not downloadable. `Q.webserver.extensions` replaces the whole list. The response includes:
 
 - **`Content-Type`**, mapped from the extension. Files with any other extension are refused, so a stray `.env` or `.sql` in the document root is not downloadable.
 - **`ETag`**, derived from the file's modification time and size. A request with a matching `If-None-Match` gets `304 Not Modified` and no body.
 - **`Last-Modified`**, from the file's modification time, for clients that validate with `If-Modified-Since` instead.
-- **`Cache-Control: public, max-age=0, must-revalidate`**. Browsers keep the file but check with the server before reusing it, and the check costs one `304`. If your asset URLs carry a version or hash, send a longer lifetime from your own config or a reverse proxy.
+- **`Cache-Control: public, max-age=0, must-revalidate`** by default. Browsers keep the file but check with the server before reusing it, and the check costs one `304`. If your asset URLs carry a version or hash, set `Q.web.static.maxAge` to the number of seconds a client may keep a file without asking (`public, max-age=N`). Files that decide how a client behaves later -- `sw.js`, `service-worker.js`, `*.webmanifest`, `manifest.json` -- are always sent with `no-cache, must-revalidate`; `Q.web.static.revalidate` replaces that list of patterns (an empty array turns it off).
 
-Recently served files are held in an in-memory response cache keyed by path and content encoding, and revalidated against the file's modification time at intervals, so a hot file is not re-read from disk on every request.
+Recently served files are held in an in-memory response cache keyed by path and content encoding, and revalidated against the file's modification time at intervals, so a hot file is not re-read from disk on every request. Files up to 1 MB are held (`Q.webserver.fileCache.maxFile`), 64 MB in all (`maxSize`), checked every second (`checkInterval`).
+
+### Which paths are files (`Q.web.static.paths`)
+
+Unset, every file with an allowed extension may be sent as it is. Set to a list of patterns on the request path (`"^/design/[^/]+/stylesheets/"`), only a path one of them matches is served as a file; any other request goes to the front controller as though the file were not there, the way an `.htaccess` that sends everything but its asset directories to `index.php` behaves. This keeps protected uploads in the document root behind the script that checks who is asking. Dot segments are resolved before matching.
 
 ### Content types as Apache gives them
 
@@ -56,7 +60,7 @@ Image URLs can carry a size, and a request for a format that does not exist on d
 /photos/hero.webp         made from hero.png if there is no hero.webp
 ```
 
-The server also picks AVIF or WebP when the browser accepts them, honours `Save-Data`, and caches every result on disk. How all of this works, and its current limits, is in [images.md](images.md).
+The server also picks AVIF or WebP when the browser accepts them, honors `Save-Data`, and caches every result on disk. How all of this works, and its current limits, is in [images.md](images.md).
 
 ## Access-controlled files
 

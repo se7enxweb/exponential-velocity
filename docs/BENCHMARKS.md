@@ -216,7 +216,7 @@ The `--app` mode with octane handles the full Qbix Platform at 498 req/s. Fork-p
 
 ## Event Loop: epoll/kqueue vs stream_select (PHP 8.6)
 
-PHP 8.6 (November 2026) adds the `Io\Poll` API — native `epoll` on Linux and `kqueue` on macOS, with no extensions needed. The server auto-detects this and uses it when available. On older PHP versions, `stream_select` is used (or Revolt if installed).
+PHP 8.6 (November 2026) adds the `Io\Poll` API — native `epoll` on Linux and `kqueue` on macOS, with no extensions needed. The server has a driver for it, but uses it only when asked for: the driver has so far run only against a stand-in, not the real `Io\Poll`, so a PHP that ships it does not switch loops unasked. By default (`auto`) the server uses Revolt when it is installed, else `stream_select`.
 
 ### Why it matters
 
@@ -235,7 +235,7 @@ For standard request/response PHP workloads, the event loop is not the bottlenec
 
 ### Where it's transformative
 
-Long-lived connections: WebSocket, SSE, and Server Push. A chat server with 5,000 connected users has 5,000 sockets in the event loop. With `stream_select`, the parent copies and scans all 5,000 on every tick — that's ~2.5ms of overhead, 200 times per second, which burns an entire CPU core just scanning. With epoll, the same scan is 0.01ms regardless.
+Long-lived connections: WebSocket and SSE. A chat server with 5,000 connected users has 5,000 sockets in the event loop. With `stream_select`, the parent copies and scans all 5,000 on every tick — that's ~2.5ms of overhead, 200 times per second, which burns an entire CPU core just scanning. With epoll, the same scan is 0.01ms regardless.
 
 | Active connections | stream_select overhead/tick | epoll/kqueue overhead/tick | Notes |
 |---|---|---|---|
@@ -251,16 +251,14 @@ This matters because the COW fork model generates thousands of in-flight connect
 
 ### How to use it
 
-Nothing to configure. On PHP 8.6+, the server detects `Io\Poll\Context` at startup and uses it automatically. The startup banner shows which backend is active:
-
-```
-│  I/O:       epoll/kqueue (PHP 8.6 Io\Poll)│
-```
+Ask for it: `Q.webserver.eventLoop: "iopoll"` in the config, or `QBIX_EVENT_LOOP=iopoll` in the environment (`revolt` and `select` force the others). A backend this PHP cannot load falls back to `auto`, with a warning. The start-up banner's `I/O:` line names `Io\Poll` whenever the class exists, whichever backend was chosen, so do not read it as proof (see `Q_Evented::driver()`).
 
 For PHP 8.0–8.5, the Symfony polyfill (`composer require symfony/polyfill-io-poll`) provides the same API backed by `stream_select` — useful for code compatibility testing but no performance gain.
 
 ### Driver priority
 
-1. **Io\Poll** (PHP 8.6+ native) — epoll/kqueue, O(1)
+`auto` tries 2, then 3; 1 only when asked for.
+
+1. **Io\Poll** (PHP 8.6+ native, `iopoll`) — epoll/kqueue, O(1)
 2. **Revolt** (if installed via Composer) — uses ext-ev, ext-event or ext-uv (epoll/kqueue), else stream_select; measured no faster than stream_select up to 2,000 connections ([architecture.md](architecture.md#revolt))
 3. **stream_select** (built-in fallback) — works everywhere, O(n)

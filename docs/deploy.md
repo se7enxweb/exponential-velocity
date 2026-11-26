@@ -22,7 +22,12 @@ Configure targets in `config/deploy.json`:
 }
 ```
 
-The command rsyncs each directory to the remote server. If the remote runs Velocity, it can be configured to hot-reload on deploy.
+The command runs `rsync -avz --delete` for each directory in `dirs` (default
+`web`, `handlers`, `classes`, `config`, `local`), so files missing locally are
+deleted on the remote. `--deploy` without a target deploys `production`.
+`config/deploy.json` is read from the app directory (`--app`) or the project
+root. A target with `reload_url` is sent a `POST` there afterwards, with
+`Authorization: Bearer <reload_secret>`, so the remote can reload itself.
 
 Servers can also be managed from the Panel's **Servers** tab — add, deploy, and remove remote servers through the browser.
 
@@ -41,12 +46,18 @@ Velocity servers can forward events to each other. Any `Q::event()` call can be 
 ```json
 {
     "server": "Exponential Velocity",
-    "version": "1.0.0",
+    "version": "1.5.0",
     "fingerprint": "11cf953679b80d04...",
-    "endpoints": {"event": "/Q/event", "health": "/Q/health"},
+    "endpoints": {"event": "/Q/event", "health": "/Q/health",
+                  "openapi": "/.well-known/openapi.json", "mcp": "/.well-known/mcp.json",
+                  "websocket": "/Q/ws"},
+    "links": {"...": "the same as absolute https:// URLs"},
     "plugins": [{"name": "Users", "version": "1.0"}]
 }
 ```
+
+`server` is the brand (`Q.webserver.brand`) and `version` the engine's protocol version (`QBIX_SERVER_VERSION`), not the release number.
+`Q.federation.advertise: false` answers 404 instead.
 
 **3. Event forwarding.** Configure which events route to which server:
 
@@ -94,7 +105,8 @@ Access and error logs with buffered writes, daily rotation, gzip archiving, and 
                 "archiveAfterDays": 2,
                 "deleteAfterDays": 30,
                 "fileMode": null,
-                "dirMode": "0755"
+                "dirMode": "0755",
+                "format": "vhost"
             }
         }
     }
@@ -113,6 +125,8 @@ Access and error logs with buffered writes, daily rotation, gzip archiving, and 
 | `deleteAfterDays` | `30` | Delete archived logs older than this. |
 | `fileMode` | unset | Permissions for the log files, as octal digits in a string: `"0640"`. Unset means a file is created at `0666` minus the umask, usually `0644`. |
 | `dirMode` | `"0755"` | Permissions for the log directory. Set explicitly, it is enforced past the umask; left alone, it behaves as it always has. |
+| `format` | `vhost` | Access line format: `vhost` (`qbix` plus the Host as a last quoted field), `qbix` (combined plus response time), `combined`, `common`, or a custom Apache-style format string. |
+| `accessName`, `errorName` | `access.log`, `error.log` | File names inside `dir`. |
 
 #### Who can read your logs
 
@@ -151,10 +165,10 @@ Error lines always flush immediately (they're rare and you want them on disk bef
 
 **Rotation:** Logs rotate daily at midnight. The current day's log is always `access.log` and `error.log`. Yesterday's becomes `access.2026-08-11.log`. After 2 days that file is gzipped to `access.2026-08-11.log.gz`. After 30 days it's deleted. If a log exceeds 50 MB mid-day, it rotates early with a timestamp suffix.
 
-Access log format (nginx-compatible combined + response time):
+Access log format (the default `vhost`: nginx-compatible combined, the response time, then the Host):
 
 ```
-192.168.1.1 - - [11/Aug/2026:14:30:00 +0000] "GET /api/users HTTP/1.1" 200 1234 "-" "Mozilla/5.0" 3.2ms
+192.168.1.1 - - [11/Aug/2026:14:30:00 +0000] "GET /api/users HTTP/1.1" 200 1234 "-" "Mozilla/5.0" 3.2ms "example.com"
 ```
 
 Errors also go to stderr, so `php sbin/qbixserver.php 2>err.log` works without config.

@@ -1,13 +1,16 @@
-## 🌐 HTTP — Fork Per Request
+## 🌐 HTTP — Workers Forked From a Preloaded Parent
 
-Every PHP request forks from the preloaded parent, handles the request, and dies. No cleanup needed — the OS reclaims everything.
+PHP requests are handled by a pool of persistent workers forked from the preloaded parent (or, with `--pool-mode=portable` and on Windows, started with `proc_open`). A worker serves requests one at a time and is replaced after `Q.webserver.maxRequests` of them (default 1000). The server resets the state PHP leaves behind between requests; see [reset.md](reset.md). With `Q.webserver.forkPerRequest` set to `true`, every request gets a fresh child that exits after answering, and the OS reclaims everything.
 
 ### Static files
 
 Drop files in `web/`. They're served directly:
 
 ```
-web/ ├── index.html        ← GET /index.html ├── style.css         ← GET /style.css └── app.js            ← GET /app.js
+web/
+├── index.html        ← GET /index.html
+├── style.css         ← GET /style.css
+└── app.js            ← GET /app.js
 ```
 
 ### PHP scripts
@@ -16,18 +19,20 @@ PHP files in `web/` execute as scripts — same as Apache or nginx + php-fpm:
 
 ```php
 <?php
-// web/api/users.php — GET /api/users.php Q_Response::header('Content-Type: application/json');
+// web/api/users.php — GET /api/users.php
+Q_Response::header('Content-Type: application/json');
 $users = MyApp\Users::recent(20);
 echo json_encode($users);
 ```
 
 ### Clean URL handlers
 
-With [routing configured](#️-clean-url-routing-optional), handlers in `handlers/` map to clean URLs:
+With [routing configured](routing.md), handlers in `handlers/` map to clean URLs:
 
 ```php
 <?php
-// handlers/api/users/get.php — GET /api/users function api_users_get(&$params, &$result) {
+// handlers/api/users/get.php — GET /api/users
+function api_users_get(&$params, &$result) {
     Q_Response::header('Content-Type: application/json');
     echo json_encode(MyApp\Users::recent(20));
 }
@@ -37,13 +42,15 @@ With [routing configured](#️-clean-url-routing-optional), handlers in `handler
 
 ```
 Browser: GET /api/users
-  → Parent forks child process (COW — a worker's own pages come to 1.3–1.9 MB bare, ~10 MB for a full CMS)
-  → Child runs handler (classes already loaded)
-  → Child sends response and exits
-  → OS reclaims all memory
+  → Server hands the request to an idle worker (forked from the preloaded
+    parent: COW — a worker's own pages come to 1.3–1.9 MB bare, ~10 MB for a full CMS)
+  → Worker runs handler (classes already loaded)
+  → Worker sends the response back and its per-request state is reset
+  → After maxRequests requests (or with forkPerRequest, after every one)
+    the worker exits and the OS reclaims its memory
 ```
 
-No memory leaks. No state from one request bleeding into the next. `exit()` only kills the child — the server keeps running.
+`exit()` and `die` are rewritten to end the request rather than the worker (see [reset.md](reset.md)); the server keeps running.
 
 ### Keep-alive
 

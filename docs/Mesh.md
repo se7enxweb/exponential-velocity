@@ -447,6 +447,18 @@ Someone steals a device and now has its mesh private key.
 
 ## 12. Implementation Plan
 
+> **Where the code stands.** The plan below was written before the code. What
+> exists in `src/Q/WebServer/`: `Mesh.php` (identity, handshake, sessions, the
+> `/Q/sync/*` endpoints), `Transport.php` (peer registry, events,
+> `requestFromPeer()`, `qbix-peer://`), `MeshRouter.php` (routing table, HELLO,
+> FORWARD), `MeshSync.php` (Bloom filters and record exchange), `MeshBLE.php`
+> and `ProllyTree.php`; the native bridges are in `mobile/`. Not done: the
+> panel's "Nearby" tab does not exist; the server does not route
+> `/Q/api/transport/*` to `Transport.php`, so the native bridge's calls to it
+> do not reach it; a `FORWARD` received over HTTP is not relayed on; and the
+> prolly tree is not walked over the wire. See [sync.md](sync.md#current-limitations)
+> and [mobile.md](mobile.md#status).
+
 ### Turn 1: Identity + Handshake in PHP (~1 session)
 
 **Build:** `Mesh.php` with identity generation (reusing Trust.php's ECDSA P-256), peer_id derivation, cert generation with peer_id as CN, handshake endpoints (`/Q/sync/identity`, `/Q/sync/handshake`), session key derivation via ECDH, AES-256-GCM encrypt/decrypt.

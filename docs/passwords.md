@@ -131,6 +131,7 @@ clears it.
 qbixctl panel:password --root=/srv/site/web            # asks twice, without echo
 qbixctl panel:password --root=/srv/site/web --generate # makes one, sets it, prints it once
 echo 'your password' | qbixctl panel:password --root=/srv/site/web
+qbixctl panel:password --root=/srv/site/web --password='your password'   # visible in the process list and shell history
 ```
 
 Pass the same `--root` the server runs with (or `--app=DIR`), and its

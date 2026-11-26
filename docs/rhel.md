@@ -10,6 +10,7 @@ with nothing extra to install.
 - [What is different on 8.0](#what-is-different-on-80)
 - [Installing on RHEL 9](#installing-on-rhel-9)
 - [Installing on RHEL 8](#installing-on-rhel-8)
+- [Installing on RHEL 10](#installing-on-rhel-10)
 - [The PHP extensions it needs](#the-php-extensions-it-needs)
 - [Where things go](#where-things-go)
 - [systemd](#systemd)
@@ -23,7 +24,7 @@ with nothing extra to install.
 Until v0.0.4.54 the package asked for PHP 8.1. Nothing in the server needed a
 language feature 8.1 introduced: every shipped file parses on 8.0, and no
 function, class or constant that is newer than 8.0 is called without a check
-that it exists first. What 8.1 did change is behaviour, and those places now
+that it exists first. What 8.1 did change is behavior, and those places now
 handle 8.0 themselves. Nothing new is required: no polyfill package, no
 extension, no setting.
 
@@ -147,6 +148,20 @@ tested on EL 8.
 
 ---
 
+### Installing on RHEL 10
+
+Each release also carries `exponential-velocity-<release>-1.el10.noarch.rpm`
+for RHEL 10 and its rebuilds. It is made the same way as the EL 9 package
+(`packaging/nfpm/render.php`), depends on `php-cli >= 8.0` and the
+distribution's PHP packages, and installs the same way:
+
+```bash
+curl -LO https://github.com/se7enxweb/exponential-velocity/releases/download/v<release>/exponential-velocity-<release>-1.el10.noarch.rpm
+sudo dnf install ./exponential-velocity-<release>-1.el10.noarch.rpm
+```
+
+---
+
 ### The PHP extensions it needs
 
 `qbixctl ext:check` lists what this PHP has and lacks, with the command that
@@ -164,8 +179,10 @@ The EL 9 package also depends on `php-xml`, `php-gd`, `php-intl`,
 `php-mysqlnd`, `php-opcache` and `php-pecl-zip` (the `lite` set an application
 platform needs), and recommends the rest of the `standard` set.
 
-Without `pcntl` the server still runs, with workers as subprocesses instead of
-forks ([architecture.md](architecture.md)); install `php-process` for the pool.
+Without `pcntl` the server still runs, with a portable pool of workers started
+as processes of their own instead of forks
+([windows.md](windows.md#the-portable-pool)); install `php-process` for the
+forked pool.
 
 ---
 

@@ -2,7 +2,7 @@
 
 This page covers how the server stands in for a PHP SAPI inside forked workers, how it coexists with the Qbix Platform in `--app` mode, and how both modes are tested. For running Laravel, Symfony, WordPress, Drupal and other unmodified code, see [compatibility.md](compatibility.md).
 
-> **Native `header()` and the source transform.** Several sections below say that PHP's built-in `header()`, `http_response_code()` and friends are discarded under the CLI SAPI. That is true of the builtins themselves. With the source transform on (the default), calls to those functions in any `.php` file loaded from disk are rewritten to shims before PHP compiles the file, so they do reach the client. The `php-cgi` carveout is for code the transform cannot see: `eval()`'d strings, files included from a `phar://` archive, and calls made through a string such as `call_user_func('header', ...)`. See [compatibility.md](compatibility.md#what-the-rewriter-does-not-reach).
+> **Native `header()` and the source transform.** Several sections below say that PHP's built-in `header()`, `http_response_code()` and friends are discarded under the CLI SAPI. That is true of the builtins themselves. With the source transform on (the default), calls to those functions in any `.php` file loaded from disk are rewritten to shims before PHP compiles the file, so they do reach the client. The `php-cgi` carveout is for code the transform cannot see: `eval()`'d strings, files included from a `phar://` archive (other than the engine archive named by `EXP_ENGINE_PHAR`), and calls made through a string such as `call_user_func('header', ...)`. See [compatibility.md](compatibility.md#what-the-rewriter-does-not-reach).
 
 ## Q_Sapi — SAPI emulation for forked children
 
@@ -75,24 +75,29 @@ Third-party code — WordPress, a vendored SDK, anything not written for Qbix �
 
 ## Tests
 
-Five test suites, 152 tests total:
+Five suites for the SAPI layer and the protocol (each prints its own count of
+passed and failed tests):
 
 ```bash
 # Core — static files, MIME, PHP dispatch, superglobals, POST/JSON, cookies, auth, stress
-bash tests/run.sh --quick                    # 72 tests
+bash tests/run.sh --quick
 
 # SAPI — superglobal population, output capture, status codes, sessions, shutdown ordering
-php tests/testSapi.php                       # 19 tests
+php tests/testSapi.php
 
 # HTTP protocol — keep-alive, path traversal, ETags, encoding, logging, panel auth
-bash tests/testHttp.sh [port]                # 37 tests
+bash tests/testHttp.sh [port]
 
 # WebSocket — RFC 6455, Socket.IO handshake, events+acks, rooms, dashboard broadcast
-node tests/testWebSocket.js [port]           # 12 tests
+node tests/testWebSocket.js [port]
 
 # Snapshot reset — octane state isolation, memory leaks, secret leaks
-bash tests/testSnapshot.sh [port]            # 12 tests
+bash tests/testSnapshot.sh [port]
 ```
+
+`run.sh` and `testSapi.php` run in CI on every push; `testHttp.sh`,
+`testWebSocket.js` and `testSnapshot.sh` are run by hand. The unit tests
+(`tests/unit-*.php`, 198 of them) run with `php tests/run-unit.php`.
 
 The snapshot tests start both a fork-mode server and a persistent-worker server, then verify that statics, globals, `$_COOKIE`, `$_SERVER`, `$_POST`, Authorization headers, and response headers from request A are invisible to request B. The fork-mode server acts as a control group. See [reset.md](reset.md) for what the snapshot resets.
 
@@ -161,16 +166,16 @@ Passing a bare path is worse than an error. `from()` then treats it as a URI str
 
 Eight suites. Everything runs against a real server over a real socket — no mocks.
 
-    bash tests/run.sh --quick                    # 71 functional + security tests
-    php  tests/testSapi.php                      # 19 SAPI emulation tests
-    php  tests/test_compat_namespace.php         # source transform in namespaced code
-    bash tests/run-probe.sh [platform-dir]       # 58 wire-level probes per mode
+    bash tests/run.sh --quick                    # functional + security tests
+    php  tests/testSapi.php                      # SAPI emulation tests
+    bash tests/namespaced-scripts.sh             # source transform in namespaced code
+    bash tests/run-probe.sh [platform-dir]       # wire-level probes per mode
     bash tests/run-cgi.sh                        # php-cgi carveout
     php  tests/platform-compat.php <platform>    # --app compatibility audit
     php  tests/routing-parity.php  <platform>    # our matcher vs the Platform's
     bash tests/run-modes.sh <app> <platform>     # dual-mode acceptance
 
-CI runs all of them on every push (`.github/workflows/test.yml`), in three jobs: standalone, php-cgi, and `--app` against a fresh checkout of [Qbix/Platform](https://github.com/Qbix/Platform).
+CI runs all of them on every push (`.github/workflows/test.yml`), in three jobs: standalone (which also runs a dozen smaller scripts: idle workers, content types, cookies and sessions, autoloaders, lazy statics, binary bodies and others), php-cgi, and `--app` against a fresh checkout of [Qbix/Platform](https://github.com/Qbix/Platform).
 
 ### Testing `--app` mode
 
@@ -196,7 +201,7 @@ The webserver is a *subset* the Platform must be able to override. In `--app` mo
 
 This audit walks `src/` **and the test fixtures** (they run under both modes too) and fails on any member a shared class does not declare. Anything the Platform lacks belongs on a webserver-only class: `Q_WebServer`, `Q_WebServer_State`, `Q_WebServer_Router`, `Q_WebServer_Identity`, `Q_WebSocket`, `Q_Scheduler`, `Q_FileCache`, `Q_HotReload`.
 
-### Two behaviours worth knowing
+### Two behaviors worth knowing
 
 **`php://input` works, via a stream wrapper.** A forking server reads the request off the socket itself, so the real `php://input` is already consumed and would stay empty for the life of the process. `Q_WebServer_State::setInput()` registers a wrapper over `php` so `file_get_contents('php://input')` returns *this* request's body, and `restoreInput()` unregisters it afterwards.
 
@@ -220,7 +225,7 @@ Everything else in `--app` mode passes: static files, `index.php`, an `action.ph
 
 **Status: 32/32 passing in both modes**, stable across repeated runs.
 
-**Native `header()` is not captured — use `Q_Response::setHeader()`.** Under the CLI SAPI PHP's `header()` is a no-op and `headers_list()` returns nothing, so a long-running CLI server cannot see those calls. This is a PHP constraint, not a server one, and unlike `php://input` it cannot be worked around with a stream wrapper. Set response headers through `Q_Response::setHeader()` or `Q::header()`; both are captured and reach the client. The suite asserts this explicitly so it will report if a future SAPI changes the behaviour.
+**Native `header()` is not captured — use `Q_Response::setHeader()`.** Under the CLI SAPI PHP's `header()` is a no-op and `headers_list()` returns nothing, so a long-running CLI server cannot see those calls. This is a PHP constraint, not a server one, and unlike `php://input` it cannot be worked around with a stream wrapper. Set response headers through `Q_Response::setHeader()` or `Q::header()`; both are captured and reach the client. The suite asserts this explicitly so it will report if a future SAPI changes the behavior.
 
 **One header store.** `Q_Response`'s accessors delegate to `Q_WebServer_State`. An earlier refactor left `Q_Response` keeping a parallel `$_headers` array while the server read State's — so every header set through the Qbix API silently vanished from the response. The suite now round-trips a header set via `Q_Response::setHeader()` and asserts it arrives.
 

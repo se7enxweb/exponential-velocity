@@ -3,8 +3,9 @@
 A forked child of a CLI process has no SAPI. Nothing populated the superglobals, nothing captures output, and native `header()` is a silent no-op. `Q_Sapi` does what mod_php or php-fpm would do:
 
 ```php
-Q_Sapi::enter($parsed);      // superglobals + ob_start include $scriptPath
-;         // any PHP file, not just a front controller list($status, $headers, $body) = Q_Sapi::leave();
+Q_Sapi::enter($parsed);      // superglobals + ob_start
+include $scriptPath;         // any PHP file, not just a front controller
+list($status, $headers, $body) = Q_Sapi::leave();
 ```
 
 `enter()` populates `$_GET`, `$_POST` (form-encoded or JSON), `$_COOKIE`, `$_FILES` and `$_SERVER` — including `HTTP_HOST`, `SCRIPT_NAME`, `PATH_INFO` and `REMOTE_ADDR`. `HTTP_HOST` matters more than it looks: `Q_Response::setCookie()` returns false without it, which silently drops the session cookie.
@@ -17,9 +18,22 @@ Before assembling the response, `capture()` calls `session_write_close()` explic
 
 `capture()` is idempotent, and `deliver()` hands the response off exactly once — to `Q_Sapi::$onCapture` if the worker pool registered a consumer, otherwise to `STDOUT` so a child run standalone behaves like an ordinary PHP script.
 
-### What fork mode cannot do
+### Native `header()` and the source transform
 
-Native `header()` cannot be intercepted: in the CLI SAPI it does nothing, and PHP offers no hook. Fork mode therefore fully supports code that goes through `Q_Response::header()` / `Q::header()`. Third-party or legacy scripts that call `header()` directly should be routed to `php-cgi` with `Q.webserver.cgi.patterns` — that config is the supported escape hatch, not a workaround.
+In the CLI SAPI PHP's own `header()` does nothing, and PHP offers no hook to intercept it. The server works around that by rewriting the PHP it includes (`Q_WebServer_Compat`, on by default: `Q.compat.skipSourceCodeTransform` is `false`): calls to `header()`, `setcookie()`, `http_response_code()`, `headers_list()`, the session functions and the rest are sent to shims that record them, in persistent workers and with `forkPerRequest` alike. The full list is in [reset.md](reset.md). So unmodified code that calls `header()` works.
+
+Native `header()` is discarded only where the transform does not reach: with `skipSourceCodeTransform` set to `true`, and in code loaded before the transform is installed (`Q.webserver.preload`; see [reset.md](reset.md#warming-the-pool-in-the-parent-and-the-one-trap-in-it)). For such code, `Q_Response::header()` / `Q::header()` always work, and `php-cgi` via `Q.webserver.cgi.patterns` runs a script in a real CGI process.
+
+### What the rewriter does not reach
+
+The transform rewrites PHP source as it is included through the server's `file://` wrapper, so it does not see:
+
+- code run with `eval()`;
+- calls made by name, such as `call_user_func('header', ...)` or `$f = 'header'; $f(...)` -- only a direct call to the global function is rewritten;
+- files included from a `phar://` archive, unless the archive is the engine archive named by `EXP_ENGINE_PHAR`, whose scheme is wrapped too;
+- code loaded before the transform is installed (`Q.webserver.preload`, an application cache's class file).
+
+Such code gets PHP's own `header()`, which does nothing under the CLI SAPI. Use `Q_Response::header()` there, or route the script to `php-cgi`.
 
 ## Setting headers, status codes and cookies
 
@@ -28,16 +42,17 @@ Native `header()` cannot be intercepted: in the CLI SAPI it does nothing, and PH
 ```php
 Q_Response::header('Content-Type: application/json');
 Q_Response::header('X-Custom: hello');
-Q_Response::header('HTTP/1.1 201 Created');   // status line form Q_Response::code(201)
-;                         // or set it directly Q_Response::setCookie('session', $token, 0, '/');
+Q_Response::header('HTTP/1.1 201 Created');   // status line form
+Q_Response::code(201);                         // or set it directly
+Q_Response::setCookie('session', $token, 0, '/');
 Q_Response::redirect('/dashboard');
 ```
 
 `Q_Response::header()` also works — `Q_Response::header()` delegates to it — but `Q_Response` is the higher-level API that scripts should prefer.
 
-### Why not `header()`?
+### Why not rely on `header()`?
 
-PHP's built-in `header()` and `http_response_code()` are **silently discarded** under the CLI SAPI, which is what the server runs in. `headers_list()` always returns an empty array and `http_response_code()` returns `false`, and PHP offers no hook to intercept the builtins. A script calling them gets a `200` with none of its headers, and no error to explain why.
+PHP's built-in `header()` and `http_response_code()` are **silently discarded** under the CLI SAPI, which is what the server runs in. `headers_list()` always returns an empty array and `http_response_code()` returns `false`, and PHP offers no hook to intercept the builtins. The source transform rewrites those calls to shims (see above), so with the default configuration they work; with the transform off, a script calling them gets a `200` with none of its headers, and no error to explain why.
 
 ### What works where
 
@@ -48,12 +63,12 @@ PHP's built-in `header()` and `http_response_code()` are **silently discarded** 
 | `Q_Response::setCookie()` | ✅ | ✅ | cookies are assembled into `Set-Cookie` headers by the server |
 | `Q_Response::header()` | ✅ | ✅ | low-level — `Q_Response::header()` delegates here |
 | `Q::header()` | ✅ | ✅ | alias for `Q_Response::header()` |
-| `header()` (built-in) | ❌ | ❌ | silently discarded by the CLI SAPI |
-| `http_response_code()` | ❌ | ❌ | silently discarded by the CLI SAPI |
+| `header()` (built-in) | ✅ | ✅ | rewritten to a shim by the source transform (default); discarded by the CLI SAPI with the transform off |
+| `http_response_code()` | ✅ | ✅ | the same |
 
 ### Scripts you don't control
 
-Third-party code — WordPress, a vendored SDK, anything not written for Qbix — will call native `header()`. Route it to `php-cgi`, which runs it in a real CGI process where the builtins work normally:
+Third-party code — WordPress, a vendored SDK, anything not written for Qbix — will call native `header()`. With the source transform on (the default) that works as it is. Code that must run without it — it defines functions the transform conflicts with, or keeps state the reset cannot reach — can be routed to `php-cgi`, which runs it in a real CGI process where the builtins work normally:
 
 ```json
 { "Q": { "webserver": { "cgi": { "patterns": ["wp-.*\\.php", "legacy/.*"] } } } }
@@ -64,6 +79,10 @@ Third-party code — WordPress, a vendored SDK, anything not written for Qbix �
 ### Cookies
 
 `Q_Response::setCookie()` works in both modes (the Platform declares it too). The server reads `Q_Response::$cookies` — a `public static` property on both implementations — and emits the `Set-Cookie` headers itself.
+
+## Sessions: files, or Redis and Valkey shared with PHP-FPM
+
+The shimmed session functions keep sessions where `session.save_handler` says. With `files` (the default) they go to `session.save_path`. With `session.save_handler=redis` and the phpredis extension loaded, they go to the Redis or Valkey store named in `session.save_path`, with the keys, encoding and lifetime phpredis's own session handler uses (its prefix plus the session id, the `php` encoding, `session.gc_maxlifetime`). Velocity and PHP-FPM then read each other's sessions, so a site served by both behind one load balancer keeps its users signed in when a request lands on the other node. Each worker opens its connection on first use and never uses one across a fork. A store that cannot be reached gives that request an empty session and one log line a minute, not an error page; without the redis extension sessions go to files, with a log line. `tests/unit-compat-session-redis.php` covers it (against a real store when `VELOCITY_TEST_REDIS` is set).
 
 ## Remembered file facts
 
@@ -199,7 +218,7 @@ could write to.
 **How.** `accessCheck()` calls `posix_access()` with `POSIX_R_OK`, `POSIX_W_OK`
 or `POSIX_X_OK`. `posix_access()` calls `access(2)` directly and does not go
 through a stream wrapper; it resolves a relative path against the current
-directory and honours `open_basedir`, as the native functions do. Without the
+directory and honors `open_basedir`, as the native functions do. Without the
 posix extension (Windows, a build without it) the native function runs with
 PHP's own file wrapper put back for that one call
 (`Q_WebServer_CompatFileWrapper::nativeAccess()`); the worker's wrapper is in
@@ -229,7 +248,7 @@ again on the first start after an upgrade; nothing has to be cleared by hand.
 
 ## Tests
 
-Five test suites, 152 tests total:
+The server-level suites below, plus `php tests/run-unit.php`, which runs the self-contained `tests/unit-*.php` tests (200 of them, no server needed; `tests/run.sh` runs it first):
 
 ```bash
 # Core — static files, MIME, PHP dispatch, superglobals, POST/JSON, cookies, auth, stress
@@ -248,7 +267,7 @@ node tests/testWebSocket.js [port]           # 12 tests
 bash tests/testSnapshot.sh [port]            # 12 tests
 ```
 
-The snapshot tests start both a fork-mode server and a persistent-worker server, then verify that statics, globals, `$_COOKIE`, `$_SERVER`, `$_POST`, Authorization headers, and response headers from request A are invisible to request B. The fork-mode server acts as a control group. See [reset.md](docs/reset.md) for what the snapshot resets.
+The snapshot tests start both a fork-mode server and a persistent-worker server, then verify that statics, globals, `$_COOKIE`, `$_SERVER`, `$_POST`, Authorization headers, and response headers from request A are invisible to request B. The fork-mode server acts as a control group. See [reset.md](reset.md) for what the snapshot resets.
 
 ## Class ownership in `--app` mode
 
@@ -302,17 +321,27 @@ In `--app` mode the calculus reverses: the Platform is already loaded, so its `Q
 
 Passing a bare path is worse than an error. `from()` then treats it as a URI string (`"Module/action/..."`) and merely SPLITS it, returning a wrong answer with no exception. Measured against a live app:
 
-    bare path  AI/webhook/slack/ingest                    -> AI / webhook/slack/ingest   (split) full URL   http://host/App/AI/webhook/slack/ingest    -> AI / webhook                (routed)
+    bare path  AI/webhook/slack/ingest                    -> AI / webhook/slack/ingest   (split)
+    full URL   http://host/App/AI/webhook/slack/ingest    -> AI / webhook                (routed)
 
 `Q_WebServer_Router` now builds `Q_Request::baseUrl() + path` before calling `from()`, and returns null rather than guessing when no base URL is available. Verified with the Platform's `Q_Uri` loaded (`which Q_Uri: PLATFORM`):
 
-    /AI/webhook/slack/ingest  -> AI/webhook /Safebox/action           -> Safebox/action /Users/login              -> null      (no catch-all route in that app's config) /nope                     -> null
+    /AI/webhook/slack/ingest  -> AI/webhook
+    /Safebox/action           -> Safebox/action
+    /Users/login              -> null      (no catch-all route in that app's config)
+    /nope                     -> null
 
 ## Testing
 
 Seven suites. Everything runs against a real server over a real socket — no mocks.
 
-    bash tests/run.sh --quick                    # 71 functional + security tests php  tests/testSapi.php                      # 19 SAPI emulation tests bash tests/run-probe.sh [platform-dir]       # 58 wire-level probes per mode bash tests/run-cgi.sh                        # php-cgi carveout php  tests/platform-compat.php <platform>    # --app compatibility audit php  tests/routing-parity.php  <platform>    # our matcher vs the Platform's bash tests/run-modes.sh <app> <platform>     # dual-mode acceptance
+    bash tests/run.sh --quick                    # 71 functional + security tests
+    php  tests/testSapi.php                      # 19 SAPI emulation tests
+    bash tests/run-probe.sh [platform-dir]       # 58 wire-level probes per mode
+    bash tests/run-cgi.sh                        # php-cgi carveout
+    php  tests/platform-compat.php <platform>    # --app compatibility audit
+    php  tests/routing-parity.php  <platform>    # our matcher vs the Platform's
+    bash tests/run-modes.sh <app> <platform>     # dual-mode acceptance
 
 CI runs all of them on every push (`.github/workflows/test.yml`), in three jobs: standalone, php-cgi, and `--app` against a fresh checkout of [Qbix/Platform](https://github.com/Qbix/Platform).
 
@@ -320,7 +349,8 @@ CI runs all of them on every push (`.github/workflows/test.yml`), in three jobs:
 
 The Platform will not bootstrap without a real app — it needs a config with `Q/plugins` and `Q/web/appRootUrl`, and its `Q_Uri` is not loadable on its own. Build a minimal, plugin-free fixture:
 
-    bash tests/fixtures/make-app.sh /path/to/Platform/platform /tmp/TestApp 20099 bash tests/run-probe.sh /path/to/Platform/platform
+    bash tests/fixtures/make-app.sh /path/to/Platform/platform /tmp/TestApp 20099
+    bash tests/run-probe.sh /path/to/Platform/platform
 
 Without a Platform path, `platform-compat.php` and `routing-parity.php` exit 0 with `SKIP`. **In CI that is indistinguishable from passing**, so the workflow greps their output and fails the job if they did not actually report success.
 
@@ -341,13 +371,13 @@ The webserver is a *subset* the Platform must be able to override. In `--app` mo
 
 This audit walks `src/` **and the test fixtures** (they run under both modes too) and fails on any member a shared class does not declare. Anything the Platform lacks belongs on a webserver-only class: `Q_WebServer`, `Q_WebServer_State`, `Q_WebServer_Router`, `Q_WebServer_Identity`, `Q_WebSocket`, `Q_Scheduler`, `Q_FileCache`, `Q_HotReload`.
 
-### Two behaviours worth knowing
+### Two behaviors worth knowing
 
 **`php://input` works, via a stream wrapper.** A forking server reads the request off the socket itself, so the real `php://input` is already consumed and would stay empty for the life of the process. `Q_WebServer_State::setInput()` registers a wrapper over `php` so `file_get_contents('php://input')` returns *this* request's body, and `restoreInput()` unregisters it afterwards.
 
 The wrapper class exists twice on purpose: `Q_PhpInputStream` in `src/Q.php` for standalone, and `Q_WebServer_PhpInput` for `--app`, because `src/Q.php` is the standalone shim and is not loaded when the Platform's `Q` wins. Without the webserver-owned copy, `php://input` returned an empty string for every request under `--app`.
 
-**Native `header()` is discarded under the CLI SAPI.** `headers_list()` always returns empty and `http_response_code()` returns `false`; PHP offers no hook to intercept the builtin. Scripts written for Qbix should use `Q_Response::header()`, which works in both modes. Scripts that must use native `header()` — WordPress, third-party code — are routed to `php-cgi` via `Q.webserver.cgi.patterns`; `tests/run-cgi.sh` proves that path preserves both status and headers.
+**Native `header()` is discarded under the CLI SAPI** unless the source transform rewrote the call. `headers_list()` always returns empty and `http_response_code()` returns `false`; PHP offers no hook to intercept the builtin. The transform (on by default) sends these calls to shims, so unmodified code works; `Q_Response::header()` works in both modes either way. Scripts that must run without the transform can be routed to `php-cgi` via `Q.webserver.cgi.patterns`; `tests/run-cgi.sh` proves that path preserves both status and headers.
 
 **The app enforces its own baseUrl.** If the app is configured for `http://host/App` and you serve it on another port, the Platform returns `{"error":"bad url ..."}`. That is the application refusing, not the server failing. Serve at the configured address, or point the app's baseUrl at the listening one — which is what `make-app.sh`'s port argument does.
 
@@ -365,7 +395,7 @@ Everything else in `--app` mode passes: static files, `index.php`, an `action.ph
 
 **Status: 32/32 passing in both modes**, stable across repeated runs.
 
-**Native `header()` is not captured — use `Q_Response::setHeader()`.** Under the CLI SAPI PHP's `header()` is a no-op and `headers_list()` returns nothing, so a long-running CLI server cannot see those calls. This is a PHP constraint, not a server one, and unlike `php://input` it cannot be worked around with a stream wrapper. Set response headers through `Q_Response::setHeader()` or `Q::header()`; both are captured and reach the client. The suite asserts this explicitly so it will report if a future SAPI changes the behaviour.
+**Native `header()` is captured only through the source transform.** Under the CLI SAPI PHP's `header()` is a no-op and `headers_list()` returns nothing, so without the transform a long-running CLI server cannot see those calls. The transform rewrites them at include time (`tests/unit-compat-transform.php`); code it does not reach should set response headers through `Q_Response::setHeader()` or `Q::header()`, which are always captured and reach the client. The suite asserts this explicitly so it will report if a future SAPI changes the behavior.
 
 **One header store.** `Q_Response`'s accessors delegate to `Q_WebServer_State`. An earlier refactor left `Q_Response` keeping a parallel `$_headers` array while the server read State's — so every header set through the Qbix API silently vanished from the response. The suite now round-trips a header set via `Q_Response::setHeader()` and asserts it arrives.
 

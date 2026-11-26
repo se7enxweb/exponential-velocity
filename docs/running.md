@@ -14,13 +14,14 @@ php sbin/qbixserver.php --socket=/run/qbix/app.sock
 php sbin/qbixserver.php --port=8080 --socket=/run/qbix/app.sock
 ```
 
-### 2. PHAR — single ~280KB file (needs PHP)
+### 2. PHAR — a single file of about 6.4MB (needs PHP)
 
 ```bash
 php sbin/qbixserver.phar --port=80
 
 # Or make it executable
-chmod +x sbin/qbixserver.phar ./sbin/qbixserver.phar --port=80
+chmod +x sbin/qbixserver.phar
+./sbin/qbixserver.phar --port=80
 ```
 
 ### 3. Static binary — no PHP needed
@@ -32,12 +33,35 @@ Download the binary for your platform — no PHP installation required:
 | **Linux x86_64** | [qbixserver-linux-x86_64](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-x86_64) |
 | **Linux ARM64** | [qbixserver-linux-aarch64](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-aarch64) |
 | **macOS ARM64** | [qbixserver-macos-arm64](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-macos-arm64) |
+| **Windows x64** | [qbixserver-windows-x64.exe](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-windows-x64.exe) |
 
 ```bash
-curl -L https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-x86_64 -o qbixserver chmod +x qbixserver ./qbixserver --port=80
+curl -L https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-x86_64 -o qbixserver
+chmod +x qbixserver
+./qbixserver --port=80
 ```
 
-The binary bundles PHP 8.3 + SQLite + OpenSSL + curl into a single ~15MB executable. Copy it to any Linux or macOS machine and run. No dependencies.
+These names are the `standard` extension set on PHP 8.3, about 75MB on Linux
+and macOS and 37MB on Windows (0.0.4.66). Every release also carries each
+platform on PHP 8.2, 8.3, 8.4 and 8.5 in four extension sets,
+`qbixserver-<platform>-php<version>-<mini|lite|standard|full>`, Windows
+`-gui.exe` builds that open no console, the bare PHP interpreters (`php-*`),
+`qbixserver.phar`, `.deb` and `.rpm` packages ([packages.md](packages.md)), a
+source kit and `SHA256SUMS`. What each set holds: [extensions.md](extensions.md).
+Copy the binary to a machine of its platform and run it; nothing else is needed.
+
+### Watchdog
+
+`--watchdog`, or `Q.webserver.watchdog` set to `true` or to an object, forks a
+watchdog at start-up (`src/Q/WebServer/Watchdog.php`). It detaches into its own
+session, waits on the server and starts it again with the same command line
+after a crash, waiting `backoff` seconds (2) before the first restart and twice
+as long after each further one, up to `maxBackoff` (60). After `maxRestarts`
+crashes (10) within an hour it gives up. A clean stop (`--stop`, SIGTERM) ends
+it too. It writes its pid and log to `local/watchdog.pid` and
+`local/watchdog.log` (`watchdog.pid` and `watchdog.log` move them). It needs
+`pcntl` to fork; under systemd, or as a Windows service, the service manager
+restarts the server instead.
 
 ---
 
@@ -80,12 +104,14 @@ php -d phar.readonly=0 build-phar.php
 # With static-php-cli installed locally:
 ./build-binary.sh
 
-# Output: bin/qbixserver (~15MB)
+# Options: --os=linux|macos --arch=x86_64|aarch64 --php=8.2|8.3|8.4|8.5
+#          --variant=mini|lite|standard|full   (defaults: linux, this machine's architecture, 8.3, standard)
+# Output: sbin/qbixserver, beside the phar it is made from
 ```
 
 The binary is built using [static-php-cli](https://github.com/crazywhalecc/static-php-cli), which compiles PHP + extensions into a statically linked binary.
 
-GitHub Actions automatically builds binaries for **Linux x86_64**, **Linux ARM64**, **macOS x86_64**, and **macOS Apple Silicon** on every tagged release.
+GitHub Actions (`.github/workflows/release.yml`) builds binaries for **Linux x86_64**, **Linux ARM64**, **macOS Apple Silicon** and **Windows x64**, each on PHP 8.2 to 8.5 in every extension set, on every tagged release.
 
 ---
 
@@ -120,14 +146,16 @@ The full Platform includes additional server scripts like `static.php` for CDN-s
 **Linux / macOS (recommended):**
 
 - PHP 8.0 or later (8.0 to 8.5; on Red Hat Enterprise Linux see [rhel.md](rhel.md))
-- Extensions: `sockets`, `pcntl` (for signals + workers), `openssl` (for HTTPS)
+- Extensions (the `server` tier, [requirements.md](requirements.md)): `ctype`,
+  `filter`, `mbstring`, `openssl` (for HTTPS), `pcntl` and `posix` (for signals and
+  the forked pool), `phar`, `session`, `sockets`, `sqlite3`, `tokenizer`
 
 ```bash
-# Check
-php -m | grep -E 'sockets|pcntl|openssl'
+# Check, with the install command for this system
+php sbin/qbixctl.php ext:check --variant=mini
 
 # Install on Ubuntu/Debian
-sudo apt install php-cli php-sockets
+sudo apt install php-cli php-common php-mbstring php-sqlite3
 
 # Install on RHEL, AlmaLinux, Rocky 9 (PHP 8.0 from AppStream)
 sudo dnf install php-cli php-common php-process php-mbstring php-pdo php-xml
@@ -137,7 +165,7 @@ sudo dnf install php-cli php-common php-process php-mbstring php-pdo php-xml
 
 - Nothing. The PHP runtime is included.
 
-**Windows:** The server works without `pcntl`. Static files, PHP scripts, WebSocket, caching, compression, access control — everything works. PHP scripts run in isolated subprocesses via `proc_open`, so `exit()` and crashes won't bring down the server. You lose the preload speed benefit (each subprocess starts fresh) and signal-based graceful shutdown. For the full 100–300× concurrent capacity (measured) advantage, use Linux or macOS (or WSL).
+**Windows:** The server runs on the official PHP for Windows without `pcntl`. PHP requests go to a portable pool of persistent workers, each a process of its own started with `proc_open` (`--pool-mode=portable`, chosen automatically where there is no fork), so `exit()` and crashes do not bring down the server. Each worker boots the application itself rather than sharing the parent's memory copy-on-write, so keep the worker count modest. Stop and reload work through files beside the pid file instead of signals, and `packaging/windows/vcc.ps1` installs it as a Windows service. CI runs it on Windows Server 2022 and 2025 (x64 and x86). See [windows.md](windows.md).
 
 ---
 

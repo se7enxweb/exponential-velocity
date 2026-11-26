@@ -2,7 +2,7 @@
 
 Velocity understands special response headers from your PHP scripts. These are the same headers nginx understands (like `X-Accel-Redirect`) plus new ones for component-level caching. Your PHP sends them with `Q_Response::header()`, the server acts on them.
 
-> **Use `Q_Response::header()`, not PHP's `header()`.** The server runs PHP in the CLI SAPI, where the built-in `header()` and `http_response_code()` are silently discarded. `Q_Response::header()`, `Q::header()`, and `Q_WebServer_State::header()` all work in both standalone and `--app` mode. See [Setting headers, status codes and cookies](#setting-headers-status-codes-and-cookies) for the full table.
+> **PHP's `header()` works through the source transform.** The server runs PHP in the CLI SAPI, where the built-in `header()` and `http_response_code()` do nothing; the compat layer (on by default) rewrites those calls to shims that record them. `Q_Response::header()`, `Q::header()`, and `Q_WebServer_State::header()` work in both standalone and `--app` mode with or without the transform. See [Setting headers, status codes and cookies](compatibility.md#setting-headers-status-codes-and-cookies) for the full table.
 
 ### Quick reference
 
@@ -14,7 +14,7 @@ Velocity understands special response headers from your PHP scripts. These are t
 | `X-Q-Cache-Deps` | Maps components to data dependency keys | `Q_Response::header('X-Q-Cache-Deps: ' . json_encode([...]));` |
 | `X-Q-Cache-Invalidate` | Marks dependency keys as stale | `Q_Response::header('X-Q-Cache-Invalidate: ' . json_encode([...]));` |
 
-All of these use `Q_Response::header()` instead of PHP's `header()`. This is because the server runs in CLI SAPI where `header()` calls are silently discarded — same as FrankenPHP worker mode and Workerman. `Q_Response::header()` has the same signature as `header()` but captures the values for the server to send. The server strips internal headers before sending the response to the client.
+The examples use `Q_Response::header()`, which has the same signature as `header()` and captures the values for the server to send whether or not the source transform is on. A plain `header()` call reaches the server the same way when the transform rewrote it (the default; see [compatibility.md](compatibility.md#native-header-and-the-source-transform)). The server strips internal headers (`X-Accel-Redirect`, `X-Accel-Buffering`, `X-Accel-Charset` and the `X-Q-Cache-*` headers) before sending the response to the client.
 
 ### Access-controlled static files
 
@@ -23,14 +23,18 @@ With a typical server, your uploaded files sit at public URLs. Anyone with the l
 `X-Accel-Redirect` lets your PHP check access, then tells the server to serve the file. By convention, private files live in `files/` — a sibling of `web/`, outside the document root:
 
 ```
-myproject/ ├── web/               ← public (accessible via URL) │   └── download.php   ← checks access, sends X-Accel-Redirect └── files/             ← private (NOT accessible via URL)
+myproject/
+├── web/               ← public (accessible via URL)
+│   └── download.php   ← checks access, sends X-Accel-Redirect
+└── files/             ← private (NOT accessible via URL)
     └── private/
         └── doc.pdf    ← served only through download.php
 ```
 
 ```php
 <?php
-// web/download.php — access-controlled file serving session_start();
+// web/download.php — access-controlled file serving
+session_start();
 
 $fileId = $_GET['id'] ?? '';
 $userId = $_SESSION['user_id'] ?? null;
@@ -47,7 +51,7 @@ Q_Response::header("X-Accel-Redirect: /files/private/{$fileId}");
 Q_Response::header("Content-Disposition: attachment; filename=\"document.pdf\"");
 ```
 
-No config needed — `files/` is resolved automatically. For custom mappings:
+No config needed — the path is resolved against the project root (the parent of `web/`), so `files/` works as it is; a path that lands inside the document root is refused, and a missing file gets `404`. For custom mappings (checked first, and never followed outside their directory):
 
 ```json
 {
@@ -65,6 +69,8 @@ No config needed — `files/` is resolved automatically. For custom mappings:
 ```
 
 For nginx compatibility, mirror the mappings: `location /files/ { internal; alias /path/to/files/; }`
+
+Behind nginx you can let nginx serve the file instead: with `Q.webserver.accel.passthrough` set to `true`, the server passes `X-Accel-*` headers through to the reverse proxy rather than acting on them.
 
 ### Reverse proxy cache
 
@@ -130,7 +136,8 @@ $feedHtml    = renderFeed($communityId);
 $sidebarHtml = renderSidebar($communityId);
 $membersHtml = renderMembers($communityId);
 
-// Tell the server about the component tree and what data each depends on Q_Response::header('X-Q-Cache-Tree: ' . json_encode([
+// Tell the server about the component tree and what data each depends on
+Q_Response::header('X-Q-Cache-Tree: ' . json_encode([
     'l' => [
         'feed'    => md5($feedHtml),
         'sidebar' => md5($sidebarHtml),
@@ -152,9 +159,11 @@ echo $feedHtml . $sidebarHtml . $membersHtml;
 
 ```php
 <?php
-// web/post.php — user posts to the feed saveNewPost($communityId, $content);
+// web/post.php — user posts to the feed
+saveNewPost($communityId, $content);
 
-// Tell the server which dependency key changed Q_Response::header('X-Q-Cache-Invalidate: ' . json_encode([
+// Tell the server which dependency key changed
+Q_Response::header('X-Q-Cache-Invalidate: ' . json_encode([
     "community/{$communityId}/feed"
 ]));
 
@@ -174,12 +183,15 @@ The server tracks which pages depend on which data keys. When a dependency key i
 These headers work with `Q_Response::header()` calls as shown above. But with the [Qbix Platform](https://github.com/Qbix/Platform), it becomes automatic:
 
 ```php
-// Tools call this during rendering — the framework handles the rest Q_Response::setCacheComponent('Streams/feed', $hash, [$depKey]);
+// Tools call this during rendering — the framework handles the rest
+Q_Response::setCacheComponent('Streams/feed', $hash, [$depKey]);
 Q_Response::invalidateCacheDeps($publisherId . '/' . $streamName);
 
-// X-Accel-Redirect for access-controlled files Q_Response::redirect(['uri' => $internalPath, 'accel' => true]);
+// X-Accel-Redirect for access-controlled files
+Q_Response::redirect(['uri' => $internalPath, 'accel' => true]);
 
-// Cache-Control with semantic options Q_Response::cacheFor(300);
+// Cache-Control with semantic options
+Q_Response::cacheFor(300);
 ```
 
 The Platform's Streams plugin automatically invalidates cache dependencies when stream data changes — posts, relations, participant joins — so cached pages update themselves without any manual invalidation calls.

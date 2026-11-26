@@ -1,6 +1,6 @@
 # Framework Compatibility
 
-Qbix Server v1.1 includes a compatibility layer that intercepts PHP's built-in functions at include time, letting framework code run without modification. Drop in your Laravel, Symfony, WordPress, Drupal, Joomla, or Magento project and start the server.
+Velocity includes a compatibility layer that intercepts PHP's built-in functions at include time, letting framework code run without modification. It is on by default. Drop in your Laravel, Symfony, WordPress, Drupal, Joomla, Magento or Exponential project and start the server.
 
 ## Quick Start
 
@@ -17,26 +17,29 @@ php sbin/qbixserver.php --root=. --preset=wordpress
 # Drupal
 php sbin/qbixserver.php --root=. --preset=drupal
 
+# Exponential
+php sbin/qbixserver.php --root=. --preset=exponential
+
 # Any framework with .htaccess
-php sbin/qbixserver.php --root=. --config=compat.json
+php sbin/qbixserver.php --root=.
 ```
 
-Where `compat.json` is:
-```json
-{ "Q": { "compat": { "enabled": true } } }
-```
-
-The server reads `.htaccess` files automatically when compat mode is enabled. No preset needed if your project ships with `.htaccess` rewrite rules.
+The server reads the `.htaccess` rewrite rules automatically while the compat
+layer is on, which it is unless `Q.compat.skipSourceCodeTransform` is `true`. No
+preset needed if your project ships with `.htaccess` rewrite rules.
 
 ## How It Works
 
 ### Source Transformation
 
-When compat mode is enabled, the server registers a custom `file://` stream wrapper. Every `include` and `require` passes through it. The wrapper uses `token_get_all()` to find global function calls and replaces them with compatibility shims. Only global calls are replaced — method calls (`$response->header()`), static calls on other classes (`Response::header()`), and function definitions (`function header()`) are left untouched.
+While the compat layer is on, the server registers a custom `file://` stream wrapper. Every `include` and `require` passes through it. The wrapper uses `token_get_all()` to find global function calls and replaces them with compatibility shims. Only global calls are replaced — method calls (`$response->header()`), static calls on other classes (`Response::header()`), and function definitions (`function header()`) are left untouched.
 
-Transformed files are cached to disk by `md5(path)`, invalidated by file modification time. The first request to each file has a small overhead for tokenization; subsequent requests serve from cache.
+Transformed files are cached in memory, keyed by real path and invalidated by modification time; the server transforms the application's files once at start-up (prewarm), before it forks the workers, so the workers share the result.
 
-### 19 Intercepted Functions
+### Intercepted Functions
+
+53 built-in functions are replaced. The ones that carry the HTTP request and
+response, sessions, uploads and ini settings:
 
 | PHP Built-in | Replacement | What it does |
 |---|---|---|
@@ -59,6 +62,18 @@ Transformed files are cached to disk by `md5(path)`, invalidated by file modific
 | `set_time_limit()` | `Q_WebServer_Compat::_set_time_limit()` | Enforced via `pcntl_alarm()` |
 | `getallheaders()` | `Q_WebServer_Compat::_getallheaders()` | Returns parsed request headers |
 | `apache_request_headers()` | `Q_WebServer_Compat::_getallheaders()` | Alias of `getallheaders()` |
+
+The others: `session_id`, `session_name`, `session_set_cookie_params`,
+`session_get_cookie_params`, `phpinfo`, `register_shutdown_function`, the error,
+exception and autoload handler functions (`set_error_handler`,
+`set_exception_handler`, `restore_error_handler`, `restore_exception_handler`,
+`spl_autoload_register`, `spl_autoload_unregister`), `putenv`, the stat functions
+(`file_exists`, `is_dir`, `is_file`, `filemtime`, `filesize`, `is_writable`,
+`is_writeable`, `is_readable`, `is_executable`, `clearstatcache`), the process
+functions (`exec`, `system`, `passthru`, `shell_exec`, `proc_close`, `pclose`),
+`fread`, and the output and connection functions (`flush`, `connection_aborted`,
+`connection_status`, `ignore_user_abort`). The full table, and why each is there,
+is in [docs/compatibility.md](docs/compatibility.md).
 
 ### .htaccess Support
 
@@ -87,11 +102,11 @@ The server parses `multipart/form-data` request bodies and populates `$_FILES` w
 
 ### Session Handling
 
-Sessions use file-based storage with exclusive `flock()` held for the request duration. This prevents concurrent requests from corrupting session data. `session_write_close()` flushes the data and releases the lock early, which is important for long-running requests. Garbage collection runs probabilistically based on `session.gc_probability` / `session.gc_divisor`.
+Sessions go where `session.save_handler` says: `files` (the default), with an exclusive `flock()` held for the request duration, or `redis` with the phpredis extension, compatible with phpredis's own handler so PHP-FPM and Velocity share sessions ([docs/compatibility.md](docs/compatibility.md)). This prevents concurrent requests from corrupting session data. `session_write_close()` flushes the data and releases the lock early, which is important for long-running requests. Garbage collection runs probabilistically based on `session.gc_probability` / `session.gc_divisor`.
 
 ## Framework Presets
 
-Presets set `compat.enabled`, `compat.rewrite`, and `compat.ini` values tuned for each framework:
+Presets set `compat.rewrite` and `compat.ini` values tuned for each framework:
 
 | Preset | `upload_max` | `post_max` | `memory` | `max_execution` | Notes |
 |---|---|---|---|---|---|
@@ -99,6 +114,7 @@ Presets set `compat.enabled`, `compat.rewrite`, and `compat.ini` values tuned fo
 | `symfony` | 10M | 12M | 256M | 60s | Front controller: `index.php` |
 | `wordpress` | 64M | 64M | 256M | 300s | High limits for media uploads |
 | `drupal` | 32M | 32M | 256M | 240s | `?q=` query param rewriting |
+| `exponential` | 64M | 64M | 256M | 300s | Front controller `index.php`; `index_rest.php` and `index_treemenu.php` for their paths; only the installation's public directories are served as files, and only those three scripts run (unless the configuration names its own lists) |
 
 ## Tested Scenarios
 
@@ -175,28 +191,32 @@ Presets set `compat.enabled`, `compat.rewrite`, and `compat.ini` values tuned fo
 ### Priority Order
 
 1. `.htaccess` rules (checked first if file exists)
-2. JSON `rewriteRules` (regex patterns)
-3. JSON `rewrite` (front controller fallback)
-4. JSON `rewriteQueryParam` (Drupal-style `?q=`)
+2. JSON `rewrite` (front controller), for a path that is not a file; with
+   `rewriteQueryParam` (Drupal-style `?q=`) the path is also put in that parameter
+3. JSON `rewriteRules` (regex patterns): checked only when `rewrite` is set, and
+   a matching rule replaces the front controller
 
 ### Startup Banner
 
-When compat mode is active, the server shows it in the startup banner:
+When the compat layer is on, the server shows it in the startup banner (the
+first line is the program's literal name, `Qbix Server`, and the release; the
+preset is `custom` when none was given):
 
 ```
-  ┌──────────────────────────────────────┐
-  │  Qbix Server v1.1.0                  │
-  │  http://0.0.0.0:8080                 │
-  │  Root: public                        │
-  │  Mode: Standalone                    │
-  │  Compat: laravel (source transform)  │
-  └──────────────────────────────────────┘
+  ┌──────────────────────────────────────────────┐
+  │  Qbix Server v0.0.4.69                       │
+  ├──────────────────────────────────────────────┤
+  │  http://0.0.0.0:8080                         │
+  │  Root: public                                │
+  │  Mode: Standalone                            │
+  │  Compat: laravel (source transform active)   │
+  ...
 ```
 
 ## Known Limitations
 
 - **OPcache**: The source transformation requires OPcache to be disabled or set to `validate_timestamps=1` so transformed source isn't cached stale. In CLI mode (`opcache.enable_cli=0`), this is the default.
-- **`\header()` (backslash-prefixed)**: Fully-qualified global calls like `\header()` are currently not transformed. This is rare in framework code but possible in vendor libraries.
+- **`\header()` (backslash-prefixed)**: Fully-qualified global calls like `\header()` are transformed like plain ones (PHP 8's `T_NAME_FULLY_QUALIFIED`).
 - **Binary extensions**: PHP extensions that call `header()` internally (e.g., `session_start()` with the native handler) bypass the source transformer. The compat layer overrides `session_start()` itself to avoid this.
 - **Output buffering**: Frameworks that use `ob_end_flush()` aggressively may interfere with the server's response capture. The server uses a non-removable output buffer to mitigate this.
 - **Async workers**: In `--workers` mode, the snapshot restore already clears PHP statics between requests. The compat layer's session and upload cleanup also runs between requests.

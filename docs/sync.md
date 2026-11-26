@@ -77,18 +77,19 @@ Records that win are passed to your `putRecords` callback in one batch.
 
 ## Prolly trees
 
-For large tables, comparing Bloom filters costs space proportional to the table. A prolly tree is a content-addressed search tree whose shape depends only on its contents, so two peers with nearly identical tables have nearly identical trees, and a diff only needs to descend into the branches whose hashes differ. `Q_WebServer_ProllyTree` builds these trees and diffs them. In the test suite, two 10,000-record trees differing in 100 records are diffed in about 1.5ms, touching about 11KB of hashes.
+For large tables, comparing Bloom filters costs space proportional to the table. A prolly tree is a content-addressed search tree whose shape depends only on its contents, so two peers with nearly identical tables have nearly identical trees, and a diff only needs to descend into the branches whose hashes differ. `Q_WebServer_ProllyTree` builds these trees and diffs them. Measured upstream (the test is not in this repository), two 10,000-record trees differing in 100 records are diffed in about 1.5ms, touching about 11KB of hashes.
 
 The endpoint `POST /Q/sync/tree` serves a table's root hash and individual nodes. When a sync estimates that more than 500 records are missing, it fetches the peer's root first and skips the transfer entirely if the roots match.
 
 ## Current limitations
 
-These are the gaps between the protocol as designed in [Mesh.md](Mesh.md) and what ships in v2.0:
+These are the gaps between the protocol as designed in [Mesh.md](Mesh.md) and what ships today (v0.0.4.69):
 
 - **The tree walk is not yet done over the wire.** When the roots differ, the sync falls back to the Bloom-filter record fetch described above rather than walking the peer's tree node by node. The tree diff is implemented and tested locally; the remaining work is the request loop.
 - **Filters hold keys, not versions.** A record that exists on both sides is in both filters, whatever its version. An edit reaches the other peer only when that peer's copy is older than `$since`, so that its filter leaves the key out. Pass the time of the last successful sync with that peer as `$since`, as in the example above. Two peers that both edit the same record after their last sync will not detect the conflict in the Bloom pass.
 - **False positives delay records.** At the ~0.1% rate, roughly one in a thousand missing records is not sent in a given round. It will usually be sent in a later round, once the sets or `$since` have changed. If your app cannot tolerate that, run a sync with `$since = 0` periodically.
-- **Multi-hop relay over HTTP is incomplete.** Routing tables, HELLO propagation and forward envelopes are implemented and pass the in-process routing suite, but when a `FORWARD` arrives over HTTP the intermediate node computes the next hop without sending it on, and the destination acknowledges delivery without running the request. Direct peer-to-peer requests over an encrypted session work end to end (`tests/test_mesh_e2e.sh`); syncs between peers that are not directly connected do not yet.
+- **Multi-hop relay over HTTP is incomplete.** Routing tables, HELLO propagation and forward envelopes are implemented (`Q_WebServer_MeshRouter`), but when a `FORWARD` arrives over HTTP the intermediate node computes the next hop without sending it on, and the destination acknowledges delivery without running the request. Direct peer-to-peer requests go over an encrypted session; syncs between peers that are not directly connected do not work yet.
+- **Few tests.** The repository's only mesh test, `tests/unit-mesh-endpoints.php`, checks that `/Q/sync/*` is closed by default and refuses unauthenticated requests when switched on. The sync itself, the prolly tree and routing have no test in `tests/` (the figures above come from the upstream suite, which this repository does not carry).
 - **BLE payload size.** A single message over BLE GATT is limited to 64KB, which a filter reaches at around 36,000 changed keys. Keep `$since` recent for large tables synced over Bluetooth.
 
 ## Endpoints

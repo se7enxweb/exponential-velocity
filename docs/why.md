@@ -1,6 +1,6 @@
 ## 🏎️ Why Not php-fpm?
 
-php-fpm re-bootstraps the framework on every request (10–50ms), uses ~42MB per worker, and leaks statics between requests. Velocity loads the framework once at startup, keeps workers persistent, resets all state between requests via Reflection and 44 function shims (about 0.5 ms for a small application, 4–5 ms for a large CMS), and shares the loaded framework between workers by copy-on-write, so each worker pays only for its own private pages: 1.3–1.9 MB with nothing loaded, about 10 MB for a full CMS ([measured](workers.md#what-a-worker-costs)).
+php-fpm re-bootstraps the framework on every request (10–50ms), uses ~42MB per worker, and leaks statics between requests. Velocity loads the framework once at startup, keeps workers persistent, resets all state between requests via Reflection and 53 function shims (about 0.5 ms for a small application, 4–5 ms for a large CMS), and shares the loaded framework between workers by copy-on-write, so each worker pays only for its own private pages: 1.3–1.9 MB with nothing loaded, about 10 MB for a full CMS ([measured](workers.md#what-a-worker-costs)).
 
 ```
 php-fpm:
@@ -21,7 +21,7 @@ Velocity:
   Cost: 1.3–1.9 MB private per worker (bare). ~100 workers on 200MB. 1,060 req/s at 50ms I/O.
 ```
 
-Three things fpm can't do: (1) persistent workers that don't leak state — Velocity resets 44 shimmed functions + all statics between requests, fpm resets nothing. (2) Many more workers on the same RAM — COW means each worker only pays for the pages it writes, not the loaded framework: a few MB each instead of 42MB, up to the event loop's ceiling of about 1,000 per pool. (3) Run unmodified blocking PHP code at high concurrency — when workers cost a few MB each, you can have enough of them that blocking I/O doesn't matter.
+Three things fpm can't do: (1) persistent workers that don't leak state — Velocity shims 53 functions and resets all statics between requests, fpm resets nothing. (2) Many more workers on the same RAM — COW means each worker only pays for the pages it writes, not the loaded framework: a few MB each instead of 42MB, up to the event loop's ceiling of about 1,000 per pool. (3) Run unmodified blocking PHP code at high concurrency — when workers cost a few MB each, you can have enough of them that blocking I/O doesn't matter.
 
 **The trick that makes it all work: fork after preload.** The server loads your entire framework — every class, every route, every config file — into a single parent process. Then it calls `pcntl_fork()` to create workers. The kernel doesn't copy the parent's 30MB of memory; it marks the pages copy-on-write. Workers share every loaded class, every compiled route, every cached config. They only pay for the pages they write to after the fork — the allocator's arenas, each request's objects, the application's caches — measured at 1.3–1.9 MB per worker for the server alone and about 10 MB for a full CMS. This is pure userland PHP. No kernel module, no C extension, no custom allocator. Just `pcntl_fork()` after loading everything, and the OS does the rest.
 
@@ -34,7 +34,7 @@ Three things fpm can't do: (1) persistent workers that don't leak state — Velo
 | **I/O 200ms (c=400)** | 20 req/s | ~200–500* req/s | **488 req/s** (200w) |
 | **Memory / worker** | ~42MB | ~42MB | **1.3–1.9 MB** bare, ~10 MB full CMS (COW, private) |
 | **Workers on 200MB** | 4 | 4 | **~100** bare, ~15 full CMS |
-| **State isolation** | Statics leak | Statics leak | **Snapshot reset (44 shims)** |
+| **State isolation** | Statics leak | Statics leak | **Snapshot reset (53 shims)** |
 | **Unmodified WordPress** | ✅ | ❌ no adapter | **✅** (source transform) |
 | **Requires extension** | — | **Yes** (PECL) | **No** |
 
@@ -70,8 +70,8 @@ If you're looking beyond php-fpm, you've probably seen FrankenPHP and Swoole. He
 | **Memory safety** | Go runtime + PHP = complex interaction | C extension = segfault risk | PHP only = memory-safe by default |
 | **Access control** | No X-Accel-Redirect equivalent | Manual implementation | ✅ Built-in X-Accel-Redirect |
 | **Component cache** | No | No | ✅ X-Q-Cache-Tree — sub-page invalidation |
-| **Early hints / 103** | ✅ Yes | No | Via amphp |
-| **HTTP/2** | ✅ Built-in (Caddy) | ✅ Built-in | ✅ Via amphp |
+| **Early hints / 103** | ✅ Yes | No | No |
+| **HTTP/2** | ✅ Built-in (Caddy) | ✅ Built-in | ✅ Built-in, over TLS (`Q.web.http2.enabled`) |
 | **WebSocket** | Via Mercure | ✅ Built-in | ✅ Built-in |
 | **PHP throughput** (CPU-bound) | 350 req/s | ~400 req/s | **2,294 req/s** (octane 100w) |
 | **PHP throughput** (same 200MB, I/O 50ms) | 78 req/s | ~300 req/s (coroutines) | **151 req/s** (fork) / **1,060 req/s** (octane 100w) |
@@ -80,7 +80,7 @@ If you're looking beyond php-fpm, you've probably seen FrankenPHP and Swoole. He
 | **Concurrent capacity** | Limited by worker memory | Limited by worker memory | **100–300× more** (COW, measured) |
 | **WebSocket rooms** | No | Manual | ✅ Built-in — rooms are forked processes |
 | **Code signing** | No | No | ✅ M-of-N manifest signing |
-| **Unmodified WordPress** | ✅ | ❌ | ✅ (44-function shim) |
+| **Unmodified WordPress** | ✅ | ❌ | ✅ (53-function shim) |
 
 ### The state isolation advantage
 
@@ -104,15 +104,15 @@ Every PHP framework, library, and snippet that uses static variables, singletons
 
 Velocity offers two modes, both of which avoid this:
 
-**Fork mode (default):** each request forks from the preloaded parent, inherits loaded classes and config (read-only, shared via COW), runs in its own process, and dies when done. No state leaks. No audit needed. Your existing PHP code works exactly as it does on php-fpm.
+**Fork mode (`forkPerRequest: true`):** each request forks from the preloaded parent, inherits loaded classes and config (read-only, shared via COW), runs in its own process, and dies when done. No state leaks. No audit needed. Your existing PHP code works exactly as it does on php-fpm.
 
-**Default mode:** persistent workers handle multiple requests, but a snapshot restore resets all class statics, `$GLOBALS`, `$_GET`, `$_POST`, `$_COOKIE`, `$_SERVER`, `$_FILES`, response headers, and error state between every request — verified by 13 dedicated snapshot isolation tests. The code above would work correctly because `$cached` is restored to `null` between requests. See [reset.md](docs/reset.md) for the full reset table.
+**Default mode:** persistent workers handle multiple requests, but a snapshot restore resets all class statics, `$GLOBALS`, `$_GET`, `$_POST`, `$_COOKIE`, `$_SERVER`, `$_FILES`, response headers, and error state between every request — verified by the snapshot isolation tests in `tests/testSnapshot.sh`. The code above would work correctly because `$cached` is restored to `null` between requests. See [reset.md](reset.md) for the full reset table.
 
 ### The "just PHP" advantage
 
 FrankenPHP requires Go tooling to build or a pre-built binary that bundles Caddy. Swoole requires compiling a C extension, which can conflict with other extensions and doesn't work on all hosting environments.
 
-Velocity is a PHP file. If you can run `php -v`, you can run the server. It uses standard PHP extensions (`sockets`, `pcntl`) that come pre-installed on most systems. There's no compilation step, no foreign runtime, no binary compatibility issues.
+Velocity is a PHP file. If you can run `php -v`, you can run the server. It uses standard PHP extensions (`sockets`, and `pcntl` where there is fork; on Windows the workers are processes of their own, [windows.md](windows.md)) that come pre-installed on most systems. There's no compilation step, no foreign runtime, no binary compatibility issues.
 
 ```bash
 # FrankenPHP
@@ -134,7 +134,7 @@ php sbin/qbixserver.php  # done
 
 **Swoole** has one unique trick: coroutine fan-out within a single worker (one request making 50 parallel HTTP calls). If that's your architecture, it helps. But it requires a C extension, breaks many PHP extensions, needs framework-specific adapters, leaks state, and will never run unmodified WordPress.
 
-**Velocity** beats fpm on I/O (14× throughput on the same RAM), beats Swoole on CPU-bound work (2,294 vs ~400 req/s), runs unmodified WordPress/Laravel/Symfony/Drupal with 28 shimmed functions, and adds WebSocket rooms, SSE, microservice isolation, cluster replication, code signing, and a live dashboard. No extensions, no Docker, no Go. One PHP file.
+**Velocity** beats fpm on I/O (14× throughput on the same RAM), beats Swoole on CPU-bound work (2,294 vs ~400 req/s), runs unmodified WordPress/Laravel/Symfony/Drupal with 53 shimmed functions, and adds WebSocket rooms, SSE, microservice isolation, cluster replication, code signing, and a live dashboard. No extensions, no Docker, no Go. One PHP file.
 
 ---
 

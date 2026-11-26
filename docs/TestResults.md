@@ -5,6 +5,16 @@ Source: `git clone https://github.com/Qbix/webserver.git` (commit `8e69b26`)
 Environment: PHP 8.3.6 (NTS), Linux (Ubuntu 24.04), single CPU
 Extensions: pcntl, sockets, pdo_sqlite, sqlite3, openssl, mbstring, phar, tokenizer
 
+> **A historical record.** This page is one manual run against the upstream
+> engine (v1.1.0) before the Velocity fork, kept as it was. It does not describe
+> the current tree. Velocity's tests today are 198 unit tests (`tests/unit-*.php`,
+> run with `php tests/run-unit.php`) plus the integration scripts in `tests/`
+> that `.github/workflows/test.yml` runs on every push (`tests/run.sh --quick`,
+> `tests/testSapi.php`, `tests/run-probe.sh`, `tests/run-cgi.sh`, the `--app`
+> suites and others), and the Windows jobs in `.github/workflows/windows.yml`
+> ([windows.md](windows.md)). One of the limitations at the end has since been
+> fixed; it is marked there.
+
 ## Unit Test Suite
 
 **72/72 passing** — `bash tests/run.sh --quick`
@@ -194,8 +204,8 @@ Covers: static files, content types, ETag/304, keep-alive, HEAD, 404s, compressi
 
 | Issue | Detail |
 |---|---|
-| SSE in persistent workers | Output collected via `ob_start()` then sent as one response. SSE streaming requires fork-per-request mode (standalone dispatch uses chunked transfer). |
-| `--workers=0` auto-detects | `!$opts['workers']` treats 0 as falsy. Use `forkPerRequest: true` in config instead. |
+| SSE in persistent workers | Output collected via `ob_start()` then sent as one response. SSE streaming requires fork-per-request mode (standalone dispatch uses chunked transfer). **Fixed since:** pooled workers stream `text/event-stream` responses (and any response that calls `Q_WebServer_State::setStreaming(true)`) chunk by chunk; see `tests/unit-pool-streaming.php`. |
+| `--workers=0` auto-detects | `!$opts['workers']` treats 0 as falsy. Use `forkPerRequest: true` in config instead. (Still so: `--workers=0` means "size the pool automatically".) |
 | ACME live provisioning | Requires publicly reachable port 80. Class methods and routing tested; protocol flow untested against real Let's Encrypt. |
 | `define()` not shimmed | Constants defined during a request persist in persistent workers. |
 | `stream_wrapper_register` not shimmed | Custom stream wrappers registered during a request persist. |

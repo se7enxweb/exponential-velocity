@@ -182,7 +182,7 @@ connection while any process holds it. It stays in `CLOSE-WAIT` until every
 worker holding it has exited. A dynamic pool forks while connections are open,
 so on a busy HTTPS site this adds up: 50 such connections after a 20-second burst
 on one installation. The only complete answer is not to inherit them:
-`Q.webserver.zygote` forks later workers from a process that never had any.
+`Q.webserver.zygote` (on by default where PHP passes sockets between processes intact) forks later workers from a process that never had any.
 
 **There is no way to drop just the descriptor from PHP.** The obvious trick --
 `socket_close(socket_import_stream($tls))`, closing the raw socket underneath

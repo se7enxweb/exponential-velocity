@@ -2,7 +2,8 @@
 
 The server can keep its configuration in a directory laid out like Debian's
 `/etc/apache2`, because that is the structure most administrators already know.
-The standard place is `/etc/qbix`. Sites, shared snippets and engine modules each
+The engine's standard place is `/etc/qbix`; Velocity stacks its own tree,
+`/etc/vc`, on top of it ([below](#velocitys-overlay-etcvc)). Sites, shared snippets and engine modules each
 have an `-available` directory holding the files and an `-enabled` directory
 holding symlinks to the ones in use; enabling or disabling one is a symlink,
 made or removed by the console.
@@ -84,7 +85,7 @@ APP_TEMPLATE='$literal'     # single quotes: taken as written
   | Refused | Why |
   |---|---|
   | `LD_*`, `DYLD_*` | the dynamic loader (`LD_PRELOAD`, `LD_LIBRARY_PATH`, ...) |
-  | `MALLOC_*`, `GLIBC_TUNABLES`, `GCONV_PATH`, `GETCONF_DIR`, `LOCPATH`, `NLSPATH`, `NIS_PATH`, `TZDIR`, `HOSTALIASES`, `LOCALDOMAIN`, `RES_OPTIONS`, `RESOLV_HOST_CONF` | glibc reads them to load files or change behaviour; it ignores them itself in privileged programs |
+  | `MALLOC_*`, `GLIBC_TUNABLES`, `GCONV_PATH`, `GETCONF_DIR`, `LOCPATH`, `NLSPATH`, `NIS_PATH`, `TZDIR`, `HOSTALIASES`, `LOCALDOMAIN`, `RES_OPTIONS`, `RESOLV_HOST_CONF` | glibc reads them to load files or change behavior; it ignores them itself in privileged programs |
   | `PATH`, `IFS`, `PS4`, `ENV`, `BASH_ENV`, `SHELLOPTS`, `BASHOPTS`, `CDPATH`, `GLOBIGNORE`, `SHELL` | how commands the application runs are found and interpreted |
   | `PHPRC`, `PHP_INI_SCAN_DIR` | which `php.ini` a PHP the application starts reads |
   | `PERL5LIB`, `PERL5OPT`, `PYTHONPATH`, `PYTHONHOME`, `PYTHONSTARTUP`, `NODE_OPTIONS`, `RUBYOPT` | code other interpreters load first |
@@ -181,6 +182,51 @@ the machine's.
 
 Designs and certificates are looked up the same way: the top overlay's
 `designs/` and `ssl/` first, then the base's.
+
+#### Velocity's overlay: /etc/vc
+
+Velocity is the `vc` distribution: the `DISTRIBUTION` file at the top of its
+tree reads `vc`, so `Q_WebServer_Distribution_Vc`
+(`src/Q/WebServer/Distribution/Vc.php`) registers `/etc/vc` as an overlay on
+`/etc/qbix`. `/etc/qbix` is loaded first and `/etc/vc` second, so its values win.
+`VC_CONF_DIR` moves it, as `QBIX_CONF_DIR` moves the base.
+
+```
+/etc/vc/vc.conf              base settings (like apache2.conf)
+/etc/vc/ports.conf           listen ports
+/etc/vc/envvars              environment for the server process
+/etc/vc/conf-available/      shared snippets      -> conf-enabled/  (symlinks)
+/etc/vc/mods-available/      engine modules       -> mods-enabled/  (symlinks)
+/etc/vc/sites-available/     one per installation -> sites-enabled/ (symlinks)
+/etc/vc/designs/  /etc/vc/ssl/
+/var/lib/vc/  /var/log/vc/   its state and log directories
+```
+
+The base file of each tree is named after its directory (`vc.conf` in
+`/etc/vc`), and `qbix.conf` is accepted in either.
+
+#### Log directory
+
+Each tree also has a log directory, as `/var/log` goes with `/etc`:
+`/var/log/qbix` for the base tree, the overlay's own (`/var/log/vc`) for an
+overlay. `QBIX_LOG_DIR` moves it. `qbixctl` writes the server's log there by
+default (see [console.md](console.md#qbixconsole)).
+
+#### On Windows
+
+Windows has no `/etc`, `/var` or `/run`; each tree becomes one folder under
+`%ProgramData%` (`Q_WebServer_Layout::platformDir()`):
+
+| POSIX | Windows |
+|---|---|
+| `/etc/vc` | `%ProgramData%\vc` |
+| `/var/lib/vc` | `%ProgramData%\vc\state` |
+| `/var/log/vc` | `%ProgramData%\vc\logs` |
+| `/var/cache/vc` | `%ProgramData%\vc\cache` |
+| `/run/vc` | `%ProgramData%\vc\run` |
+
+The same rule holds for `/etc/qbix`. `QBIX_CONF_DIR`, `VC_CONF_DIR`,
+`QBIX_STATE_DIR` and `QBIX_LOG_DIR` still win. See [windows.md](windows.md).
 
 ### The state directory
 

@@ -104,6 +104,11 @@ The server listens on 8080 until `/etc/qbix/ports.conf` says otherwise.
 /var/lib/exponential-velocity/            state, owned by qbix
 ```
 
+The package creates `/etc/qbix` only. Velocity's own overlay, `/etc/vc`
+(`vc.conf`, `ports.conf`, `envvars`, the same `-available`/`-enabled` pairs), is
+not created by it; when you make it, it is stacked on top of `/etc/qbix` and its
+values win ([layout.md](layout.md#velocitys-overlay-etcvc)).
+
 Everything under `/etc` is configuration: an upgrade never overwrites a file you
 changed. Enable and disable sites, snippets and modules with `qbixctl ensite`,
 `dissite`, `enconf`, `disconf`, `enmod` and `dismod` ([layout.md](layout.md)).

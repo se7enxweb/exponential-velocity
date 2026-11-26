@@ -22,8 +22,12 @@ answers a health check.
 ```
 ghcr.io/se7enxweb/exponential-velocity:<release>-php<version>-<variant>   fixed
 ghcr.io/se7enxweb/exponential-velocity:php<version>-<variant>             moves with each release
+ghcr.io/se7enxweb/exponential-velocity:<release>                          newest PHP, standard variant, fixed
 ghcr.io/se7enxweb/exponential-velocity:latest                             newest PHP, standard variant
 ```
+
+`<release>` is the version without its `v` (`0.0.4.69`). Each tag also has a
+single-architecture form with `-amd64` or `-arm64` appended to the fixed tag.
 
 > DEPRECATED: `ghcr.io/se7enxweb/qbix-webserver` is no longer updated. Use
 > `ghcr.io/se7enxweb/exponential-velocity` instead.
@@ -131,8 +135,12 @@ which is not redistributable, so it is not in any image; FreeTDS over ODBC is.
 
 ### Configuration
 
-The server reads `/etc/qbix` inside the container, laid out as described in
-[layout.md](layout.md). Mount a directory there, or pass settings on the command
+The image's default command, `qbixserver --root=/app --port=8080`, reads no
+configuration tree. To use one, mount it at `/etc/vc` (Velocity's overlay) or
+`/etc/qbix` (the engine's base tree; the image creates it empty), both laid out as
+described in [layout.md](layout.md), and ask for it: `--conf-dir=auto`, a
+`--config=/etc/vc/sites-enabled/<site>.conf`, or the environment variable
+`QBIX_CONF_DIR` (or `VC_CONF_DIR`). Settings can also be passed on the command
 line. Certificates and HTTPS: [https.md](https.md). A mounted directory needs to be
 readable by the container's user (root in these images, unless you run them with
 `--user`).

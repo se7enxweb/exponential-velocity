@@ -63,7 +63,7 @@ How many extensions a variant has on each static platform (PHP 8.3):
 | mini | 11 | 11 | 11 | 9 |
 | lite | 30 | 30 | 30 | 26 |
 | standard | 49 | 49 | 51 | 40 |
-| full | 93 | 93 | 95 | 66 |
+| full | 88 | 87 | 89 | 58 |
 
 ### Databases
 
@@ -105,8 +105,9 @@ Every form meets this standard except where a line below says otherwise.
 
 Static-binary exceptions, by platform:
 
-- **Windows**: no `pcntl` or `posix` (there is no `fork()`; isolation comes from
-  `qbix_fork.dll`, or php-cgi), no `intl` (the ICU bundle needs C++17, which PHP's
+- **Windows**: no `pcntl` or `posix` (there is no `fork()`; workers run in the
+  portable pool, each a process of its own started with `proc_open()`,
+  [windows.md](windows.md#the-portable-pool)), no `intl` (the ICU bundle needs C++17, which PHP's
   Windows build does not use for intl) and no `xsl` (static-php-cli cannot build
   libxslt there), plus the extensions static-php-cli does not build for Windows yet
   (`gmp`, `ldap`, `memcached`, `mongodb`, `odbc`, `readline`, `gettext` and others;
@@ -229,11 +230,11 @@ platforms whose binary leaves the extension out (see the exceptions above).
 | `decimal` | Arbitrary-precision decimals |  |
 | `deepclone` | Fast deep object cloning |  |
 | `dio` | Direct low-level I/O (serial ports, devices) |  |
-| `ds` | Efficient data structures |  |
+| `ds` | Efficient data structures | Windows |
 | `ev` | libev event loop: epoll/kqueue for the Revolt event loop backend (see architecture.md) |  |
 | `event` | libevent event loop: epoll/kqueue for the Revolt event loop backend (see architecture.md) | Windows |
 | `ffi` | Calling C libraries from PHP | Linux x86-64, Linux ARM64 |
-| `gmssl` | Chinese national cryptography (SM2/3/4) |  |
+| `gmssl` | Chinese national cryptography (SM2/3/4) | Linux x86-64, Linux ARM64, macOS, Windows |
 | `grpc` | gRPC clients | Windows |
 | `imagick` | ImageMagick image processing | Windows |
 | `imap` | IMAP/POP3 mail access (unbundled from PHP 8.4, built from PECL) | Windows |
@@ -243,12 +244,12 @@ platforms whose binary leaves the extension out (see the exceptions above).
 | `mbregex` | Multibyte regular expressions for mbstring |  |
 | `memcache` | The older memcache client, for libraries that still use it | Windows |
 | `msgpack` | MessagePack serialization |  |
-| `mysqlnd_ed25519` | MariaDB ed25519 authentication |  |
-| `mysqlnd_parsec` | MariaDB PARSEC authentication |  |
+| `mysqlnd_ed25519` | MariaDB ed25519 authentication | Linux x86-64, Linux ARM64, macOS, Windows |
+| `mysqlnd_parsec` | MariaDB PARSEC authentication | Linux x86-64, Linux ARM64, macOS, Windows |
 | `opentelemetry` | OpenTelemetry tracing |  |
 | `password-argon2` | Argon2 password hashing | Windows |
-| `protobuf` | Protocol Buffers | Windows |
-| `rar` | RAR archives |  |
+| `protobuf` | Protocol Buffers | Linux x86-64, Linux ARM64, macOS, Windows |
+| `rar` | RAR archives | Linux x86-64, Linux ARM64, macOS, Windows |
 | `rdkafka` | Kafka clients | Windows |
 | `shmop` | Shared memory segments |  |
 | `simdjson` | Very fast JSON decoding |  |
@@ -262,9 +263,9 @@ platforms whose binary leaves the extension out (see the exceptions above).
 | `trader` | Technical-analysis maths | Windows |
 | `uuid` | UUID generation | Windows |
 | `uv` | libuv event loop: epoll/kqueue for the Revolt event loop backend (see architecture.md) | Windows |
-| `xlswriter` | Writing Excel files |  |
-| `xz` | XZ / LZMA compression |  |
-| `yac` | Lock-free shared-memory cache |  |
+| `xlswriter` | Writing Excel files | Windows |
+| `xz` | XZ / LZMA compression | Windows |
+| `yac` | Lock-free shared-memory cache | Linux ARM64, macOS, Windows |
 | `yaml` | YAML parsing |  |
 | `zstd` | Zstandard compression | Windows |
 

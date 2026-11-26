@@ -77,7 +77,9 @@ Check at any time with `qbixconsole ssl:show`.
    break a handshake. The copy belongs to that one server process: another server on
    the same directory and port (a second site, a test instance) writes its own and
    never removes this one. A server removes only its own earlier copies and those
-   of processes that are no longer running.
+   of processes that are no longer running. With `--drop-master` the copies (the
+   default pair and every SNI pair) are handed to the user the server becomes,
+   since PHP reads them again for every handshake.
 4. **HTTPS comes up before HTTP**, so there is never a moment when the server
    answers plain HTTP but not HTTPS.
 5. **Everything is watched.** Every `watchInterval` seconds (60) the server looks
@@ -311,7 +313,7 @@ EAB credentials in their dashboard and give them as `eab`. Any other ACME CA (a
 company CA such as step-ca, for example) works with its directory URL; give its
 root in `caBundle` if your system does not trust it.
 
-#### Rate limits and good behaviour
+#### Rate limits and good behavior
 
 The server never asks more often than needed: one account per CA, a certificate
 only when one is due, and a pause that doubles after every failure. If the CA
@@ -370,7 +372,7 @@ network, and as a stand-in while a real certificate is on its way.
 
 ```sh
 qbixconsole ssl:show [--json]            # what HTTPS uses, days left, hosts, ACME state
-qbixconsole ssl:check <file>...          # what a certificate file, archive or bundle holds
+qbixconsole ssl:check [--password=P] [--key-password=P] <file>...  # what a certificate file, archive or bundle holds
 qbixconsole ssl:issue [--staging] [domain...]   # get the ACME certificate now, in the foreground
 qbixconsole ssl:renew [--if-needed] [host...]   # a new self-signed certificate now
 ```

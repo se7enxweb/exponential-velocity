@@ -3,7 +3,10 @@
 An audit of the reverse response cache, with the focus on keeping small entries
 in APCu: what the code does today, what it costs per hit, where it falls short,
 and what is worth changing. Line numbers refer to the tree this was written
-against (`origin/main` at `07f7a28`).
+against (`origin/main` at `07f7a28`), and have moved since. Sections 1-9
+describe the code as it was then; every finding has since been fixed, as
+[section 10](#10-results) records. For the cache as it is now, see
+[cache.md](cache.md).
 
 Each finding is marked:
 
@@ -21,6 +24,7 @@ Each finding is marked:
 - [7. Findings at a glance](#7-findings-at-a-glance)
 - [8. Benchmark](#8-benchmark)
 - [9. Proposal](#9-proposal)
+- [10. Results](#10-results)
 
 ---
 
@@ -80,7 +84,7 @@ APCu is on. Nothing checks `apcu_enabled()` or `apc.enable_cli`, and nothing is
 logged. This alone explains a gain that shows up on one machine and not on the
 next.
 
-**Is APCu initialised before `pcntl_fork()`? — OK.**
+**Is APCu initialized before `pcntl_fork()`? — OK.**
 APCu allocates its segment at module startup, in the server process, before any
 fork, so the parent, the zygote and every worker share one segment. In practice
 only the parent reads and writes page entries (every `get()` and `put()` runs
@@ -120,11 +124,11 @@ marker is re-read at most once a second, so a hit can be served for up to one
 second after a bump (documented). Since only the parent serves hits, that is one
 process, not one per worker.
 
-**Is data serialised more than once per hit? — PERF (C4).**
-Once. With `apc.serializer=php` an array is stored serialised, so each
+**Is data serialized more than once per hit? — PERF (C4).**
+Once. With `apc.serializer=php` an array is stored serialized, so each
 `apcu_fetch()` unserialises the whole entry, copying the body out of shared
 memory; a conditional request adds a second, small unserialise for the index.
-Storing the body as its own string key would avoid the serialiser on the body.
+Storing the body as its own string key would avoid the serializer on the body.
 A PHP-array layer in the parent would avoid both.
 
 **Other APCu observations.**
@@ -280,17 +284,17 @@ concurrency 16, 20,000 requests, with the server's own CPU read from `/proc`:
 
 ### 9. Proposal
 
-Ranked by expected gain against risk. Nothing here is implemented yet.
+Ranked by expected gain against risk. Nothing here was implemented when this was written; all of it has been since (section 10).
 
 | # | Change | Findings | Expected gain | Risk | Default |
 |---|---|---|---|---|---|
-| 1 | **Decide APCu from `apcu_enabled()`, not `function_exists()`.** Log once at startup when the cache is on and APCu is loaded but unusable (`apc.enable_cli=0`), when `apc.use_request_time=1`, and when `apcu.maxSize` exceeds the segment. Count failed `apcu_store()` calls. | C1, C3, C6 | The whole APCu gain (~2× small pages) on every host where it silently did nothing today | Low: only stops calling functions that already fail | behaviour unchanged where APCu works |
+| 1 | **Decide APCu from `apcu_enabled()`, not `function_exists()`.** Log once at startup when the cache is on and APCu is loaded but unusable (`apc.enable_cli=0`), when `apc.use_request_time=1`, and when `apcu.maxSize` exceeds the segment. Count failed `apcu_store()` calls. | C1, C3, C6 | The whole APCu gain (~2× small pages) on every host where it silently did nothing today | Low: only stops calling functions that already fail | behavior unchanged where APCu works |
 | 2 | **`/Q/health` → `cache`**: `hits.memory`, `hits.apcu`, `hits.disk`, `misses`, `apcuStoreFailures`, and when APCu is usable its memory (`apcu_sma_info(true)`: size, available) and expunges/entries (`apcu_cache_info(true)`). | C8 | None directly; makes 1, 3 and 4 measurable in production | Low: additive keys | on |
 | 3 | **File the entry under the encoding actually stored**: a brotli-accepting client uses the `gzip` entry while `encodeBody()` produces gzip only. (Storing real brotli is a separate, later option.) | C2 | Halves renders, disk and APCu memory for the same pages; more pages fit `shm_size` | Low: the old `|br` entries become unreachable and age out; no generation bump needed | on |
 | 4 | **Keep the APCu copy through the stale window**: TTL = lifetime + `staleWhileRevalidate`. | C5 | Stale hits served from memory instead of disk, exactly on busy pages | Low: `get()` already decides staleness from `expires`, not from APCu's TTL | on |
-| 5 | **Bounded in-process L1 in the parent** in front of APCu: an array of ready-to-send entries (status, joined header block, body), limited by entry count and total bytes (e.g. `apcu.l1.maxEntries: 0`, `l1.maxBytes`), LRU by moving a hit to the end. Every L1 hit still checks `expires` and `isOldGeneration()`; `purge()`/`clear()` drop it; skip-cookie, `Authorization` and refresh checks stay in front of it unchanged. | C4, C7 | Estimated 10–25% less CPU per hit (no unserialise, no body copy out of shared memory, no header rebuild); to be measured, not assumed | Medium: parent memory, and one more place that must honour the generation marker | **off** (`0` entries) |
+| 5 | **Bounded in-process L1 in the parent** in front of APCu: an array of ready-to-send entries (status, joined header block, body), limited by entry count and total bytes (e.g. `apcu.l1.maxEntries: 0`, `l1.maxBytes`), LRU by moving a hit to the end. Every L1 hit still checks `expires` and `isOldGeneration()`; `purge()`/`clear()` drop it; skip-cookie, `Authorization` and refresh checks stay in front of it unchanged. | C4, C7 | Estimated 10–25% less CPU per hit (no unserialise, no body copy out of shared memory, no header rebuild); to be measured, not assumed | Medium: parent memory, and one more place that must honor the generation marker | **off** (`0` entries) |
 | 6 | **Fix the static file cache's eviction**: insert, then evict least-recently-used until under the limit, instead of refusing inserts once full. | S2 | Sites with >64 MB of small assets keep serving the hot ones from memory | Low | on |
-| 7 | **Honour `q=0`** in Accept-Encoding for both caches' key and `encodeBody()`. | S3 | Correctness only | Low | on |
+| 7 | **Honor `q=0`** in Accept-Encoding for both caches' key and `encodeBody()`. | S3 | Correctness only | Low | on |
 | 8 | **Serve `HEAD` from the page cache** (headers of the `GET` entry, no body). | — | Small | Low | on |
 
 Suggestions from the brief that the code already does:
@@ -322,7 +326,7 @@ each. Every new test was checked to fail on the commit before its change.
 | 3 | One entry per stored coding | C2: pages are no longer rendered and stored twice |
 | 4 | APCu keeps a page through the stale window | C5: stale answers from memory |
 | 6 | Static file cache evicts least recently used | S2; hit path cost unchanged (~4,000 req/s, ~2.5 µs CPU per request either way) |
-| 7 | `q=0` honoured, including precompressed files | S3 |
+| 7 | `q=0` honored, including precompressed files | S3 |
 | 8 | HEAD answered from the cache | A HEAD for a cached page no longer renders it |
 | 5 | Optional in-process layer (`memory.maxEntries`, off) | C4, C7: no change for 3 KB pages, ~12% less CPU per hit for 44 KB pages in most rounds |
 

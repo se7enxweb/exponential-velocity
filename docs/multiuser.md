@@ -135,8 +135,9 @@ for every request of that host, before the cache, a file or a script
 - `access.auth`: `{ "dir": "admin/", "realm": "Staff", "userFile": "/path/.htpasswd" }`:
   HTTP Basic, the deepest block covering the path decides. bcrypt, Apache MD5 (`$apr1$`),
   `{SHA}` and `crypt()` hashes; a user file that cannot be read gives 500, never access.
-- `rewrite`: sets of mod_rewrite rules per directory (the deepest set covering the path
-  runs, as Apache runs the deepest `.htaccess` with rules): `pattern` (relative to the
+- `rewrite`: sets of mod_rewrite rules per directory, each `{ "dir": ..., "base": ...,
+  "rules": [...] }` (`base` is `RewriteBase`; the deepest set covering the path
+  runs, as Apache runs the deepest `.htaccess` with rules). A rule has `pattern` (relative to the
   directory), optional `negate`, `conds` (`%{REQUEST_FILENAME}` with `-f`/`-d`/`-s`/`-e`,
   or a regex on `%{HTTP_HOST}`, `%{HTTP_USER_AGENT}`, `%{REQUEST_URI}`, `%{QUERY_STRING}`,
   `%{HTTPS}`, `%{REQUEST_METHOD}`, `%{HTTP_REFERER}`, `%{HTTP_COOKIE}`, `%{HTTP:Name}`, with
@@ -156,7 +157,8 @@ for every request of that host, before the cache, a file or a script
 - `followSymlinks`: `true` (Apache's `FollowSymLinks`) or `"ifOwnerMatch"`
   (`SymLinksIfOwnerMatch`: every link on the way has the owner of its target) lets a file
   reached through a link outside the root be sent or run for this host. Unset, such a file
-  is refused (403), as for every host.
+  is refused (403), as for every host. The server-wide `Q.webserver.followSymlinks: true`
+  allows it for every host (the behavior before the check existed).
 - A host with an entry here never gets the server's welcome page: a root without an index
   answers 403, as Apache with `Options -Indexes` does.
 - Paths are judged decoded, with dot segments resolved; a path that climbs out of the
