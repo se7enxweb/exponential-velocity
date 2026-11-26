@@ -73,7 +73,7 @@ Create `config/server.json` next to your `web/` directory, or pass `--config=pat
 | `app` | `""` | App name — prefixes handler function names (e.g. `"Chess"` → `Chess_chat_message()`) |
 | `webserver.fallback` | null | Catch-all: `"index.html"`, `{"handler":"app/notfound"}`, or `{"file":"404.html"}` |
 | `webserver.hotReload` | `false` | Watch `classes/`, `handlers/`, `config/` for changes. Auto-restarts on class/config changes. |
-| `webserver.cgi.patterns` | [] | Regex patterns for scripts that use php-cgi (legacy compatibility) |
+| `webserver.cgi.patterns` | [] | Regex patterns for scripts that use php-cgi (legacy compatibility); a lone `"*"` means every script |
 | `webserver.cgi.binary` | auto | Path to php-cgi binary (auto-detected if not set) |
 | `webserver.scripts` | (all) | Scripts that run when asked for by name, relative to the root (`["/index.php"]`). Any other `.php` goes to the front controller. See [Only the entry points run](#only-the-entry-points-run) |
 | `web.static.paths` | (all) | Patterns on a file's path below the root; only a matching file is sent as it is, any other goes to the front controller. See [Only the entry points run](#only-the-entry-points-run) |

@@ -4793,12 +4793,12 @@ class Q_WebServer
 		static $cgiPatterns = null;
 		static $cgiBinary = null;
 		if ($cgiPatterns === null) {
-			// Item 2: without pcntl there is no fork, so per-request process
-			// isolation can only come from php-cgi. Default to routing ALL php
-			// through it there; `patterns` then means "exceptions". With pcntl
-			// available the carveout stays opt-in.
-			$_cgiDefault = Q_WebServer_Fork::available() ? array() : array('*');
-			$cgiPatterns = Q_Config::get('Q', 'webserver', 'cgi', 'patterns', $_cgiDefault);
+			// Opt-in everywhere, as docs/configuration.md says ([]). Without
+			// pcntl the default used to be ["*"], meant as "every script
+			// through php-cgi"; as a regex "*" is invalid, so it never matched,
+			// and the portable pool is what isolates requests there now.
+			$cgiPatterns = Q_Config::get('Q', 'webserver', 'cgi', 'patterns', array());
+			if (!is_array($cgiPatterns)) $cgiPatterns = array($cgiPatterns);
 			$cgiBinary = Q_Config::get('Q', 'webserver', 'cgi', 'binary', null);
 			if (!$cgiBinary) {
 				// Auto-detect php-cgi
@@ -4818,7 +4818,7 @@ class Q_WebServer
 			&& !isset(self::$poolHosts[strtolower(preg_replace('/:\d+$/', '', (string) ($parsed['headers']['host'] ?? '')))])) {
 			$relPath = '/' . ltrim(str_replace(DS, '/', substr($scriptPath, strlen(self::$rootDir))), '/');
 			foreach ($cgiPatterns as $pattern) {
-				if (@preg_match(self::ensureRegex($pattern), $relPath)) {
+				if (self::cgiPatternMatches($pattern, $relPath)) {
 					return self::handlePhpCgi($client, $parsed, $scriptPath, $cgiBinary);
 				}
 			}
@@ -9108,6 +9108,30 @@ WORKER;
 		}
 		// Use \x01 as delimiter — won't appear in URL patterns
 		return "\x01" . $pattern . "\x01";
+	}
+
+	/**
+	 * Whether a script path matches one Q.webserver.cgi.patterns entry.
+	 * A lone "*" means every script, since that is what it is written to mean
+	 * and as a regex it is invalid; any other entry is a regex (ensureRegex).
+	 * An invalid regex matches nothing, and says so once in the error log.
+	 * @method cgiPatternMatches
+	 * @static
+	 * @param {string} $pattern
+	 * @param {string} $relPath the script below the document root, from "/"
+	 * @return {boolean}
+	 */
+	static function cgiPatternMatches($pattern, $relPath)
+	{
+		static $reported = array();
+		if (!is_string($pattern)) return false;
+		if (trim($pattern) === '*') return true;
+		$r = @preg_match(self::ensureRegex($pattern), $relPath);
+		if ($r === false && !isset($reported[$pattern])) {
+			$reported[$pattern] = true;
+			error_log('Q.webserver.cgi.patterns: "' . $pattern . '" is not a valid regex and matches nothing');
+		}
+		return $r === 1;
 	}
 
 	/**
