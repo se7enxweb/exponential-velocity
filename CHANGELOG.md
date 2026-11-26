@@ -67,6 +67,11 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+### Updated
+
+- **Docker images run as `www-data`, not root**, and carry the configuration trees laid out like Debian's `/etc/apache2`: the engine's `/etc/qbix` as the packages install it and Velocity's `/etc/vc` overlay, with `/var/lib/vc`, `/var/log/vc`, `/var/cache/vc` and `/run/vc`, all owned by `www-data`. Docker and Podman still let the server bind any port; `--user root` keeps the former behavior ([docs/docker.md](docs/docker.md#user-and-configuration-trees)).
+- **`edge` images from main**: a push to main publishes `edge` and `edge-php<version>-<variant>`; release tags stay as they were, and the workflow now stops before it would overwrite a fixed tag that exists.
+
 ## v0.0.4.70 — the workers setting, the reported version and seven more fixes; Velocity as a Windows service
 
 2026-11-26

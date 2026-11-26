@@ -11,6 +11,7 @@ answers a health check.
 - [What each variant carries](#what-each-variant-carries)
 - [Database add-ons: Oracle, Firebird, ODBC](#database-add-ons-oracle-firebird-odbc)
 - [Configuration](#configuration)
+- [User and configuration trees](#user-and-configuration-trees)
 - [Health check](#health-check)
 - [Compose](#compose)
 - [Building your own](#building-your-own)
@@ -24,9 +25,15 @@ ghcr.io/se7enxweb/exponential-velocity:<release>-php<version>-<variant>   fixed
 ghcr.io/se7enxweb/exponential-velocity:php<version>-<variant>             moves with each release
 ghcr.io/se7enxweb/exponential-velocity:<release>                          newest PHP, standard variant, fixed
 ghcr.io/se7enxweb/exponential-velocity:latest                             newest PHP, standard variant
+ghcr.io/se7enxweb/exponential-velocity:edge-php<version>-<variant>        the main branch, moves with each push
+ghcr.io/se7enxweb/exponential-velocity:edge                               the main branch, newest PHP, standard variant
 ```
 
-`<release>` is the version without its `v` (`0.0.4.69`). Each tag also has a
+`<release>` is the version without its `v` (`0.0.4.69`). A fixed tag is never
+moved once it is published: the workflow stops before it would overwrite one, and
+an image found wrong after its release is replaced by the next release, with the
+reason in its [changelog](../CHANGELOG.md) entry. `edge` tags are for trying what
+is coming; production pins a fixed tag. Each tag also has a
 single-architecture form with `-amd64` or `-arm64` appended to the fixed tag.
 
 > DEPRECATED: `ghcr.io/se7enxweb/qbix-webserver` is no longer updated. Use
@@ -142,8 +149,33 @@ described in [layout.md](layout.md), and ask for it: `--conf-dir=auto`, a
 `--config=/etc/vc/sites-enabled/<site>.conf`, or the environment variable
 `QBIX_CONF_DIR` (or `VC_CONF_DIR`). Settings can also be passed on the command
 line. Certificates and HTTPS: [https.md](https.md). A mounted directory needs to be
-readable by the container's user (root in these images, unless you run them with
-`--user`).
+readable by the container's user, `www-data` ([below](#user-and-configuration-trees)).
+
+---
+
+### User and configuration trees
+
+The server runs as `www-data` (uid 33), not as root. Docker and Podman let a
+container's user bind any port, so `--port=80` still works inside the container.
+Files the server writes to a mounted directory belong to uid 33; give the
+directory to it (`chown 33:33`) or run the image with `--user` set to the owner
+you want. Images up to 0.0.4.70 ran as root; to keep that, run with `--user root`.
+
+The configuration trees follow Debian's `/etc/apache2` layout ([layout.md](layout.md)),
+both owned by `www-data`:
+
+```
+/etc/qbix/qbix.conf, ports.conf, envvars      the engine's base tree, as the packages install it
+/etc/qbix/sites-available/default.conf        enabled by the link in sites-enabled/
+/etc/qbix/{conf,mods}-{available,enabled}/
+/etc/vc/{sites,conf,mods}-{available,enabled}/   Velocity's overlay, empty, for your own files
+/etc/vc/designs/
+/var/lib/vc  /var/log/vc  /var/cache/vc  /run/vc  state, logs, cache, run files
+```
+
+Mount a site file at `/etc/vc/sites-available/<site>.conf`, enable it with
+`qbixctl ensite <site>` (or mount `/etc/vc/sites-enabled/` too) and start the server
+with `--conf-dir=auto` to use it.
 
 ---
 
@@ -175,8 +207,18 @@ services:
   db:
     image: mariadb:11
     environment:
-      MARIADB_ROOT_PASSWORD: change-me
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    secrets: [db_root_password]
+secrets:
+  db_root_password:
+    file: ./db_root_password.txt
 ```
+
+For a complete Exponential site in containers (Apache with PHP-FPM or Velocity,
+SQLite, MariaDB or PostgreSQL), use Exponential's own images,
+`ghcr.io/se7enxweb/exponential`, documented in the Exponential repository
+(`doc/eng-us/help/hosting/models/containers-docker-and-podman.md`) and on
+[doc.se7enx.com](https://doc.se7enx.com/).
 
 ---
 
