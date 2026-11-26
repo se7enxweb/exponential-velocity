@@ -3,7 +3,10 @@
  * Cross-platform fork abstraction.
  *
  * Linux/macOS: uses pcntl_fork() (native COW).
- * Windows:     uses qbix_fork.dll via FFI (RtlCloneUserProcess COW).
+ * Windows:     a best-effort FFI shim (src/fork_shim.c, RtlCloneUserProcess
+ *              COW), attached to a release only when it builds. The worker
+ *              pool does not use it (Q_WebServer_Pool::mode): Windows workers
+ *              are the portable pool.
  * Fallback:    returns false if neither is available.
  *
  * Usage:

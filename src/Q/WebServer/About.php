@@ -24,6 +24,9 @@ class Q_WebServer_About
 	/** The upstream engine this is built on, when QBIX_SERVER_VERSION is not defined. */
 	const BASE_VERSION = '1.5.0';
 
+	/** The upstream engine's home page, when no distribution names its own. */
+	const HOMEPAGE = 'https://github.com/Qbix/Server';
+
 	/** The options that ask. */
 	static $flags = array('--version', '-version', '-v', '-V', '--about', '-about', '--copyright', '-copyright');
 
@@ -107,7 +110,7 @@ class Q_WebServer_About
 			'build'       => $build,
 			'date'        => $date,
 			'engine'      => 'Qbix Server ' . $base,
-			'homepage'    => 'https://github.com/Qbix/Server',
+			'homepage'    => self::HOMEPAGE,
 			'copyright'   => array('Copyright (C) 2024-2026 Qbix, Inc.'),
 			'authors'     => 'Qbix, Inc. and contributors',
 			'distribution' => 'none (the upstream engine)',
@@ -130,6 +133,26 @@ class Q_WebServer_About
 			}
 		}
 		return $info;
+	}
+
+	/**
+	 * The home page to point a reader at (--help, the quick start, the welcome
+	 * page): the distribution's when one is selected, else the upstream
+	 * engine's. Pages that named a repository by hand drifted; this is the one
+	 * place it is kept.
+	 * @method homepage
+	 * @static
+	 * @param {string} $root the server's root directory
+	 * @return {string}
+	 */
+	static function homepage($root)
+	{
+		$class = self::distributionClass($root);
+		if ($class !== null and method_exists($class, 'about')) {
+			$extra = (array) $class::about();
+			if (!empty($extra['homepage'])) return (string) $extra['homepage'];
+		}
+		return self::HOMEPAGE;
 	}
 
 	/** The extensions the server uses, each with whether it is loaded. */

@@ -56,7 +56,7 @@ p code{background:var(--code-bg);padding:1px 5px;border-radius:3px;color:var(--c
     <a href="/Q/dashboard">📊 Dashboard</a>
     <a href="/Q/health">💚 Health</a>
     <a href="/Q/panel">⚙️ Panel</a>
-    <a href="https://github.com/Qbix/webserver">📖 GitHub</a>
+    <a href="<?= htmlspecialchars(class_exists('Q_WebServer_About') && defined('QBIX_SERVER_DIR') ? Q_WebServer_About::homepage(QBIX_SERVER_DIR) : 'https://github.com/Qbix/Server', ENT_QUOTES) ?>">📖 GitHub</a>
   </div>
 </div>
 

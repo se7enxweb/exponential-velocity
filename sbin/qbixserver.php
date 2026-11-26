@@ -271,7 +271,7 @@ foreach ($argv as $i => $arg) {
 		echo "\nQuick start:\n";
 		echo "  mkdir -p web && echo '<?php echo \"Hello!\";' > web/index.php\n";
 		echo "  $me\n";
-		echo "\nDocs: https://github.com/Qbix/webserver\n";
+		echo "\nDocs: " . Q_WebServer_About::homepage(dirname(__DIR__)) . "\n";
 		exit(0);
 	}
 	if ($arg === '-t') {
@@ -607,7 +607,7 @@ if (!$servingFromPhar && empty($opts['signal'])) {
 		fwrite(STDERR, "    $me --root=public --preset=symfony\n");
 		fwrite(STDERR, "    $me --root=.     --preset=wordpress\n");
 		fwrite(STDERR, "    $me --root=.     --preset=exponential\n\n");
-		fwrite(STDERR, "  Docs: https://github.com/Qbix/webserver\n\n");
+		fwrite(STDERR, "  Docs: " . Q_WebServer_About::homepage(dirname(__DIR__)) . "\n\n");
 		exit(1);
 	}
 	$webDir = $resolvedWebDir;
@@ -626,7 +626,7 @@ if (!$qbixMode) {
 		$shimPath = dirname(__DIR__) . '/src/Q.php';
 		if (!file_exists($shimPath)) {
 			fwrite(STDERR, "Error: src/Q.php not found. Run from the webserver repo directory,\n");
-			fwrite(STDERR, "or use a self-contained binary from https://github.com/Qbix/webserver/releases\n");
+			fwrite(STDERR, "or use a self-contained binary from " . Q_WebServer_About::homepage(dirname(__DIR__)) . "/releases\n");
 			exit(1);
 		}
 		require_once $shimPath;

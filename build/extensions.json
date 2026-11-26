@@ -845,7 +845,7 @@
             "type": "bundled",
             "spc": "pcntl",
             "unavailable": {
-                "windows-x64": "No fork() on Windows: isolation comes from qbix_fork.dll, or php-cgi"
+                "windows-x64": "No fork() on Windows: each worker is a process of its own, started by the portable pool"
             },
             "unsupportedOs": [
                 "Windows"

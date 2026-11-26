@@ -607,9 +607,9 @@ class Q_WebServer_Pool
 		if ($wanted === null) $wanted = Q_Config::get('Q', 'webserver', 'poolMode', getenv('QBIX_POOL_MODE') ?: 'auto');
 		$wanted = strtolower(trim((string) $wanted));
 		if (!class_exists('Q_WebServer_Fork', false)) require_once __DIR__ . '/Fork.php';
-		// Fork means pcntl_fork(). The FFI route in Q_WebServer_Fork needs a
-		// qbix_fork.dll that is not shipped, and cloning a Windows process with
-		// open sockets is not something Windows supports; it is not relied on.
+		// Fork means pcntl_fork(). Q_WebServer_Fork's FFI route on Windows is
+		// not relied on: cloning a Windows process with open sockets is not
+		// something Windows supports, so Windows workers are the portable pool.
 		$fork = function_exists('pcntl_fork') && Q_WebServer_Fork::available();
 		$portable = function_exists('proc_open') && function_exists('stream_socket_server');
 		if ($wanted === 'portable') return $portable ? 'portable' : ($fork ? 'fork' : null);
