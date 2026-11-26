@@ -71,7 +71,14 @@ check('...and returns at once', microtime(true) - $started < 1.0, true);
 // The server picks the document root itself when nothing is above it.
 $src = file_get_contents(__DIR__ . '/../sbin/qbixserver.php');
 check('qbixserver.php prewarms --root itself when one level up is /',
-	strpos($src, "\$prewarmDir === DIRECTORY_SEPARATOR || !is_dir(\$prewarmDir)") !== false, true);
+	strpos($src, "\$prewarmDir === DIRECTORY_SEPARATOR || dirname(\$prewarmDir) === \$prewarmDir || !is_dir(\$prewarmDir)") !== false, true);
+
+// A Windows drive root, as one level above --root=C:\site gives it.
+foreach (array('C:\\', 'C:', 'c:/') as $drive) {
+	$threw = null;
+	try { $n = Q_WebServer_Compat::prewarm($drive); } catch (\Throwable $e) { $threw = get_class($e); $n = null; }
+	check("prewarm($drive) neither throws nor walks a drive", array($threw, $n), array(null, 0));
+}
 
 foreach (glob($scratch . DS . 'cache' . DS . '*') ?: array() as $f) @unlink($f);
 @rmdir($scratch . DS . 'cache');

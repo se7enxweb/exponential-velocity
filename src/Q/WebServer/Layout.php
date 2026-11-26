@@ -83,8 +83,8 @@ class Q_WebServer_Layout
 		foreach (self::$overlays as $o) {
 			if ($o[0] === $dir) return;
 		}
-		self::$overlays[] = array(rtrim($dir, '/'), $env, $stateDir === null ? null : rtrim($stateDir, '/'),
-			$logDir === null ? null : rtrim($logDir, '/'));
+		self::$overlays[] = array(self::normDir($dir), $env, $stateDir === null ? null : self::normDir($stateDir),
+			$logDir === null ? null : self::normDir($logDir));
 	}
 
 	/** The base tree's log directory (/var/log counterpart of /etc/qbix), and its variable. */
@@ -104,13 +104,13 @@ class Q_WebServer_Layout
 	static function logDir($confDir)
 	{
 		$env = getenv(self::LOG_ENV);
-		if (is_string($env) and $env !== '') return rtrim($env, '/');
+		if (is_string($env) and $env !== '') return self::normDir($env);
 		if ($confDir === null or $confDir === '') return null;
-		$confDir = rtrim($confDir, '/');
+		$confDir = self::normDir($confDir);
 		foreach (array_reverse(self::$overlays) as $o) {
-			if (self::place($o[1], $o[0]) === $confDir) return $o[3] ?? null;
+			if (self::same(self::place($o[1], $o[0]), $confDir)) return self::platformDir($o[3] ?? null);
 		}
-		if (self::place(self::ENV, self::$standardDirs[0] ?? null) === $confDir) return self::LOG_DIR;
+		if (self::same(self::place(self::ENV, self::$standardDirs[0] ?? null), $confDir)) return self::platformDir(self::LOG_DIR);
 		return null;
 	}
 
@@ -129,15 +129,15 @@ class Q_WebServer_Layout
 	static function stateDir($confDir)
 	{
 		$cfg = class_exists('Q_Config', false) ? Q_Config::get('Q', 'webserver', 'stateDir', null) : null;
-		if (is_string($cfg) and $cfg !== '') return rtrim($cfg, '/');
+		if (is_string($cfg) and $cfg !== '') return self::normDir($cfg);
 		$env = getenv(self::STATE_ENV);
-		if (is_string($env) and $env !== '') return rtrim($env, '/');
+		if (is_string($env) and $env !== '') return self::normDir($env);
 		if ($confDir === null or $confDir === '') return null;
-		$confDir = rtrim($confDir, '/');
+		$confDir = self::normDir($confDir);
 		foreach (array_reverse(self::$overlays) as $o) {
-			if (self::place($o[1], $o[0]) === $confDir) return $o[2] ?? null;
+			if (self::same(self::place($o[1], $o[0]), $confDir)) return self::platformDir($o[2] ?? null);
 		}
-		if (self::place(self::ENV, self::$standardDirs[0] ?? null) === $confDir) return self::STATE_DIR;
+		if (self::same(self::place(self::ENV, self::$standardDirs[0] ?? null), $confDir)) return self::platformDir(self::STATE_DIR);
 		return null;
 	}
 
@@ -184,12 +184,12 @@ class Q_WebServer_Layout
 		if ($explicit === 'none' or $explicit === 'disabled') return null;
 		if ($explicit === 'auto') return self::search();
 		if ($explicit !== null and $explicit !== '') {
-			return is_dir($explicit) ? rtrim($explicit, '/') : null;
+			return is_dir($explicit) ? self::normDir($explicit) : null;
 		}
 		foreach (array_merge(array(self::ENV), array_filter(array_column(self::$overlays, 1))) as $env) {
 			$dir = getenv($env);
 			if (is_string($dir) and $dir !== '') {
-				return $dir === 'auto' ? self::search() : (is_dir($dir) ? rtrim($dir, '/') : null);
+				return $dir === 'auto' ? self::search() : (is_dir($dir) ? self::normDir($dir) : null);
 			}
 		}
 		if ($configFile) return self::fromSiteFile($configFile);
@@ -210,15 +210,21 @@ class Q_WebServer_Layout
 	static function stack($asked)
 	{
 		if ($asked === null) return array();
-		$asked = rtrim($asked, '/');
+		$asked = self::normDir($asked);
 		$family = array(self::place(self::ENV, self::$standardDirs[0] ?? null));
 		foreach (self::$overlays as $o) {
 			$family[] = self::place($o[1], $o[0]);
 		}
-		if (!in_array($asked, $family, true)) return array($asked);
+		$member = false;
+		foreach ($family as $dir) {
+			if (self::same($dir, $asked)) { $member = true; break; }
+		}
+		if (!$member) return array($asked);
 		$stack = array();
 		foreach ($family as $dir) {
-			if ($dir !== null and ($dir === $asked or self::isConfDir($dir))) $stack[] = $dir;
+			if ($dir === null) continue;
+			if (self::same($dir, $asked)) $stack[] = $asked;
+			elseif (self::isConfDir($dir)) $stack[] = $dir;
 		}
 		return array_values(array_unique($stack));
 	}
@@ -228,9 +234,105 @@ class Q_WebServer_Layout
 	{
 		$value = $env ? getenv($env) : false;
 		if (is_string($value) and $value !== '' and $value !== 'auto') {
-			return is_dir($value) ? rtrim($value, '/') : null;
+			return is_dir($value) ? self::normDir($value) : null;
 		}
-		return $default === null ? null : rtrim($default, '/');
+		return $default === null ? null : self::normDir(self::platformDir($default));
+	}
+
+	/**
+	 * Whether this is Windows (Q_WebServer_Process::isWindows(), which tests
+	 * can force).
+	 * @method onWindows
+	 * @static
+	 * @return {boolean}
+	 */
+	static function onWindows()
+	{
+		if (!class_exists('Q_WebServer_Process', false)) require_once __DIR__ . '/Process.php';
+		return Q_WebServer_Process::isWindows();
+	}
+
+	/**
+	 * The folder Windows keeps machine-wide program data in: %ProgramData%
+	 * (C:\ProgramData), with forward slashes, which PHP accepts on Windows.
+	 * @method programData
+	 * @static
+	 * @return {string}
+	 */
+	static function programData()
+	{
+		foreach (array('ProgramData', 'ALLUSERSPROFILE') as $name) {
+			$value = getenv($name);
+			if (is_string($value) and $value !== '') return rtrim(str_replace('\\', '/', $value), '/');
+		}
+		return 'C:/ProgramData';
+	}
+
+	/**
+	 * Where one of the standard POSIX places of a tree lives on this system.
+	 *
+	 * On Linux, the BSDs and macOS: the path itself. Windows has no /etc,
+	 * /var or /run; the convention there is one folder per program under
+	 * %ProgramData%, so each tree becomes one folder holding all of it:
+	 *
+	 *   /etc/vc        %ProgramData%\vc           vc.conf, ports.conf, envvars,
+	 *                                             *-available, *-enabled, ssl, designs
+	 *   /var/lib/vc    %ProgramData%\vc\state
+	 *   /var/log/vc    %ProgramData%\vc\logs
+	 *   /var/cache/vc  %ProgramData%\vc\cache
+	 *   /run/vc        %ProgramData%\vc\run
+	 *
+	 * The same rule holds for /etc/qbix and any overlay. Any other path, and
+	 * every path on a POSIX system, is returned unchanged. The variables that
+	 * move a tree (QBIX_CONF_DIR, VC_CONF_DIR, QBIX_STATE_DIR, QBIX_LOG_DIR)
+	 * still win on Windows.
+	 *
+	 * @method platformDir
+	 * @static
+	 * @param {string|null} $dir a standard place, e.g. /etc/vc
+	 * @return {string|null}
+	 */
+	static function platformDir($dir)
+	{
+		if (!is_string($dir) or $dir === '' or !self::onWindows()) return $dir;
+		if (!preg_match('~^/(etc|var/lib|var/log|var/cache|run)/([A-Za-z0-9._-]+)/?$~', $dir, $m)) return $dir;
+		$sub = array('etc' => '', 'var/lib' => '/state', 'var/log' => '/logs', 'var/cache' => '/cache', 'run' => '/run');
+		return self::programData() . '/' . $m[2] . $sub[$m[1]];
+	}
+
+	/**
+	 * A directory without its trailing slash; on Windows also with forward
+	 * slashes, so C:\ProgramData\vc and C:/ProgramData/vc/ read the same. A
+	 * root (/, C:/) keeps its slash.
+	 * @method normDir
+	 * @static
+	 * @param {string} $dir
+	 * @return {string}
+	 */
+	static function normDir($dir)
+	{
+		$dir = (string) $dir;
+		if (self::onWindows()) $dir = str_replace('\\', '/', $dir);
+		$trimmed = rtrim($dir, '/');
+		if ($trimmed === '') return $dir === '' ? '' : '/';
+		if (preg_match('~^[A-Za-z]:$~', $trimmed)) return $trimmed . '/';
+		return $trimmed;
+	}
+
+	/**
+	 * Whether two directories are the same place: exactly on POSIX; ignoring
+	 * case and the kind of slash on Windows, whose file systems ignore case.
+	 * @method same
+	 * @static
+	 * @param {string|null} $a
+	 * @param {string|null} $b
+	 * @return {boolean}
+	 */
+	static function same($a, $b)
+	{
+		if ($a === null or $b === null) return $a === $b;
+		if (!self::onWindows()) return $a === $b;
+		return strcasecmp(self::normDir($a), self::normDir($b)) === 0;
 	}
 
 	/**
@@ -241,7 +343,7 @@ class Q_WebServer_Layout
 	 */
 	static function search()
 	{
-		foreach (array_merge(self::$standardDirs, array_column(self::$overlays, 0)) as $dir) {
+		foreach (array_map(array(__CLASS__, 'platformDir'), array_merge(self::$standardDirs, array_column(self::$overlays, 0))) as $dir) {
 			if (self::isConfDir($dir)) return $dir;
 		}
 		return null;
@@ -525,7 +627,7 @@ class Q_WebServer_Layout
 		}
 		return array(
 			'confDir'  => $dir,
-			'searched' => self::$standardDirs,
+			'searched' => array_map(array(__CLASS__, 'platformDir'), self::$standardDirs),
 			'files'    => $dir !== null ? self::files($dir) : array(),
 			'site'     => $configFile,
 			'pairs'    => $pairs,

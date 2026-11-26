@@ -1,11 +1,23 @@
 name: windows
 
-# The portable worker pool on real Windows (docs/windows.md): GitHub's
-# Windows Server 2022 and 2025 runners, x64 with PHP 8.1, 8.3 and 8.5 from
-# setup-php, and x86 with the official 32-bit PHP zip from windows.php.net.
-# Each job runs the self-contained unit test of the pool (its server part
-# reads /proc and is skipped here) and tests/windows/smoke.ps1, which starts a
-# real server with two portable workers. Logs are uploaded either way.
+# Velocity on real Windows (docs/windows.md has the matrix these jobs prove):
+#
+#   x64          Windows Server 2022 and 2025, PHP 8.1, 8.3, 8.5 (setup-php):
+#                Windows unit gate, smoke test, HTTPS (self-signed and the
+#                Windows certificate store).
+#   x86          Windows Server 2022, the official 32-bit PHP 8.3: the same.
+#   arm64        Windows 11 on ARM (windows-11-arm): the same, plus the full
+#                Exponential site under load and the Windows service. Native
+#                ARM64 PHP when windows.php.net lists one, else x64 PHP under
+#                Windows' x64 emulation.
+#   exponential  Windows Server 2022 (PHP 8.3) and 2025 (PHP 8.5): a complete
+#                Exponential site on SQLite, its pages, the admin login and a
+#                short load; then Velocity as a Windows service through
+#                packaging/windows/vcc.ps1 under a virtual account, with HTTPS
+#                from the certificate store, recovery, and the same site.
+#   unit-survey  every unit test on Windows, for the record (not a gate).
+#
+# Logs are uploaded as artifacts either way.
 
 on:
   push:
@@ -16,6 +28,7 @@ jobs:
   x64:
     name: ${{ matrix.os }} PHP ${{ matrix.php }} x64
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -32,30 +45,33 @@ jobs:
           ini-values: memory_limit=512M
           coverage: none
 
-      - name: PHP
+      - name: PHP and Windows
         shell: powershell
         run: |
           php -v
-          php -m
-          (Get-Command php).Source
+          (Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, OSArchitecture | Format-List | Out-String).Trim()
 
-      - name: Portable pool unit test
+      - name: Windows unit gate
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path smoke-logs | Out-Null
           $env:QBIX_TEST_TMP = $env:RUNNER_TEMP
-          cmd /c "php tests\unit-portable-pool.php > smoke-logs\unit-portable-pool.txt 2>&1"
-          $code = $LASTEXITCODE
-          Get-Content smoke-logs\unit-portable-pool.txt
-          exit $code
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\unit-survey.ps1 -Php (Get-Command php).Source -Gate -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
 
       - name: Smoke test (real server, portable workers)
+        if: ${{ !cancelled() }}
         shell: powershell
         env:
           QBIX_POOL_TRACE: '1'
         run: |
-          $php = (Get-Command php).Source
-          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php $php -LogDir "$pwd\smoke-logs"
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php (Get-Command php).Source -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - name: HTTPS (self-signed, Windows certificate store)
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\https-smoke.ps1 -Php (Get-Command php).Source -LogDir "$pwd\smoke-logs"
           exit $LASTEXITCODE
 
       - uses: actions/upload-artifact@v4
@@ -68,6 +84,7 @@ jobs:
   x86:
     name: ${{ matrix.os }} PHP ${{ matrix.php }} x86 (32-bit)
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -79,32 +96,18 @@ jobs:
       - name: Install the official 32-bit PHP (windows.php.net)
         shell: powershell
         run: |
-          $ProgressPreference = 'SilentlyContinue'
-          $rel = Invoke-RestMethod -Uri 'https://windows.php.net/downloads/releases/releases.json'
-          $line = $rel.'${{ matrix.php }}'
-          $build = $line.PSObject.Properties | Where-Object { $_.Name -like 'nts-vs*-x86' } | Select-Object -First 1
-          if (-not $build) { throw "no x86 NTS build listed for PHP ${{ matrix.php }}" }
-          $zip = $build.Value.zip.path
-          Write-Host "PHP $($line.version) $($build.Name): $zip"
-          Invoke-WebRequest -Uri "https://windows.php.net/downloads/releases/$zip" -OutFile php.zip
-          Expand-Archive php.zip -DestinationPath C:\php32
-          Copy-Item C:\php32\php.ini-development C:\php32\php.ini
-          Add-Content C:\php32\php.ini "`nextension_dir=C:\php32\ext`nextension=sockets`nextension=mbstring`nextension=openssl`nextension=curl`nextension=fileinfo`nextension=sqlite3`nextension=pdo_sqlite`nmemory_limit=512M`n"
-          C:\php32\php.exe -v
-          C:\php32\php.exe -r "echo PHP_INT_SIZE * 8, '-bit', PHP_EOL;"
-          C:\php32\php.exe -m
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\install-php.ps1 -Version ${{ matrix.php }} -Arch x86 -Dest C:\php32
+          exit $LASTEXITCODE
 
-      - name: Portable pool unit test
+      - name: Windows unit gate
         shell: powershell
         run: |
-          New-Item -ItemType Directory -Force -Path smoke-logs | Out-Null
           $env:QBIX_TEST_TMP = $env:RUNNER_TEMP
-          cmd /c "C:\php32\php.exe tests\unit-portable-pool.php > smoke-logs\unit-portable-pool.txt 2>&1"
-          $code = $LASTEXITCODE
-          Get-Content smoke-logs\unit-portable-pool.txt
-          exit $code
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\unit-survey.ps1 -Php C:\php32\php.exe -Gate -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
 
       - name: Smoke test (real server, portable workers)
+        if: ${{ !cancelled() }}
         shell: powershell
         env:
           QBIX_POOL_TRACE: '1'
@@ -112,9 +115,161 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php C:\php32\php.exe -LogDir "$pwd\smoke-logs"
           exit $LASTEXITCODE
 
+      - name: HTTPS (self-signed, Windows certificate store)
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\https-smoke.ps1 -Php C:\php32\php.exe -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: windows-${{ matrix.os }}-php${{ matrix.php }}-x86
           path: smoke-logs
+          retention-days: 14
+
+  arm64:
+    name: windows-11-arm PHP ${{ matrix.php }} (ARM64 machine)
+    runs-on: windows-11-arm
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PHP (native ARM64 if windows.php.net has it, else x64 under emulation)
+        shell: powershell
+        run: |
+          (Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, BuildNumber, OSArchitecture | Format-List | Out-String).Trim()
+          "PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE"
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\install-php.ps1 -Version ${{ matrix.php }} -Arch arm64 -Dest C:\php-arm
+          exit $LASTEXITCODE
+
+      - name: Windows unit gate
+        shell: powershell
+        run: |
+          $env:QBIX_TEST_TMP = $env:RUNNER_TEMP
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\unit-survey.ps1 -Php C:\php-arm\php.exe -Gate -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - name: Smoke test (real server, portable workers)
+        if: ${{ !cancelled() }}
+        shell: powershell
+        env:
+          QBIX_POOL_TRACE: '1'
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php C:\php-arm\php.exe -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - name: HTTPS (self-signed, Windows certificate store)
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\https-smoke.ps1 -Php C:\php-arm\php.exe -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - name: Exponential fixture (SQLite)
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\exponential-fixture.ps1 -Php C:\php-arm\php.exe -Dir C:\exp -Port 18431 -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - name: Exponential site under Velocity, with load
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\exponential-site.ps1 -Php C:\php-arm\php.exe -Dir C:\exp -Port 18431 -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - name: Windows service (vcc.ps1, virtual account), with the Exponential site
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\service.ps1 -Php C:\php-arm\php.exe -ExpDir C:\exp -ExpPort 18431 -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-11-arm-php${{ matrix.php }}
+          path: smoke-logs
+          retention-days: 14
+
+  exponential:
+    name: ${{ matrix.os }} PHP ${{ matrix.php }} Exponential site + service
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            php: '8.3'
+          - os: windows-2025
+            php: '8.5'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: sockets, mbstring, openssl, curl, fileinfo, sqlite3, pdo_sqlite, intl, xsl, gd, zip, exif
+          ini-values: memory_limit=512M
+          tools: composer
+          coverage: none
+
+      - name: Exponential fixture (SQLite)
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\exponential-fixture.ps1 -Php (Get-Command php).Source -Dir C:\exp -Port 18431 -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - name: Exponential site under Velocity, with load
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\exponential-site.ps1 -Php (Get-Command php).Source -Dir C:\exp -Port 18431 -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - name: Windows service (vcc.ps1, virtual account), with the Exponential site
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\service.ps1 -Php (Get-Command php).Source -ExpDir C:\exp -ExpPort 18431 -LogDir "$pwd\smoke-logs"
+          exit $LASTEXITCODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-${{ matrix.os }}-php${{ matrix.php }}-exponential
+          path: smoke-logs
+          retention-days: 14
+
+  unit-survey:
+    name: unit tests survey (windows-2025, PHP 8.3)
+    runs-on: windows-2025
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@2.37.2
+        with:
+          php-version: '8.3'
+          extensions: sockets, mbstring, openssl, curl, fileinfo, sqlite3, pdo_sqlite, intl, zip
+          ini-values: memory_limit=512M
+          coverage: none
+      - name: Every unit test on Windows
+        shell: powershell
+        run: |
+          $env:QBIX_TEST_TMP = $env:RUNNER_TEMP
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\unit-survey.ps1 -Php (Get-Command php).Source -Timeout 90 -LogDir "$pwd\survey-logs"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-unit-survey
+          path: survey-logs
           retention-days: 14
