@@ -40,19 +40,30 @@ class Q_Evented
 	{
 		if (!self::$driver) {
 			$want = self::configured();
-			$name = self::available($want) ? $want : null;
-			if ($want !== 'auto' && !$name) {
+			$name = self::choose();
+			if ($want !== 'auto' && $name !== $want) {
 				fwrite(STDERR, "  event loop \"$want\" is not available here; choosing automatically\n");
-			}
-			if (!$name) {
-				foreach (self::AUTO as $n) {
-					if (self::available($n)) { $name = $n; break; }
-				}
 			}
 			$class = self::$backends[$name];
 			self::$driver = new $class();
 		}
 		return self::$driver;
+	}
+
+	/**
+	 * The backend driver() takes, or has taken, without creating one: the
+	 * configured one when this PHP can load it, else the first of AUTO.
+	 * @return {string} iopoll, revolt or select
+	 */
+	static function choose()
+	{
+		if (self::$driver) return self::backend();
+		$want = self::configured();
+		if (self::available($want)) return $want;
+		foreach (self::AUTO as $n) {
+			if (self::available($n)) return $n;
+		}
+		return 'select';
 	}
 
 	/**
@@ -85,6 +96,23 @@ class Q_Evented
 	static function backend()
 	{
 		return array_search(get_class(self::driver()), self::$backends) ?: get_class(self::$driver);
+	}
+
+	/**
+	 * The backend in use, as the start-up banner shows it. Asks choose(), so it
+	 * names the loop the server runs, not one this PHP merely has, and it
+	 * creates no driver: the banner comes before the workers are forked.
+	 * @return {string}
+	 */
+	static function label()
+	{
+		$name = self::choose();
+		switch ($name) {
+			case 'iopoll': return 'epoll/kqueue (Io\\Poll)';
+			case 'revolt': return 'Revolt';
+			case 'select': return 'stream_select';
+		}
+		return $name;
 	}
 
 	static function setDriver(Q_Evented_Driver $d) { self::$driver = $d; }

@@ -1773,8 +1773,10 @@ $preloadLabel = $nHandlers > 0
 	: "  Preloaded: {$nClasses} classes (handlers: lazy)";
 fwrite(STDERR, "  │" . str_pad($preloadLabel, $W) . "│\n");
 fwrite(STDERR, "  ├" . str_repeat('─', $W) . "┤\n");
-$evLoop = class_exists('Io\\Poll', false) ? 'epoll/kqueue (PHP 8.6 Io\\Poll)'
-	: (class_exists('Revolt\\EventLoop') ? 'Revolt' : 'stream_select');
+// The loop the server runs, as Q_Evented chose it (Q.webserver.eventLoop,
+// QBIX_EVENT_LOOP or auto), not a guess from which classes exist: Io\Poll is
+// opt-in, so a PHP that has it may well run stream_select.
+$evLoop = Q_Evented::label();
 fwrite(STDERR, "  │" . str_pad("  Dashboard: /Q/dashboard", $W) . "│\n");
 fwrite(STDERR, "  │" . str_pad("  Health:    /Q/health", $W) . "│\n");
 fwrite(STDERR, "  │" . str_pad("  Docs:      /Q/docs", $W) . "│\n");
