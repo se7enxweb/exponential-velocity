@@ -143,6 +143,17 @@ if (function_exists('posix_getuid') and posix_getuid() === 0 and @lchown("$root/
 @unlink("$outside/x.php");
 @rmdir($outside);
 
+// The response cache keys by the path asked for, not the one a rule rewrote it to: two pages of a front-controller
+// host must never share an entry.
+require_once __DIR__ . '/../src/Q/WebServer/Cache.php';
+$pa = array('method' => 'GET', 'uri' => '/clean/url', 'path' => '/clean/url', 'query' => '', 'headers' => array('host' => 'h.test'));
+$pb = array('method' => 'GET', 'uri' => '/other/page', 'path' => '/other/page', 'query' => '', 'headers' => array('host' => 'h.test'));
+Q_WebServer_HostRules::apply($pa);
+Q_WebServer_HostRules::apply($pb);
+check('rewritten to the front controller', array($pa['path'], $pb['path']), array('/index.php', '/index.php'));
+check('the path asked for is kept', array($pa['_askedPath'], $pb['_askedPath']), array('/clean/url', '/other/page'));
+check('two pages, two cache keys', Q_WebServer_Cache::cacheKey($pa) !== Q_WebServer_Cache::cacheKey($pb), true);
+
 array_map('unlink', array_filter((array) glob("$root/*/*/*") + (array) glob("$root/*/*"), 'is_file'));
 @unlink($users);
 echo ($fail ? 'FAIL' : 'PASS') . ": unit-host-rules, $pass passed, $fail failed\n";

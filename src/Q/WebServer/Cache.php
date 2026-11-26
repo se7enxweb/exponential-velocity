@@ -1062,7 +1062,7 @@ class Q_WebServer_Cache
 			// recovered from the URL -- cacheKey() folds in the host and the
 			// content-coding, so one URL has a `|gzip` entry and a plain one,
 			// and md5($url) is neither of them.
-			'url'     => $parsed['path'] . (($parsed['query'] ?? '') !== ''
+			'url'     => ($parsed['_askedPath'] ?? $parsed['path']) . (($parsed['query'] ?? '') !== ''
 			             ? '?' . $parsed['query'] : ''),
 			'key'     => $key,
 		);
@@ -1799,7 +1799,9 @@ class Q_WebServer_Cache
 	static function cacheKey($parsed)
 	{
 		$host = $parsed['headers']['host'] ?? '';
-		$parts = $host . $parsed['path'] . '?' . ($parsed['query'] ?? '');
+		// The path the client asked for: a host's URL rules may have rewritten 'path' internally (every page to
+		// /index.php), and keyed by that, every page of the host shared the first one's entry.
+		$parts = $host . ($parsed['_askedPath'] ?? $parsed['path']) . '?' . ($parsed['query'] ?? '');
 		// The document root the host is served from, so two names routed to
 		// different roots never share an entry, whatever else the key holds.
 		if (class_exists('Q_WebServer_Domains')) {

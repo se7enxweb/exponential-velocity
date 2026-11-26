@@ -61,6 +61,8 @@ class Q_WebServer_HostRules
 		if ($host === '') return null;
 		$hc = Q_Config::get('Q', 'webserver', 'hosts', $host, null);
 		self::$current = is_array($hc) ? $hc : null;
+		// What the client asked for, before any rule rewrites 'path': the response cache keys by it.
+		if (!isset($parsed['_askedPath'])) $parsed['_askedPath'] = (string) ($parsed['path'] ?? '/');
 		if (!is_array($hc) or (empty($hc['access']) and empty($hc['rewrite']) and empty($hc['index'])
 			and empty($hc['serverRewrite']))) return null;
 		$root = isset($hc['root']) ? rtrim((string) $hc['root'], '/') : '';
