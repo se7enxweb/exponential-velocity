@@ -76,6 +76,17 @@ edited down to what a reader actually needs.
 
 - **README and docs brought in line with the code**: Windows binaries and the service installer listed as shipped, install per platform, current binary sizes, 53 shimmed functions, persistent workers as the default, the portable pool, the `/etc/vc` overlay, configuration keys, console commands and options that were missing, and links that did not resolve.
 
+### Fixed
+
+- **`Q.webserver.workers` sizes a forked pool too**, not only a portable one; it was replaced by the automatic count under fork.
+- **The reported version is the release**: `SERVER_SOFTWARE`, `/.well-known/qbix.json`, the OpenAPI info, the OpenClaim, the attestation and the panel said `1.5.0` (the base engine); they now say the release, through `Q_WebServer::version()`.
+- **The start-up banner names the event loop the server runs** (`Q_Evented::label()`), not `Io\Poll` whenever that class exists.
+- **`Q.webserver.cgi.patterns`**: the default is `[]` on every platform, as documented; the former `["*"]` without pcntl was an invalid regex that matched nothing. A lone `"*"` now means every script, and an invalid pattern is reported once in the error log.
+- **TLS session resumption** is documented as a limit of PHP (an OpenSSL context per stream), with `tests/tls-session-resumption.php` to show it; the comments that said a shared stream context would make it work are corrected.
+- **ext:plan and the `Pool.php` comment** no longer describe `qbix_fork.dll` as Windows' isolation or as never shipped: Windows workers are the portable pool.
+- **`--help`**, the quick start and the welcome page point to the distribution's home page, else the engine's (`Q_WebServer_About::homepage()`), instead of `github.com/Qbix/webserver`.
+- **`qbixctl start` and `restart` take `--pool-mode`** directly, and the start record keeps it for a restart; it could only be passed after `--`.
+
 ## v0.0.4.69 — sessions in Redis or Valkey, shared with PHP-FPM
 
 2026-11-25
