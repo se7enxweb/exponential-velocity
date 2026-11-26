@@ -593,6 +593,15 @@ class Q_WebServer_Autohost
 		// The same registry the panel's Apps and Frameworks tabs use, so the
 		// three always agree. Plain PHP and bare Composer projects are not a
 		// framework here, as before.
+		// sbin/qbixserver.php calls this before any autoloader exists when a
+		// phar or a packed binary runs without --root (its data directory, and
+		// --stop/--reload): load the registry here, or that start ends in
+		// 'Class "Q_WebServer_Framework" not found'.
+		if (!class_exists('Q_WebServer_Framework')) {
+			foreach (array('Framework/Detector', 'Framework/VersionFile', 'Framework/Builtin', 'Framework') as $f) {
+				require_once __DIR__ . '/' . $f . '.php';
+			}
+		}
 		$d = Q_WebServer_Framework::detect(rtrim($appDir, '/\\'));
 		if (!$d or in_array($d['kind'], array('php', 'composer'), true)) return null;
 		return $d['kind'];
