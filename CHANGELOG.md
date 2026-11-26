@@ -67,6 +67,10 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.70 — the workers setting, the reported version and seven more fixes; Velocity as a Windows service
+
+2026-11-26
+
 ### Added
 
 - **Windows service installer**: `packaging/windows/vcc.ps1` installs Velocity as a Windows service under a virtual account, with the Debian-style tree under `%ProgramData%\vc`; the Windows CI proves HTTPS, a full Exponential site, load and the service ([docs/windows.md](docs/windows.md)).
@@ -86,6 +90,13 @@ edited down to what a reader actually needs.
 - **ext:plan and the `Pool.php` comment** no longer describe `qbix_fork.dll` as Windows' isolation or as never shipped: Windows workers are the portable pool.
 - **`--help`**, the quick start and the welcome page point to the distribution's home page, else the engine's (`Q_WebServer_About::homepage()`), instead of `github.com/Qbix/webserver`.
 - **`qbixctl start` and `restart` take `--pool-mode`** directly, and the start record keeps it for a restart; it could only be passed after `--`.
+- **A static Windows binary starts its portable workers**, and the phar and the static binaries answer `--stop` and start without `--root`.
+- **A preset named in the configuration** (`Q.compat.preset`) is applied, not only `--preset`.
+- **On Windows**: Ctl loads the layout class before it asks it about Windows, and the compat prewarm never walks a whole drive and skips directories it cannot read.
+
+### Not changed
+
+- **The mobile bridge's `/Q/api/transport/*` calls** are still not routed. The native bridge sends no credentials, and everything under `/Q/api/` sits behind the control panel's sign-in; routing it needs an authentication design for the bridge first ([docs/mobile.md](docs/mobile.md)).
 
 ## v0.0.4.69 — sessions in Redis or Valkey, shared with PHP-FPM
 
