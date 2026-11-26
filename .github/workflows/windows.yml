@@ -139,8 +139,9 @@ jobs:
         run: |
           $bytes = [IO.File]::ReadAllBytes('C:\vcbin\qbixserver-windows-x64.exe')
           $text = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
-          $at = $text.IndexOf("#!/usr/bin/env php`n<?php`nPhar::mapPhar(", [StringComparison]::Ordinal)
-          if ($at -lt 0) { $at = $text.IndexOf("<?php`nPhar::mapPhar(", [StringComparison]::Ordinal) }
+          # the release builds on a Windows checkout, so its stub may have CRLF line ends
+          $m = [regex]::Match($text, "(#!/usr/bin/env php\r?\n)?<\?php\r?\nPhar::mapPhar\('qbixserver\.phar'\);")
+          $at = if ($m.Success) { $m.Index } else { -1 }
           if ($at -le 0) { Write-Host "::error::no phar stub in the release binary"; exit 1 }
           $phar = [IO.File]::ReadAllBytes("$pwd\sbin\qbixserver.phar")
           $out = New-Object byte[] ($at + $phar.Length)
