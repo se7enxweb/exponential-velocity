@@ -791,31 +791,34 @@ class Q_WebServer
 
 		// Listen on plain tcp:// — TLS handshake happens after accept
 		$errno = $errstr = 0;
-		// One SSL context for the listener, inherited by every connection it
-		// accepts, rather than a fresh one built per socket after accept.
+		// One stream context for the listener, inherited by every connection
+		// it accepts: the certificate, the key and the ALPN list are
+		// configured once here, and a renewed certificate is put on this same
+		// context by reloadTls(), so the next handshake presents it without
+		// re-binding.
 		//
-		// A context is what holds the session cache and the ticket key, so a
-		// per-connection context means no client can ever resume: every visit,
-		// and every new connection within a visit, pays a full handshake
-		// including the certificate chain. Measured on this server: openssl
-		// -reconnect reported 0 resumed handshakes and no session ticket
-		// offered at all.
+		// This does not make TLS sessions resumable, although it was once
+		// written here that it would. PHP's OpenSSL streams create a new
+		// SSL_CTX for every stream when stream_socket_enable_crypto() runs, and
+		// the session cache and the ticket key belong to that SSL_CTX, not to
+		// the stream context. No stream context option shares them (PHP offers
+		// only no_ticket), so every connection is a full handshake: openssl
+		// s_client -reconnect reports "New" six times out of six, on PHP 8.3
+		// and 8.5 alike. tests/tls-session-resumption.php shows it. Resumption
+		// needs a TLS terminator in front of this server, or a PHP that
+		// exposes a session cache to stream servers.
 		//
-		// The handshake itself still happens on the accepted socket through
+		// The handshake itself happens on the accepted socket through
 		// stream_socket_enable_crypto(), which is what keeps accept()
-		// non-blocking; only the configuration moves.
+		// non-blocking.
 		//
-		// A renewed certificate is put on this same context by reloadTls(),
-		// so the next handshake presents it without re-binding, and every
-		// connection accepted after that point agrees on which one it got.
 		// Per-domain certificates for SNI, if any were registered (autohost /
 		// ACME provisioning, or Q.web.https.domains). OpenSSL presents the one
 		// whose name matches the client's SNI; local_cert above stays the
 		// default for every unmatched name, so a single-cert server -- an empty
 		// map -- keeps exactly the behaviour it had. This does not change the
 		// cipher suite or the minimum TLS version: only which certificate is
-		// presented. The context is shared by every accepted connection, which
-		// is what still lets a session be resumed.
+		// presented.
 		$sniCerts = Q_WebServer_Certs::sniCerts();
 
 		$tlsContext = stream_context_create(array('ssl' => array(
@@ -895,11 +898,10 @@ class Q_WebServer
 			}
 		}
 
-		// Nothing is set on this socket. It inherits the listener's context,
-		// which is the point: a shared context is what allows a session to be
-		// resumed, and setting an option here would give this connection one
-		// of its own again. The certificate, the key and the ALPN list are all
-		// configured once, where the listener is created.
+		// Nothing is set on this socket. It inherits the listener's context:
+		// the certificate, the key and the ALPN list are all configured once,
+		// where the listener is created (startTls, which also says why a
+		// session is still never resumed).
 
 		$key = (int) $client;
 		self::$clients[$key] = $client;

@@ -819,9 +819,13 @@ dns 7.99 ms    tcp 0.32 ms    tls 20.96 ms    server 1.46 ms
 ```
 
 The accept path is fine. The handshake is 21 ms on a link whose round trip is
-0.3 ms, so it is CPU and scheduling rather than round trips — and session
-resumption is not currently working: `openssl s_client -reconnect` reports
-`New` every time and `Reused` never. **This is the largest known open item.**
+0.3 ms, so it is CPU and scheduling rather than round trips — and no session
+is ever resumed: `openssl s_client -reconnect` reports `New` every time and
+`Reused` never. That is a limit of PHP, not of this server: PHP's OpenSSL
+streams build a new OpenSSL context for every connection, and the session
+cache and the ticket key live in that context, so no stream context option can
+share them (`php tests/tls-session-resumption.php` shows it on the PHP you
+run). Where resumption matters, put a TLS terminator in front.
 If you are benchmarking this server against nginx, benchmark both over plain
 HTTP as well, or you are mostly measuring OpenSSL.
 
@@ -917,8 +921,9 @@ php tests/run-unit.php          # green again, with your test in it
 
 ### Good first contributions
 
-- Make TLS session resumption work (see *TLS is the ceiling* above) — the
-  single highest-value open item.
+- TLS session resumption (see *TLS is the ceiling* above) needs PHP itself
+  to expose a session cache to stream servers; a patch to PHP's OpenSSL
+  extension is the place for it.
 - An ECDSA certificate path alongside RSA.
 - Move the TLS handshake off the event loop so concurrent handshakes do not
   serialize.
