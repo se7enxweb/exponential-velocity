@@ -1628,7 +1628,7 @@ class Q_WebServer_Pool
 		$_SERVER['SERVER_PORT'] = $req['serverPort'] ?? '8080';
 		$_SERVER['REMOTE_ADDR'] = $req['remoteAddr'] ?? '127.0.0.1';
 		$_SERVER['REMOTE_PORT'] = (string) ($req['remotePort'] ?? 0);
-		$_SERVER['SERVER_SOFTWARE'] = 'QbixServer/' . (defined('QBIX_SERVER_VERSION') ? QBIX_SERVER_VERSION : '1.0');
+		$_SERVER['SERVER_SOFTWARE'] = 'QbixServer/' . Q_WebServer::version();
 		$_SERVER['GATEWAY_INTERFACE'] = 'CGI/1.1';
 		$_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
 

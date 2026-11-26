@@ -46,7 +46,7 @@ Velocity servers can forward events to each other. Any `Q::event()` call can be 
 ```json
 {
     "server": "Exponential Velocity",
-    "version": "1.5.0",
+    "version": "0.0.4.69",
     "fingerprint": "11cf953679b80d04...",
     "endpoints": {"event": "/Q/event", "health": "/Q/health",
                   "openapi": "/.well-known/openapi.json", "mcp": "/.well-known/mcp.json",

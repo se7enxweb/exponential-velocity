@@ -220,7 +220,7 @@ class Q_WebServer_Attestation
 		$verification = self::verify($binaryPath);
 
 		return [
-			'server' => 'Qbix Server v' . QBIX_SERVER_VERSION,
+			'server' => 'Qbix Server v' . Q_WebServer::version(),
 			'binary_hash' => self::binaryHash($binaryPath),
 			'binary_size' => filesize($binaryPath),
 			'signed' => !empty($sigData['signatures']),

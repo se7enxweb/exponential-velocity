@@ -1123,7 +1123,7 @@ class Q_WebServer_Panel
 			'appDir' => defined('APP_DIR') ? APP_DIR : null,
 			'hasGit' => self::which('git') !== null,
 			'diskFree' => self::formatBytes(disk_free_space(Q_WebServer::$rootDir ?: '.')),
-			'serverVersion' => defined('QBIX_SERVER_VERSION') ? 'QbixServer/' . QBIX_SERVER_VERSION : null,
+			'serverVersion' => 'QbixServer/' . Q_WebServer::version(),
 			'sapi' => php_sapi_name(),
 			'pid' => getmypid(),
 			'uid' => function_exists('posix_getuid') ? posix_getuid() : null,

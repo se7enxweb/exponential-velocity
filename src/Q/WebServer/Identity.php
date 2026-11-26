@@ -159,7 +159,7 @@ class Q_WebServer_Identity
 			'stm' => array(
 				'type' => 'server',
 				'software' => 'Qbix Server',
-				'version' => defined('QBIX_SERVER_VERSION') ? QBIX_SERVER_VERSION : '1.0.0',
+				'version' => Q_WebServer::version(),
 				'fingerprint' => $identity['fingerprint'],
 				'endpoints' => array(
 					'event' => '/Q/event',

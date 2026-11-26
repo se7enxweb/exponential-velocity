@@ -761,7 +761,7 @@ class Q_WebServer_Trust
 		$verification = self::verifyBinary($binaryPath);
 
 		return [
-			'server' => 'Qbix Server v' . QBIX_SERVER_VERSION,
+			'server' => 'Qbix Server v' . Q_WebServer::version(),
 			'binary_hash' => 'sha256:' . hash_file('sha256', $binaryPath),
 			'binary_size' => filesize($binaryPath),
 			'signed' => !empty($sigData['signatures']),

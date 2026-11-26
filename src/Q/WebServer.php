@@ -5190,7 +5190,7 @@ WORKER;
 		$env = array(
 			'REDIRECT_STATUS'    => '200',
 			'GATEWAY_INTERFACE'  => 'CGI/1.1',
-			'SERVER_SOFTWARE'    => 'QbixServer/' . (defined('QBIX_SERVER_VERSION') ? QBIX_SERVER_VERSION : '1.0'),
+			'SERVER_SOFTWARE'    => 'QbixServer/' . Q_WebServer::version(),
 			'SERVER_PROTOCOL'    => 'HTTP/' . ($parsed['httpVersion'] ?? '1.1'),
 			'SERVER_NAME'        => $hostParts[0],
 			'SERVER_PORT'        => isset($hostParts[1]) ? $hostParts[1] : '80',
@@ -6059,7 +6059,7 @@ WORKER;
 		}
 		$_SERVER['SERVER_ADDR']       = self::$host === '0.0.0.0' ? '127.0.0.1' : self::$host;
 		$_SERVER['SERVER_PROTOCOL']   = 'HTTP/' . ($parsed['httpVersion'] ?? '1.1');
-		$_SERVER['SERVER_SOFTWARE']   = 'QbixServer/' . (defined('QBIX_SERVER_VERSION') ? QBIX_SERVER_VERSION : '1.0');
+		$_SERVER['SERVER_SOFTWARE']   = 'QbixServer/' . Q_WebServer::version();
 		$_SERVER['GATEWAY_INTERFACE'] = 'CGI/1.1';
 		$_SERVER['REDIRECT_STATUS']   = 200;
 		$_SERVER['REMOTE_ADDR']       = $parsed['_remoteAddr'] ?? '127.0.0.1';
@@ -7410,6 +7410,28 @@ WORKER;
 			'headers' => array('Content-Type' => 'application/json'));
 	}
 
+	/**
+	 * The version this server reports: in SERVER_SOFTWARE, in qbix.json, in
+	 * the OpenAPI document and in the panel. That is the shipped release
+	 * (QBIX_SHIP_VERSION, stamped at build time or found by git), without its
+	 * leading "v"; QBIX_SERVER_VERSION, the base the release is built on, only
+	 * where no release is known. Reporting the base everywhere made every
+	 * release look like the same one.
+	 *
+	 * @method version
+	 * @static
+	 * @return {string} e.g. "0.0.4.70"
+	 */
+	static function version()
+	{
+		$v = defined('QBIX_SHIP_VERSION') ? (string) constant('QBIX_SHIP_VERSION') : '';
+		$v = ltrim(trim($v), 'vV');
+		if ($v === '') {
+			$v = defined('QBIX_SERVER_VERSION') ? (string) constant('QBIX_SERVER_VERSION') : '1.0.0';
+		}
+		return $v;
+	}
+
 	static function brand()
 	{
 		if (self::$brand === null) {
@@ -8521,7 +8543,7 @@ WORKER;
 		$identity = Q_WebServer_Identity::serverIdentity();
 		$info = array(
 			'server' => self::brand(),
-			'version' => defined('QBIX_SERVER_VERSION') ? QBIX_SERVER_VERSION : '1.0.0',
+			'version' => self::version(),
 			'fingerprint' => $identity ? $identity['fingerprint'] : null,
 			'endpoints' => array(
 				'event' => '/Q/event',
@@ -8566,7 +8588,7 @@ WORKER;
 			'openapi' => '3.1.0',
 			'info' => array(
 				'title' => self::brand() . ' API',
-				'version' => defined('QBIX_SERVER_VERSION') ? QBIX_SERVER_VERSION : '1.0.0',
+				'version' => self::version(),
 				'description' => 'Auto-generated API spec for this ' . self::brand() . ' instance.',
 				'contact' => array('url' => 'https://github.com/Qbix/Server'),
 			),

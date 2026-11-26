@@ -9,7 +9,7 @@ Qbix-native discovery. Returns the server's identity, fingerprint, installed plu
 ```json
 {
     "server": "Exponential Velocity",
-    "version": "1.5.0",
+    "version": "0.0.4.69",
     "fingerprint": "4af468e461fc2022...",
     "endpoints": {
         "event": "/Q/event",
@@ -24,8 +24,10 @@ Qbix-native discovery. Returns the server's identity, fingerprint, installed plu
 }
 ```
 
-`version` is the engine's own number (`QBIX_SERVER_VERSION`, `1.5.0`), not the
-Velocity release; `qbixserver --version` shows the release and build. The
+`version` is the release the server runs, without its leading `v` (the same
+number `SERVER_SOFTWARE` carries, `QbixServer/0.0.4.69`); only where no release
+is known, from source with no tag, is it the base engine's number
+(`QBIX_SERVER_VERSION`). `qbixserver --version` adds the build. The
 answer also carries `links` (absolute URLs of the same endpoints and of the
 server's OpenClaim). `plugins` is left out with `Q.federation.advertisePlugins:
 false`, and `apps` is added with `Q.federation.advertiseApps: true`.
@@ -84,7 +86,7 @@ Every Velocity server auto-generates a signed [OpenClaim](https://openclaiming.o
     "stm": {
         "type": "server",
         "software": "Exponential Velocity",
-        "version": "1.5.0",
+        "version": "0.0.4.69",
         "fingerprint": "4af468e461fc2022...",
         "endpoints": {
             "event": "/Q/event",
