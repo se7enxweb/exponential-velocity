@@ -67,6 +67,15 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+### Added
+
+- **Windows service installer**: `packaging/windows/vcc.ps1` installs Velocity as a Windows service under a virtual account, with the Debian-style tree under `%ProgramData%\vc`; the Windows CI proves HTTPS, a full Exponential site, load and the service ([docs/windows.md](docs/windows.md)).
+- Tests: `unit-docs-cli.php` (every server option, console command and command option is documented, and every invocation in the docs uses ones that exist) and `unit-docs-links.php` (every relative link and anchor in the documentation resolves).
+
+### Updated
+
+- **README and docs brought in line with the code**: Windows binaries and the service installer listed as shipped, install per platform, current binary sizes, 53 shimmed functions, persistent workers as the default, the portable pool, the `/etc/vc` overlay, configuration keys, console commands and options that were missing, and links that did not resolve.
+
 ## v0.0.4.69 — sessions in Redis or Valkey, shared with PHP-FPM
 
 2026-11-25
