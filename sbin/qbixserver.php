@@ -1501,6 +1501,13 @@ if (is_file($certFile) && is_file($keyFile)
 
 fwrite(STDERR, "\n");
 
+// Q.webserver.workers sizes the pool when --workers does not, for a forked
+// pool as for a portable one. Only the portable pool used to read it, so a
+// configured count was silently replaced by the automatic one under fork.
+if (!$opts['workers']) {
+	$opts['workers'] = Q_WebServer_Pool::configuredWorkers(Q_Config::get('Q', 'webserver', 'workers', 0));
+}
+
 // Auto-detect workers if not specified
 if (!$opts['workers'] && function_exists('pcntl_fork')) {
 	$nproc = 1;
@@ -1562,12 +1569,11 @@ if (!$opts['workers'] && function_exists('pcntl_fork')) {
 // No fork here (Windows, or a PHP without pcntl): a portable pool of workers
 // started as their own processes, unless --workers says otherwise. Each one
 // loads the application itself, so the count stays modest: one per core,
-// between 2 and 8. Q.webserver.workers, when set, decides instead.
+// between 2 and 8. Q.webserver.workers, when set, has decided already (above).
 if (!$opts['workers'] && !function_exists('pcntl_fork') && function_exists('proc_open')) {
-	$__cfgWorkers = (int) Q_Config::get('Q', 'webserver', 'workers', 0);
 	$__cores = (int) (getenv('NUMBER_OF_PROCESSORS') ?: 0);
-	$opts['workers'] = $__cfgWorkers > 0 ? $__cfgWorkers : max(2, min(8, $__cores ?: 2));
-	unset($__cfgWorkers, $__cores);
+	$opts['workers'] = max(2, min(8, $__cores ?: 2));
+	unset($__cores);
 }
 
 // ── System limits check ──────────────────────────────────────────────

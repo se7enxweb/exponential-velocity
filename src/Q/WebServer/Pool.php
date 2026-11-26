@@ -91,6 +91,25 @@ class Q_WebServer_Pool
 	}
 
 	/**
+	 * The pool size Q.webserver.workers asks for, or 0 for "choose
+	 * automatically". Read for every kind of pool, forked or portable, when
+	 * --workers is not given.
+	 *
+	 * @method configuredWorkers
+	 * @static
+	 * @param {mixed} $value the configured value
+	 * @return {integer} a positive count, or 0 when unset or not a count
+	 */
+	static function configuredWorkers($value)
+	{
+		if (is_int($value) || (is_string($value) && ctype_digit(trim($value)))) {
+			return max(0, (int) $value);
+		}
+		if (is_float($value) && $value >= 1) return (int) $value;
+		return 0;
+	}
+
+	/**
 	 * Whether a worker process is gone, without waiting. Reaps it if not yet.
 	 *
 	 * "Gone" is anything but "still running" (0). The server's SIGCHLD

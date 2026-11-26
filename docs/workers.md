@@ -23,8 +23,9 @@ exactly what is reset.
 
 ### How many workers
 
-`--workers=N` sets the pool size. Without it, the server sizes the pool from the
-machine and from what a worker costs:
+`--workers=N` sets the pool size; without it, `Q.webserver.workers` does, for a
+forked pool as for a portable one. Without either, the server sizes the pool from
+the machine and from what a worker costs:
 
 - a worker is assumed to hold at least what the parent holds after loading the
   application (never less than 8 MB);
@@ -41,8 +42,8 @@ between 4 and 64.
 Where PHP has no `fork` (Windows, or a PHP built without `pcntl`), or when
 `--pool-mode=portable` (`Q.webserver.poolMode`, `QBIX_POOL_MODE`) asks for it, the
 pool is a portable one: each worker is a process of its own, started with
-`proc_open()`, that boots the application itself. Without `--workers` it has one
-worker per core, between 2 and 8, or `Q.webserver.workers` when set. See
+`proc_open()`, that boots the application itself. Without `--workers` or
+`Q.webserver.workers` it has one worker per core, between 2 and 8. See
 [windows.md](windows.md#the-portable-pool).
 
 ```sh
@@ -482,8 +483,8 @@ Every setting, with its default. All are under `Q.webserver`.
 | `warmupAsUser` | `true` | Run the warm-up with the worker user's effective ids. |
 | `writable` | `[]` | More directories to hand to the worker user at start. |
 
-The pool size itself is given with `--workers`; `Q.webserver.workers` is read
-only by the portable pool.
+The pool size itself is given with `--workers`, or with `Q.webserver.workers`
+when `--workers` is not given (forked and portable pools alike).
 
 ---
 
