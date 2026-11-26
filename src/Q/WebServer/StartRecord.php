@@ -241,7 +241,7 @@ class Q_WebServer_StartRecord
 	/** The server's options that take a value (qbixserver.php's list). */
 	static $valued = array('root', 'app', 'host', 'port', 'https-port', 'socket', 'socket-mode', 'workers', 'config',
 		'preset', 'sign', 'verify', 'key', 'key-id', 'generate-key', 'policy', 'pid', 'pack', 'output',
-		'keep-globals', 'conf-dir', 'distribution', 'deploy', 'signer', 'm', 'user', 'group');
+		'keep-globals', 'conf-dir', 'distribution', 'deploy', 'signer', 'm', 'user', 'group', 'pool-mode');
 
 	/** The variables of an environment a restart carries over. */
 	/**

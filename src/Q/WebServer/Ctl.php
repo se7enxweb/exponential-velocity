@@ -504,7 +504,7 @@ class Q_WebServer_Ctl
 
 	/** qbixserver.php's options that start passes on, and restart replaces, when they are given. */
 	static $serverValueOptions = array('conf-dir', 'config', 'root', 'app', 'host', 'port', 'https-port', 'socket',
-		'socket-mode', 'workers', 'distribution', 'preset', 'keep-globals', 'user', 'group');
+		'socket-mode', 'workers', 'distribution', 'preset', 'keep-globals', 'user', 'group', 'pool-mode');
 	static $serverFlags = array('debug', 'quiet', 'verbose', 'hotreload', 'watchdog', 'allow-root-workers', 'drop-master');
 
 	/**
@@ -936,7 +936,7 @@ class Q_WebServer_Ctl
 
 		// Every qbixserver.php option start passes on ($serverValueOptions, $serverFlags).
 		$startOpts = array('root' => 'Document root', 'app' => 'Qbix app directory', 'port' => 'HTTP port', 'https-port' => 'HTTPS port',
-			'workers' => 'Workers', 'host' => 'Bind address', 'socket' => 'Unix domain socket', 'socket-mode' => 'Permissions of the socket file',
+			'workers' => 'Workers', 'pool-mode' => 'How workers are started: fork, portable or auto', 'host' => 'Bind address', 'socket' => 'Unix domain socket', 'socket-mode' => 'Permissions of the socket file',
 			'preset' => 'Framework preset', 'keep-globals' => 'Globals the app keeps between requests',
 			'user' => 'User the workers run as', 'group' => 'Group the workers run as',
 			'debug' => array('Verbose logging', false), 'quiet' => array('Report errors only', false),
