@@ -854,7 +854,13 @@ class Q_WebServer_PortablePool extends Q_WebServer_Pool
 	{
 		if (is_array($custom) and $custom) return array_values(array_map('strval', $custom));
 		$argv = array_values(array_map('strval', $argv));
-		if ($sapi === 'micro') return array_merge(array((string) $php), array_slice($argv, 1));
+		if ($sapi === 'micro') {
+			// phpmicro on Windows leaves PHP_BINARY empty, and proc_open()
+			// refuses an empty program: the binary is the one this process
+			// was started as.
+			if ((string) $php === '' and isset($argv[0]) and $argv[0] !== '') $php = realpath($argv[0]) ?: $argv[0];
+			return array_merge(array((string) $php), array_slice($argv, 1));
+		}
 		// The server's own interpreter line, where the system tells it
 		// (interpreterCommand()): with it come its -d settings, -c, -n.
 		if (is_array($interpreter) and count($interpreter) >= 2) {

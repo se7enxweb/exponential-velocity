@@ -110,6 +110,9 @@ pp_check('PHP options from Q.webserver.portable.phpArgs come before the script',
 pp_check('a static binary (micro) is its own script',
 	$P::workerCommand(array('vc.exe', '--port=8080'), 'C:\\vc\\vc.exe', 'micro', false),
 	array('C:\\vc\\vc.exe', '--port=8080'));
+pp_check('a static binary with an empty PHP_BINARY (phpmicro on Windows) runs as argv[0]',
+	$P::workerCommand(array('C:\\no-such-dir\\vc.exe', '--port=8080'), '', 'micro', false),
+	array('C:\\no-such-dir\\vc.exe', '--port=8080'));
 pp_check('Q.webserver.portable.command replaces it all',
 	$P::workerCommand($argv, 'php', 'cli', '/etc/php.ini', array('C:\\php\\php.exe', 'w.php', 5)),
 	array('C:\\php\\php.exe', 'w.php', '5'));
