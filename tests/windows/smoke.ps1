@@ -12,15 +12,15 @@
 #
 #   powershell -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php C:\php\php.exe
 #
-# -Server runs something else than the source tree: the committed phar
-# (-Server sbin\qbixserver.phar, run by -Php) or a static binary
-# (-Server C:\vc\qbixserver-windows-x64.exe, run on its own, -Php unused).
+# -Entry runs something else than the source tree: the committed phar
+# (-Entry sbin\qbixserver.phar, run by -Php) or a static binary
+# (-Entry C:\vc\qbixserver-windows-x64.exe, run on its own, -Php unused).
 #
 # Prints PASS/FAIL per check, exits 1 if any failed.
 
 param(
     [string]$Php = "php.exe",
-    [string]$Server = "",
+    [string]$Entry = "",
     [int]$Workers = 2,
     [int]$StartSeconds = 60,
     [string]$LogDir = ""
@@ -67,10 +67,10 @@ Set-Content -Path (Join-Path $base "conf.json") -Value '{"Q":{"web":{"cache":{"e
 $pidFile = Join-Path $base "vc.pid"
 $log = Join-Path $base "server.log"
 $port = FreePort
-if ($Server -eq "") { $Server = "$repo\sbin\qbixserver.php" }
-$Server = (Resolve-Path $Server).Path
+if ($Entry -eq "") { $Entry = "$repo\sbin\qbixserver.php" }
+$Entry = (Resolve-Path $Entry).Path
 # A static binary is its own interpreter; a script or a phar is run by -Php.
-if ($Server -like "*.exe") { $exe = $Server; $pre = @() } else { $exe = $Php; $pre = @($Server) }
+if ($Entry -like "*.exe") { $exe = $Entry; $pre = @() } else { $exe = $Php; $pre = @($Entry) }
 
 if ($exe -eq $Php) { Write-Host "PHP:  $(& $Php -v | Select-Object -First 1)" }
 Write-Host "Run:  $exe $($pre -join ' ')"
@@ -108,7 +108,7 @@ Check "workers reused (at most $Workers pids)" ($pids.Count -le $Workers) "($($p
 
 $victim = [int]($pids.Keys | Where-Object { $_ -gt 0 } | Select-Object -First 1)
 $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $victim" -ErrorAction SilentlyContinue
-Check "a worker is a process running the server ($(Split-Path -Leaf $Server))" ($proc -and $proc.CommandLine -like "*$(Split-Path -Leaf $Server)*")
+Check "a worker is a process running the server ($(Split-Path -Leaf $Entry))" ($proc -and $proc.CommandLine -like "*$(Split-Path -Leaf $Entry)*")
 Check "...whose parent is the server" ($proc -and $proc.ParentProcessId -eq $server.Id)
 
 Stop-Process -Id $victim -Force

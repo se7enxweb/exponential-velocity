@@ -114,7 +114,7 @@ jobs:
         env:
           QBIX_POOL_TRACE: '1'
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php (Get-Command php).Source -Server sbin\qbixserver.phar -LogDir "$pwd\smoke-logs\phar"
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Php (Get-Command php).Source -Entry sbin\qbixserver.phar -LogDir "$pwd\smoke-logs\phar"
           exit $LASTEXITCODE
 
       - name: Download the latest release's static Windows binary
@@ -130,13 +130,45 @@ jobs:
           Get-Item C:\vcbin\qbixserver-windows-x64.exe | Select-Object Name, Length
           & C:\vcbin\qbixserver-windows-x64.exe --version
 
-      - name: Smoke test (static qbixserver-windows-x64.exe, on its own)
+      # A static binary is phpmicro's runtime with the phar appended (spc micro:combine). Building the runtime takes
+      # the release workflow an hour, so this takes the release's and appends this commit's phar: the code of the
+      # push, in the runtime users download.
+      - name: The release's static runtime with this commit's phar
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: |
+          $bytes = [IO.File]::ReadAllBytes('C:\vcbin\qbixserver-windows-x64.exe')
+          $text = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
+          $at = $text.IndexOf("#!/usr/bin/env php`n<?php`nPhar::mapPhar(", [StringComparison]::Ordinal)
+          if ($at -lt 0) { $at = $text.IndexOf("<?php`nPhar::mapPhar(", [StringComparison]::Ordinal) }
+          if ($at -le 0) { Write-Host "::error::no phar stub in the release binary"; exit 1 }
+          $phar = [IO.File]::ReadAllBytes("$pwd\sbin\qbixserver.phar")
+          $out = New-Object byte[] ($at + $phar.Length)
+          [Array]::Copy($bytes, 0, $out, 0, $at)
+          [Array]::Copy($phar, 0, $out, $at, $phar.Length)
+          [IO.File]::WriteAllBytes('C:\vcbin\qbixserver-windows-x64-current.exe', $out)
+          "runtime $at bytes + phar $($phar.Length) bytes"
+          & C:\vcbin\qbixserver-windows-x64-current.exe --version
+          exit $LASTEXITCODE
+
+      - name: Smoke test (static binary with this commit's phar, on its own)
         if: ${{ !cancelled() }}
         shell: powershell
         env:
           QBIX_POOL_TRACE: '1'
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Server C:\vcbin\qbixserver-windows-x64.exe -LogDir "$pwd\smoke-logs\exe"
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Entry C:\vcbin\qbixserver-windows-x64-current.exe -LogDir "$pwd\smoke-logs\exe-current"
+          exit $LASTEXITCODE
+
+      # The release as shipped, for the record: a fix reaches it with the next release.
+      - name: Smoke test (the latest release's qbixserver-windows-x64.exe as shipped, report only)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: powershell
+        env:
+          QBIX_POOL_TRACE: '1'
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\windows\smoke.ps1 -Entry C:\vcbin\qbixserver-windows-x64.exe -LogDir "$pwd\smoke-logs\exe-release"
           exit $LASTEXITCODE
 
       - uses: actions/upload-artifact@v4
