@@ -268,6 +268,12 @@ class Q_WebServer_HostRules
 			$target = (string) ($rule['target'] ?? '-');
 			if (!empty($flags['F'])) return self::answer(403, 'Forbidden');
 			if (!empty($flags['G'])) return self::answer(410, 'Gone');
+			// [R=4xx/5xx]: Apache drops the substitution and answers that status (`RewriteRule x - [R=404,L]`, the
+			// usual way to hide a file). Taken as "no redirect" before, the request went on: a script it was
+			// meant to hide ran.
+			if (!empty($flags['R']) and (int) $flags['R'] >= 400 and (int) $flags['R'] <= 599) {
+				return self::answer((int) $flags['R'], self::reason((int) $flags['R']));
+			}
 			if ($target === '-') {
 				if (!empty($flags['L']) or !empty($flags['END'])) return null;
 				continue;
@@ -379,6 +385,14 @@ class Q_WebServer_HostRules
 		return array('status' => $status, 'headers' => array('Content-Type' => 'text/plain; charset=utf-8'), 'body' => "$status $text\n");
 	}
 
+	/** The reason phrase of an HTTP status this class answers with. */
+	static function reason($status)
+	{
+		$r = array(400 => 'Bad Request', 401 => 'Unauthorized', 403 => 'Forbidden', 404 => 'Not Found', 405 => 'Method Not Allowed',
+			410 => 'Gone', 429 => 'Too Many Requests', 500 => 'Internal Server Error', 501 => 'Not Implemented', 503 => 'Service Unavailable');
+		return $r[(int) $status] ?? 'Error';
+	}
+
 	/** The body of the current host's error document for $status, or null. */
 	static function errorDocument($status)
 	{
@@ -411,6 +425,12 @@ class Q_WebServer_HostRules
 			$target = (string) ($rule['target'] ?? '-');
 			if (!empty($flags['F'])) return self::answer(403, 'Forbidden');
 			if (!empty($flags['G'])) return self::answer(410, 'Gone');
+			// [R=4xx/5xx]: Apache drops the substitution and answers that status (`RewriteRule x - [R=404,L]`, the
+			// usual way to hide a file). Taken as "no redirect" before, the request went on: a script it was
+			// meant to hide ran.
+			if (!empty($flags['R']) and (int) $flags['R'] >= 400 and (int) $flags['R'] <= 599) {
+				return self::answer((int) $flags['R'], self::reason((int) $flags['R']));
+			}
 			if ($target === '-') {
 				if (!empty($flags['L']) or !empty($flags['END'])) return null;
 				continue;

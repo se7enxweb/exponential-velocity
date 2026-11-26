@@ -55,6 +55,7 @@ Q_Config::set('Q', 'webserver', 'hosts', 'h.test', array(
 		array('dir' => '', 'rules' => array(
 			array('pattern' => '^var/.*\.php$', 'target' => '-', 'flags' => array('F' => true)),
 			array('pattern' => '^gone$', 'target' => '-', 'flags' => array('G' => true)),
+			array('pattern' => '^hidden\\.php$', 'target' => '-', 'flags' => array('R' => 404, 'L' => true)),
 			array('pattern' => '^app\.php(/(.*)|$)', 'target' => '/$2', 'flags' => array('R' => 301, 'L' => true),
 				'conds' => array(array('test' => '%{ENV:REDIRECT_STATUS}', 'pattern' => '^$'))),
 			array('pattern' => '^old/(.*)$', 'target' => 'https://n.example/$1', 'flags' => array('R' => 301, 'L' => true)),
@@ -142,6 +143,8 @@ if (function_exists('posix_getuid') and posix_getuid() === 0 and @lchown("$root/
 @unlink("$root/linked.php");
 @unlink("$outside/x.php");
 @rmdir($outside);
+
+check('[R=404] with - answers 404 (the script it hides never runs)', req('/hidden.php'), '404');
 
 // The response cache keys by the path asked for, not the one a rule rewrote it to: two pages of a front-controller
 // host must never share an entry.
