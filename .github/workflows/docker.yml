@@ -5,8 +5,10 @@ name: Docker images
 # the tags and what each variant carries; packaging/docker/ builds them.
 #
 # Every run builds and tests (the server answers /Q/health, and the engine's
-# own `ext:check` finds the variant complete). Only a tag -- or a manual run
-# asked to -- pushes.
+# own `ext:check` finds the variant complete). A tag publishes the release's
+# fixed tags (never moved: a run stops before it would overwrite one); a push
+# to main publishes the moving edge tags (edge, edge-php<ver>-<variant>); a
+# manual run publishes only when asked to.
 
 on:
   push:
@@ -75,8 +77,12 @@ jobs:
           php packaging/docker/matrix.php '${{ github.event.inputs.php }}' '${{ github.event.inputs.variants }}' >> "$GITHUB_OUTPUT"
           push=false
           if [ "${GITHUB_REF_TYPE}" = tag ] || [ '${{ github.event.inputs.push }}' = true ]; then push=true; fi
+          if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF_NAME}" = main ]; then push=true; fi
           echo "push=$push" >> "$GITHUB_OUTPUT"
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          # A release tag gives its version; anything else is edge
+          version=edge
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then version="${GITHUB_REF_NAME#v}"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
   build:
@@ -123,6 +129,10 @@ jobs:
           docker logs "$cid" | tail -20
           [ "$code" = 200 ] || { echo "::error::/Q/health answered $code"; exit 1; }
           docker exec "$cid" php /usr/share/exponential-velocity/packaging/docker/healthcheck.php
+          # Not root, and the Debian-style trees in place (docs/docker.md)
+          docker exec "$cid" sh -ec '[ "$(id -u)" != 0 ] && [ "$(id -un)" = www-data ]'
+          if docker logs "$cid" 2>&1 | grep -E 'panel: LOCKED|Permission denied'; then echo "::error::the server cannot write what it needs as www-data"; exit 1; fi
+          docker exec "$cid" sh -ec 'for d in /etc/qbix /etc/vc; do for k in sites conf mods; do test -d "$d/$k-available" && test -d "$d/$k-enabled" && test -w "$d/$k-available"; done; done; test -f /etc/qbix/qbix.conf && test -f /etc/qbix/ports.conf && test -L /etc/qbix/sites-enabled/default.conf'
           docker rm -f "$cid" >/dev/null
           docker image ls qbix-test:$TAG
 
@@ -138,12 +148,16 @@ jobs:
         if: needs.plan.outputs.push == 'true'
         run: |
           ref="$IMAGE:${{ needs.plan.outputs.version }}-$TAG-${{ matrix.arch }}"
+          # A release's tags are fixed: never overwrite one that exists
+          if [ '${{ needs.plan.outputs.version }}' != edge ] && docker manifest inspect "$ref" >/dev/null 2>&1; then
+            echo "::error::$ref exists already; a published version tag is never moved"; exit 1
+          fi
           docker tag qbix-test:$TAG "$ref"
           docker push "$ref"
 
   # One multi-architecture tag per image from the per-architecture pushes:
   # <version>-php<ver>-<variant>, php<ver>-<variant>, and latest for the
-  # newest PHP's standard image.
+  # newest PHP's standard image; from main, edge-php<ver>-<variant> and edge.
   publish:
     needs: [plan, build]
     if: needs.plan.outputs.push == 'true'
@@ -163,9 +177,17 @@ jobs:
         run: |
           v='${{ needs.plan.outputs.version }}'
           t='php${{ matrix.php }}-${{ matrix.variant }}'
-          tags="-t $IMAGE:$v-$t -t $IMAGE:$t"
-          if [ '${{ matrix.php }}' = '${{ needs.plan.outputs.newest }}' ] && [ '${{ matrix.variant }}' = standard ]; then
-            tags="$tags -t $IMAGE:latest -t $IMAGE:$v"
+          newest=false
+          if [ '${{ matrix.php }}' = '${{ needs.plan.outputs.newest }}' ] && [ '${{ matrix.variant }}' = standard ]; then newest=true; fi
+          if [ "$v" = edge ]; then
+            tags="-t $IMAGE:edge-$t"
+            [ "$newest" = true ] && tags="$tags -t $IMAGE:edge"
+          else
+            if docker buildx imagetools inspect "$IMAGE:$v-$t" >/dev/null 2>&1; then
+              echo "::error::$IMAGE:$v-$t exists already; a published version tag is never moved"; exit 1
+            fi
+            tags="-t $IMAGE:$v-$t -t $IMAGE:$t"
+            [ "$newest" = true ] && tags="$tags -t $IMAGE:latest -t $IMAGE:$v"
           fi
           docker buildx imagetools create $tags "$IMAGE:$v-$t-amd64" "$IMAGE:$v-$t-arm64"
           docker buildx imagetools inspect "$IMAGE:$v-$t"
