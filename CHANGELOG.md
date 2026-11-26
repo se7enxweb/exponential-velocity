@@ -67,6 +67,19 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.69 — sessions in Redis or Valkey, shared with PHP-FPM
+
+2026-11-25
+
+### Fixed
+
+- **Sessions ignored `session.save_handler`**: the compat session layer always kept them in files. A site served by Velocity on one node and PHP-FPM on another, with FPM's sessions in Redis or Valkey, signed every editor out whenever the load balancer switched nodes. With `session.save_handler=redis` sessions now go to the store named in `session.save_path`, with the keys, encoding and lifetime phpredis's session handler uses (prefix + id, the `php` encoding, `session.gc_maxlifetime`), so Velocity and PHP-FPM read each other's sessions. The connection opens on first use in each worker and is never used across a fork. A store that is down gives that request an empty session and one log line a minute, never an error page. Files remain the default.
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.69.
+- Tests: `unit-compat-session-redis.php` (20 checks with `VELOCITY_TEST_REDIS`, a round trip against phpredis in both directions).
+
 ## v0.0.4.68 — a host's `[R=404]` rule answers 404
 
 2026-11-25
