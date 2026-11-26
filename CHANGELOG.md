@@ -67,6 +67,19 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.67 — a host's URL rules no longer make its pages share one cache entry
+
+2026-11-25
+
+### Fixed
+
+- **Every page of a host with URL rules answered with the same cached page** (v0.0.4.64 to v0.0.4.66): the response cache keyed entries by the path after the host's rules had rewritten it, so with a front controller (`RewriteRule . /index.php`) every address of the host was `/index.php`, and the first page stored was the answer to all of them. The cache now keys by the path the client asked for. Hosts without rules (`Q.webserver.hosts.<host>.rewrite`) were not affected. Found switching an Exponential site behind nginx; it never reached visitors.
+
+### Updated
+
+- **`sbin/qbixserver.phar` is rebuilt from these sources**, stamped v0.0.4.67.
+- Tests: `unit-host-rules.php` checks that two pages of a front-controller host have two cache keys (38 checks).
+
 ## v0.0.4.66 — --drop-master keeps HTTPS working
 
 2026-11-25
