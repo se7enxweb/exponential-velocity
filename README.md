@@ -13,12 +13,28 @@ and your PHP still runs unmodified — and adds everything a production site nee
 the packaging, the control plane, the security and the site-operations tooling.
 The program names (`qbixserver`, `qbixctl`, `qbixconsole`), the `QBIX_*`
 environment variables and the `/etc/qbix` tree keep the engine's names, so
-existing scripts and installations keep working.
+existing scripts and installations keep working. Velocity's own settings tree,
+`/etc/vc`, is an overlay on top of `/etc/qbix` ([Configuration Layout](docs/layout.md)).
+
+**Current version: v0.0.4.69** (see the [Changelog](CHANGELOG.md); binaries and
+packages are attached to each [GitHub release](https://github.com/se7enxweb/exponential-velocity/releases)).
 
 - **Install it however you like.** Static binaries for Linux (x86-64, ARM64),
-  macOS (Apple Silicon) and Windows, `.deb` and `.rpm` packages that upgrade in
-  place, Docker images, or a single `.phar` — built and tested across PHP
-  8.2–8.5 in four sizes (mini, lite, standard, full).
+  macOS (Apple Silicon) and Windows (x64), a Windows service installer,
+  `.deb` and `.rpm` packages that upgrade in place, Docker images, a Composer
+  package, or a single `.phar` — built and tested across PHP 8.2–8.5 in four
+  sizes (mini, lite, standard, full). See [Install](#install).
+- **A drop-in for Apache behind a hosting panel.** A site's `.htaccess` access
+  control and URL rules, worker pools per system user and upstreams by host
+  ([multiuser.md](docs/multiuser.md)), trusted proxies, Apache's content types
+  and error documents, and a per-host fallback to the previous server when
+  Velocity cannot serve a host ([host-fallback.md](docs/host-fallback.md)).
+- **Root only where it must be.** Workers never run as root unless asked; with
+  `--drop-master` the server itself becomes the run user once its ports are
+  bound and its certificates read ([running-without-root.md](docs/running-without-root.md)).
+- **Sessions shared with PHP-FPM.** With `session.save_handler=redis` sessions
+  go to Redis or Valkey with the keys phpredis uses, so Velocity and PHP-FPM
+  nodes behind one load balancer read each other's sessions (from v0.0.4.69).
 - **A control panel built for the public internet.** Credentialed access to the
   dashboard, logs, metrics and app inspector, a root-owned credential store,
   forced change of the default password, login lockout, and — for a browser —
@@ -76,7 +92,7 @@ Instead of making each worker do more, Velocity runs more workers. The server lo
 
 Your code runs unmodified, in two modes:
 
-**Persistent workers (default)** — workers stay alive across requests. Between each request, a Reflection-based snapshot restores all static properties, and globals and the shimmed functions' state are reset: about 0.5 ms for a small application, 4–5 ms for a CMS with ~600 classes -- around 1.5% of a typical page render. 44 PHP functions (`header()`, `session_start()`, `ini_set()`, `set_error_handler()`, etc.) are shimmed via source transformation so they reset correctly. This is how you get 2,294 req/s on CPU-bound work and 1,060 req/s under I/O.
+**Persistent workers (default)** — workers stay alive across requests. Between each request, a Reflection-based snapshot restores all static properties, and globals and the shimmed functions' state are reset: about 0.5 ms for a small application, 4–5 ms for a CMS with ~600 classes -- around 1.5% of a typical page render. 53 PHP functions (`header()`, `session_start()`, `ini_set()`, `set_error_handler()`, etc.) are shimmed via source transformation so they reset correctly. This is how you get 2,294 req/s on CPU-bound work and 1,060 req/s under I/O.
 
 **Fork-per-request** — if persistent mode doesn't work for your code (functions with internal static variables, plugins that register global state in ways the shim can't track), set `forkPerRequest: true`. Each request gets a fresh fork. It's slower than persistent mode, but each forked worker still costs a few MB instead of 50MB, so you can run many times more of them than fpm on the same hardware. That's the whole point — blocking I/O doesn't matter when you have enough workers, and COW makes "enough workers" nearly free.
 
@@ -99,9 +115,9 @@ See [BENCHMARKS.md](docs/BENCHMARKS.md) for full methodology and [reset.md](docs
 
 **nginx** for reverse proxy and static files. **php-fpm** to run PHP. **Node.js** for a Socket.IO server. **Redis** for pub/sub between fpm and Node. **supervisor** to keep it all running. **Docker** to make it deployable. Six processes, three languages, two runtimes.
 
-Velocity replaces all six with one process. HTTP, WebSocket (with Socket.IO protocol), SSE, sessions, uploads, static files, .htaccess — same port, same file. No Redis, no Node, no pub/sub glue. Download a 4.5MB binary, run it, done. Pure PHP.
+Velocity replaces all six with one process. HTTP, WebSocket (with Socket.IO protocol), SSE, sessions, uploads, static files, .htaccess — same port, same file. No Redis, no Node, no pub/sub glue. Download one binary (about 17 MB for the mini build, 70 MB for the standard one on Linux), run it, done. Pure PHP.
 
-You can also package your entire app — code, assets, SQLite database — into that binary and distribute it as a single file. Double-click on Windows, `./myapp --open` on Mac or Linux, the browser opens and the app is there. No PHP to install, no web server to configure, no database to set up. 5 MB, not 200 — because we open the browser that's already there instead of shipping Chromium like Electron does. [How it works →](#single-binary-distribution)
+You can also package your entire app — code, assets, SQLite database — into that binary and distribute it as a single file. Double-click on Windows, `./myapp --open` on Mac or Linux, the browser opens and the app is there. No PHP to install, no web server to configure, no database to set up. Tens of megabytes rather than hundreds, because we open the browser that's already there instead of shipping Chromium like Electron does. [How it works →](#single-binary-distribution)
 
 ---
 
@@ -126,27 +142,39 @@ You can also package your entire app — code, assets, SQLite database — into 
 | 🛤️ | [Routing](docs/routing.md) | Clean URLs, .htaccess, DirectoryIndex |
 | 📂 | [PHP Framework](docs/framework.md) | The micro-framework: handlers, events, Q classes |
 | ⚙️ | [Configuration](docs/configuration.md) | JSON config, CLI options, presets |
-| 🗂️ | [Configuration Layout](docs/layout.md) | `/etc/qbix` laid out like `/etc/apache2`, load order, overlays, distributions |
+| 🗂️ | [Configuration Layout](docs/layout.md) | `/etc/qbix` laid out like `/etc/apache2`, the `/etc/vc` overlay, load order, distributions |
 | ⌨️ | [Console & Command Line](docs/console.md) | `qbixserver.php` options, `qbixconsole` commands, `qbixctl`, option styles |
 | 📦 | [Running & Building](docs/running.md) | Source, phar, binary. Building static binaries. Requirements |
+| 📦 | [Packages](docs/packages.md) | The `.deb` and `.rpm` packages: install, upgrade in place, the systemd unit |
+| 🐳 | [Docker](docs/docker.md) | The container images, their tags and variants |
+| 🪟 | [Windows](docs/windows.md) | The portable worker pool, the Windows service installer `vcc.ps1`, `%ProgramData%\vc`, what is tested |
+| 🔓 | [Running without root](docs/running-without-root.md) | What needs root and what does not, `--user`, `--drop-master` |
+| 👥 | [Many users: pools and upstreams](docs/multiuser.md) | Worker pools per system user, upstreams by host, a site's `.htaccess` access control and URL rules |
+| ↩️ | [Host fallback](docs/host-fallback.md) | A host Velocity cannot serve goes back to the previous server |
 | 🎩 | [PHP 8.0 & Red Hat Enterprise Linux](docs/rhel.md) | PHP 8.0 to 8.5: why 8.0 works, what differs there, installing on RHEL 8 and 9, extensions, systemd, SELinux, verifying |
 | 📀 | [Binaries & Signing](docs/binaries.md) | Pack apps, manage like zip, ECDSA M-of-N signing, Rekor, platform signing |
 | 🏗️ | [Architecture](docs/architecture.md) | Persistent workers, COW, execution model, mental model, benchmarks |
 | 🏭 | [Workers & Pool](docs/workers.md) | Pool size, static and dynamic pools, when a worker is replaced, reload |
 | 🧭 | [Lessons](docs/lessons.md) | What persists between requests, what workers inherit, memory, opcache, TLS in a forked child |
-| ⏳ | [Time-Consuming Lessons](docs/time-consuming-lessons.md) | The problems that took longest to diagnose: symptom, cause, how to recognise it, fix |
+| ⏳ | [Time-Consuming Lessons](docs/time-consuming-lessons.md) | The problems that took longest to diagnose: symptom, cause, how to recognize it, fix |
 | 📊 | [Dashboard & Panel](docs/dashboard.md) | Live stats, control panel tabs |
 | 🖥️ | [Q Shell](docs/shell.md) | Drop-down console on every server view: tiers, jobs, sudo, REST API |
 | 🎨 | [Designs](docs/designs.md) | Restyle the dashboard, panel, docs, listing and error pages from `designs/` |
 | 🚀 | [Deploy & Federation](docs/deploy.md) | Rsync deploy, cluster replication, inter-server trust |
 | 🔍 | [API Discovery](docs/api-discovery.md) | OpenAPI, MCP, qbix.json, HTTP/2 |
-| 🧩 | [Compatibility](docs/compatibility.md) | SAPI emulation, 44 shimmed functions, class ownership, tests |
+| 📁 | [Static Files](docs/static-files.md) | What is served from disk, static roots, content types |
+| 🧪 | [Cache Audit](docs/cache-audit.md) | An audit of the response cache's APCu layer: cost per hit, gaps, what is worth changing |
+| 🔁 | [Data Sync](docs/sync.md) | Data sync over the mesh (experimental, off by default) |
+| 🧱 | [App Mode & SAPI](docs/app-mode.md) | `--app` mode and how the server stands in for a PHP SAPI in its workers |
+| 🕸️ | [Mesh](docs/Mesh.md) and [iOS & Android](docs/mobile.md) | The experimental peer-to-peer mesh (off by default) and Velocity inside a phone app |
+| ⚙️ | [uwebserver](docs/uwebserver.md) | The small C server for static files and benchmark baselines |
+| 🧩 | [Compatibility](docs/compatibility.md) | SAPI emulation, 53 shimmed functions, class ownership, tests |
 | 📈 | [Benchmarks](docs/BENCHMARKS.md) | Full methodology and numbers |
 | 🔄 | [State Reset](docs/reset.md) | What gets restored between requests |
 | 🔀 | [Migrate from nginx](docs/migrate-nginx.md) | Server blocks, try_files, proxy_pass, gzip |
-| 🔀 | [Migrate from Apache](docs/migrate-apache.md) | .htaccess unchanged, VirtualHost mapping |
+| 🔀 | [Migrate from Apache](docs/migrate-apache.md) | .htaccess rewrite rules read as they are, the other directives and VirtualHost mapped to config |
 | 🔀 | [Migrate from Caddy](docs/migrate-caddy.md) | Automatic HTTPS, on-demand TLS → autohost |
-| ✅ | [Test Results](docs/TestResults.md) | 140 end-to-end tests |
+| ✅ | [Test Results](docs/TestResults.md) | End-to-end test results |
 | 🗺️ | [Roadmap](docs/roadmap.md) | What's next |
 | 📄 | [License](docs/license.md) | MIT |
 
@@ -155,8 +183,39 @@ You can also package your entire app — code, assets, SQLite database — into 
 ```bash
 git clone https://github.com/se7enxweb/exponential-velocity
 cd exponential-velocity
-php sbin/qbixserver.php
+mkdir -p web && echo '<?php echo "Hello!";' > web/index.php
+php sbin/qbixserver.php --port=8080      # http://127.0.0.1:8080/
+php sbin/qbixserver.php --help           # every option
+php sbin/qbixconsole.php list            # every administration command
 ```
+
+Without `--port` the server listens on 80 (and on 443 when it has a
+certificate), which needs root or the capability to bind low ports; see
+[Running without root](docs/running-without-root.md).
+
+## Install
+
+| Platform | Ways to install | Guide |
+|---|---|---|
+| **Debian 12/13, Ubuntu 22.04/24.04** | `.deb` package (systemd unit), static binary, phar, Docker | [packages.md](docs/packages.md) |
+| **RHEL / AlmaLinux / Rocky 9 and 10** | `.rpm` package, static binary, phar, Docker | [packages.md](docs/packages.md), [rhel.md](docs/rhel.md) |
+| **Other Linux** (x86_64, aarch64) | static binary, phar, Docker | [running.md](docs/running.md) |
+| **macOS** (Apple Silicon) | static binary, phar | [running.md](docs/running.md) |
+| **Windows** (x64; x86 with the phar or source) | static binary (`.exe`, console and GUI builds), the **Windows service installer** [`packaging/windows/vcc.ps1`](packaging/windows/vcc.ps1), phar | [windows.md](docs/windows.md) |
+| **Any PHP 8.0+ system** | phar, source, Composer (`composer require se7enxweb/exponential-velocity`) | [running.md](docs/running.md) |
+
+### Linux packages
+
+```bash
+# Debian / Ubuntu (pick the file for your release from the release page)
+sudo apt install ./exponential-velocity_<release>-1+deb12_all.deb
+# RHEL / AlmaLinux / Rocky
+sudo dnf install ./exponential-velocity-<release>-1.el10.noarch.rpm
+```
+
+The packages install `qbixserver`, `qbixctl` and `qbixconsole` in `/usr/sbin`
+and the `exponential-velocity` systemd unit; installing a newer package over an
+older one upgrades in place.
 
 ### Download a binary
 
@@ -166,18 +225,57 @@ no version of PHP on the machine to conflict with.
 ```bash
 # Linux x86_64
 curl -LO https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-x86_64
-chmod +x qbixserver-linux-x86_64 && ./qbixserver-linux-x86_64
+chmod +x qbixserver-linux-x86_64 && ./qbixserver-linux-x86_64 --port=8080
 
 # Linux aarch64 -- also what a Raspberry Pi 4 or 5 runs
 curl -LO https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-aarch64
-chmod +x qbixserver-linux-aarch64 && ./qbixserver-linux-aarch64
+chmod +x qbixserver-linux-aarch64 && ./qbixserver-linux-aarch64 --port=8080
 
-# Windows x64
-curl -LO https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-windows-x64.exe
-qbixserver-windows-x64.exe
+# macOS, Apple Silicon
+curl -LO https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-macos-arm64
+chmod +x qbixserver-macos-arm64 && ./qbixserver-macos-arm64 --port=8080
 ```
 
+```bat
+rem Windows x64 (cmd.exe; curl ships with Windows 10 and later)
+curl -LO https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-windows-x64.exe
+qbixserver-windows-x64.exe --port=8080
+```
+
+Each binary also comes per PHP version and size, for example
+`qbixserver-linux-x86_64-php8.4-full`; the unsuffixed name is the default
+build. On Windows a `-gui.exe` build opens no console window.
 [**All downloads &rarr;**](https://github.com/se7enxweb/exponential-velocity/releases/latest)
+
+### Windows: install as a service
+
+[`packaging/windows/vcc.ps1`](packaging/windows/vcc.ps1) installs Velocity as
+a Windows service run by a virtual account (never LocalSystem unless asked),
+keeps the Debian-style configuration tree under `%ProgramData%\vc`, grants the
+account exactly the file access it needs, and imports a certificate from the
+Windows certificate store. From an elevated PowerShell, with PHP for Windows in
+`C:\php` and this repository in `C:\vc`:
+
+```powershell
+cd C:\vc\packaging\windows
+.\vcc.ps1 doctor  -Php C:\php\php.exe
+.\vcc.ps1 install -Php C:\php\php.exe -Root C:\sites\example -Port 8080
+.\vcc.ps1 status
+```
+
+Tested in CI on Windows Server 2022 and 2025 (x64, and x86 with 32-bit PHP)
+and on Windows 11 ARM (x64 PHP, emulated);
+every command, the security model and the known gaps are in
+[docs/windows.md](docs/windows.md#running-it-as-a-windows-service-vccps1).
+
+### Docker
+
+```bash
+docker run -d -p 8080:8080 -v "$PWD/public:/app" ghcr.io/se7enxweb/exponential-velocity:latest
+```
+
+The document root in the image is `/app`. Tags per release, PHP version and
+variant: [docs/docker.md](docs/docker.md).
 
 ### Or run the phar, anywhere PHP runs
 
@@ -230,7 +328,7 @@ why, is in [docs/layout.md](docs/layout.md#programs-bin-and-sbin).
 
 ## Use With Your Existing Codebase
 
-If you already have a PHP app running on nginx + php-fpm, switching is one command. The server reads your `.htaccess`, rewrites URLs to your front controller, and runs your code with 44 functions shimmed so static variables, sessions, and headers work correctly between requests.
+If you already have a PHP app running on nginx + php-fpm, switching is one command. The server reads your `.htaccess`, rewrites URLs to your front controller, and runs your code with 53 functions shimmed so static variables, sessions, and headers work correctly between requests.
 
 **Laravel:**
 
@@ -285,7 +383,7 @@ Each preset sets framework-appropriate defaults: the front controller path, uplo
 
 ### What gets shimmed
 
-The server intercepts 44 PHP functions (`header()`, `session_start()`, `setcookie()`, `ini_set()`, `file_exists()`, `exec()`, etc.) via source transformation at include time. Your code calls `header()` and it works — the server captures it. Between requests, all static properties are restored from a snapshot in 0.03ms. See [reset.md](docs/reset.md) for the full list and [Compatibility](docs/compatibility.md#remembered-file-facts) for what the file functions remember.
+The server intercepts 53 PHP functions (`header()`, `session_start()`, `setcookie()`, `ini_set()`, `file_exists()`, `exec()`, etc.) via source transformation at include time. Your code calls `header()` and it works — the server captures it. Between requests, all static properties are restored from a snapshot (about 0.5 ms for a small application, 4–5 ms for a CMS). See [reset.md](docs/reset.md) for the full list and [Compatibility](docs/compatibility.md#remembered-file-facts) for what the file functions remember.
 
 ### What to watch for
 
@@ -318,7 +416,7 @@ it is.
 | **Linux** x86_64 | [`qbixserver-linux-x86_64`](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-x86_64) | shipped |
 | **Linux** aarch64 &middot; Raspberry Pi 4 / 5 | [`qbixserver-linux-aarch64`](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-linux-aarch64) | shipped |
 | **macOS** arm64 &middot; Apple Silicon | [`qbixserver-macos-arm64`](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-macos-arm64) | shipped |
-| **Windows** x64 | — | does not build yet |
+| **Windows** x64 | [`qbixserver-windows-x64.exe`](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-windows-x64.exe) (console) &middot; [`qbixserver-windows-x64-gui.exe`](https://github.com/se7enxweb/exponential-velocity/releases/latest/download/qbixserver-windows-x64-gui.exe) (no console window) &middot; service installer [`vcc.ps1`](packaging/windows/vcc.ps1) | shipped, [docs/windows.md](docs/windows.md) |
 
 ### The phar — anywhere PHP 8.0+ runs
 
@@ -341,6 +439,7 @@ is the authority; a row here is a platform we test, not one we promise.
 | **Linux** musl | Alpine on x86_64, aarch64, i386 | a different C library, not a different build |
 | **BSD** | FreeBSD 14, DragonFly BSD | real kernels in a VM, not emulated Linux |
 | **illumos** | OmniOS | the surviving OpenSolaris line |
+| **Windows** | Server 2022 and 2025 (x64, x86), Windows 11 ARM | no `fork()`: the portable worker pool ([`windows` workflow](.github/workflows/windows.yml)) |
 
 Two of those earn their place for specific reasons. **s390x is big-endian**, and
 this server has several binary protocols — `pack('N')` framing, ETags, HPACK,
@@ -365,7 +464,6 @@ they are:
 | **OpenBSD**, **NetBSD** | PHP 8 in ports and pkgsrc | in the matrix; being worked on |
 | **Solaris 11** | PHP 8 packages exist | no runner |
 | **Haiku** | PHP is in HaikuPorts | its installer is GUI-only, so CI cannot boot it unattended |
-| **Windows** via the phar | PHP 8 for Windows is official | the phar path is untested there; only the binary is known broken |
 
 The test for any of them is one line on the machine in question:
 
@@ -415,8 +513,9 @@ libc of the three.
 starts a new process running a named function rather than duplicating the
 caller. Velocity's fastest mode uses copy-on-write `fork()`, so that mode would
 not carry across — but the server already has a path for exactly this, because
-Windows has no `fork()` either. It runs there through `php-cgi` subprocesses,
-persistent and shimmed, just without the memory sharing. So this costs
+Windows has no `fork()` either. It runs there with the portable worker pool:
+workers started with `proc_open()`, persistent and shimmed, just without the
+memory sharing. So this costs
 performance, not viability.
 
 *Sockets and files.* Networking comes from `bsdsocket.library`, whose handles
@@ -464,7 +563,7 @@ after request. Workers are still persistent and still shimmed, you simply do
 not get the COW memory saving. Tested on Linux (portable mode forced) and on
 GitHub Actions Windows Server 2022 and 2025 runners (x64 with PHP 8.1, 8.3 and
 8.5, x86 with PHP 8.3: smoke test 15/15); not yet verified on a Windows 11
-desktop or physical Windows machines: [docs/windows.md](docs/windows.md). The 44-function source transform still clears state between
+desktop or physical Windows machines: [docs/windows.md](docs/windows.md). The 53-function source transform still clears state between
 requests.
 
 **PHP 8.6+ (epoll/kqueue):** the server detects PHP 8.6's native `Io\Poll` API
@@ -502,7 +601,7 @@ php sbin/qbixserver.php --root=examples/todo/web --port=8080
 Already running nginx, Apache, or Caddy? These guides show the config mapping:
 
 - [Migrating from nginx](docs/migrate-nginx.md) — server blocks, try_files, proxy_pass, gzip
-- [Migrating from Apache](docs/migrate-apache.md) — .htaccess works unchanged, VirtualHost → domains config
+- [Migrating from Apache](docs/migrate-apache.md) — .htaccess rewrite rules are read as they are; other directives and VirtualHost map to host settings
 - [Migrating from Caddy](docs/migrate-caddy.md) — automatic HTTPS, on-demand TLS → autohost
 
 ## Single-Binary Distribution
@@ -557,7 +656,7 @@ also be set by a host application that builds the file itself.
 | `Q.webserver.backlog` | `1024` | How many established connections may wait to be accepted. See below — the old default of 32 was a cliff, not a queue. |
 | `Q.webserver.workers` | auto | Process count. Sized from measured per-worker cost rather than a guess. |
 | `Q.web.cache.enabled` | `false` | The reverse cache. Off unless asked for. |
-| `Q.web.cache.staleWhileRevalidate` | `0` | Seconds past expiry an entry may still be served while one request renders the replacement. `0` keeps the pre-2026-09 behaviour exactly. |
+| `Q.web.cache.staleWhileRevalidate` | `0` | Seconds past expiry an entry may still be served while one request renders the replacement. `0` keeps the pre-2026-09 behavior exactly. |
 | `Q.web.cache.skip.cookies` | `PHPSESSID`, `Q_sid` | Cookies that mean "this response is personal". **Set this to your framework's session cookie** — see the warning below. |
 | `Q.web.static.maxAge` | `0` | Seconds a client may keep a static file without asking again. `0` means `must-revalidate`, which is a conditional request per file per page view. |
 
@@ -647,7 +746,7 @@ with the age it actually has — because a cache downstream deserves to know.
 
 `X-Cache-Refresh: 1` reads past the stored copy so the response is rendered and
 stored again. It is deliberately not `Cache-Control: no-cache`: browsers send
-that on a plain reload, and honouring it would let any client or crawler make
+that on a plain reload, and honoring it would let any client or crawler make
 the server render on demand.
 
 ```bash
@@ -746,7 +845,7 @@ Current coverage includes frame codec, HPACK (including malformed input),
 cache keys, cache entry format, cache wire form, conditional revalidation,
 stale-while-revalidate, HTTP/1.1 response head construction, path safety,
 source transformation, HTTP/2 limits, cookies, flow control, and full-socket
-behaviour.
+behavior.
 
 ---
 
@@ -795,7 +894,7 @@ high.
    undoes it. Numbers from a real run are worth more than adjectives.
 3. **It changes one thing.** A fix and a refactor in one commit is two reviews
    pretending to be one.
-4. **Its default is the old behaviour.** A new capability that alters how an
+4. **Its default is the old behavior.** A new capability that alters how an
    existing installation behaves without being asked is a regression to
    somebody. `staleWhileRevalidate` defaults to `0` for exactly this reason.
 
@@ -837,16 +936,16 @@ Copyright (c) 2025–2026 7x (Exponential Velocity)
 In plain terms: you may use, copy, modify, merge, publish, distribute,
 sublicense and sell this software, including in closed-source and commercial
 products, for free. The two conditions are that the copyright notice and the
-licence text travel with any substantial portion of the software, and that the
+license text travel with any substantial portion of the software, and that the
 software comes with no warranty and no liability — if it breaks your site, that
 is your risk, not the authors'.
 
-There is no contributor licence agreement. By opening a pull request you are
-offering your contribution under the same MIT licence as the rest of the
+There is no contributor license agreement. By opening a pull request you are
+offering your contribution under the same MIT license as the rest of the
 project, which is the ordinary arrangement for a repository of this kind.
 
 Distributing a single-file binary built with this server still distributes this
-software, so the licence text goes in the binary too. `docs/binaries.md` covers
+software, so the license text goes in the binary too. `docs/binaries.md` covers
 how that is packed.
 
 We [proposed `switch_global_context()` for PHP core](https://discourse.thephp.foundation/t/php-dev-three-proposals-for-php-9/2113). While that works its way through the RFC process, the server does it in userland today.
