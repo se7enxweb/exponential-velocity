@@ -83,7 +83,7 @@ The endpoint `POST /Q/sync/tree` serves a table's root hash and individual nodes
 
 ## Current limitations
 
-These are the gaps between the protocol as designed in [Mesh.md](Mesh.md) and what ships today (v0.0.4.70):
+These are the gaps between the protocol as designed in [Mesh.md](Mesh.md) and what ships today (v0.0.4.71):
 
 - **The tree walk is not yet done over the wire.** When the roots differ, the sync falls back to the Bloom-filter record fetch described above rather than walking the peer's tree node by node. The tree diff is implemented and tested locally; the remaining work is the request loop.
 - **Filters hold keys, not versions.** A record that exists on both sides is in both filters, whatever its version. An edit reaches the other peer only when that peer's copy is older than `$since`, so that its filter leaves the key out. Pass the time of the last successful sync with that peer as `$since`, as in the example above. Two peers that both edit the same record after their last sync will not detect the conflict in the Bloom pass.

@@ -16,7 +16,7 @@ environment variables and the `/etc/qbix` tree keep the engine's names, so
 existing scripts and installations keep working. Velocity's own settings tree,
 `/etc/vc`, is an overlay on top of `/etc/qbix` ([Configuration Layout](docs/layout.md)).
 
-**Current version: v0.0.4.70** (see the [Changelog](CHANGELOG.md); binaries and
+**Current version: v0.0.4.71** (see the [Changelog](CHANGELOG.md); binaries and
 packages are attached to each [GitHub release](https://github.com/se7enxweb/exponential-velocity/releases)).
 
 - **Install it however you like.** Static binaries for Linux (x86-64, ARM64),

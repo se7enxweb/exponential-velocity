@@ -67,10 +67,25 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.71 — RewriteMap lookups, [E=] variables and %{THE_REQUEST} in a host's URL rules; Docker images as www-data
+
+2026-11-26
+
+### Added
+
+- **`RewriteMap` in a host's URL rules**: `Q.webserver.hosts.<host>.maps` holds `txt:` maps (the key/value lines) and `int:` maps (`unescape`, `escape`, `tolower`, `toupper`); `${name:key|default}` is looked up in conditions and substitutions, the default when nothing is found ([docs/multiuser.md](docs/multiuser.md)).
+- **`[E=NAME:value]` and `%{ENV:NAME}`**: a matching rule keeps the variable for the rules after it, as Apache's mod_rewrite does for a redirect built from it. It is not handed to PHP.
+- **`%{THE_REQUEST}`**: the request line as the client sent it, for rules that need the raw path.
+- Tests: `unit-host-rules.php` covers maps, variables, `%{THE_REQUEST}` and the one-pass expansion.
+
 ### Updated
 
 - **Docker images run as `www-data`, not root**, and carry the configuration trees laid out like Debian's `/etc/apache2`: the engine's `/etc/qbix` as the packages install it and Velocity's `/etc/vc` overlay, with `/var/lib/vc`, `/var/log/vc`, `/var/cache/vc` and `/run/vc`, all owned by `www-data`. Docker and Podman still let the server bind any port; `--user root` keeps the former behavior ([docs/docker.md](docs/docker.md#user-and-configuration-trees)).
 - **`edge` images from main**: a push to main publishes `edge` and `edge-php<version>-<variant>`; release tags stay as they were, and the workflow now stops before it would overwrite a fixed tag that exists.
+
+### Fixed
+
+- **A substitution is expanded in one pass**: a query string brought in by `%{QUERY_STRING}` was read again for back-references, so `%3D` became an empty `%3` group plus `D`. Apache never reads an expanded value twice.
 
 ## v0.0.4.70 — the workers setting, the reported version and seven more fixes; Velocity as a Windows service
 
