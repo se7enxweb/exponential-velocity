@@ -1489,6 +1489,11 @@ class Q_WebServer_Pool
 			// collectCycles().
 			self::collectCycles();
 
+			// Q.webserver.trimMemory: hand the memory manager's cached, unused chunks back to the system after each
+			// request. A persistent worker keeps every 2 MB chunk its largest request needed; on a host with
+			// hundreds of quiet sites that is most of each worker's memory while it waits. See trimMemory().
+			self::trimMemory();
+
 			// Superglobals: overwritten by executeScript() on next iteration.
 			// Output buffers: the one capture buffer, emptied by Capture::end().
 			// Error state: clear it.
@@ -2261,6 +2266,27 @@ class Q_WebServer_Pool
 	 * @method collectCycles
 	 * @static
 	 * @return {integer} how many values were freed; 0 when it did not collect
+	 */
+	/**
+	 * Q.webserver.trimMemory (default false): gc_mem_caches() after each request of a persistent worker, so the
+	 * memory manager returns the chunks it cached for the request to the system instead of keeping them for the
+	 * next one. A quiet worker then holds what its warm state needs, not what its largest request needed.
+	 *
+	 * @method trimMemory
+	 * @static
+	 * @return {integer} bytes released (0 when off)
+	 */
+	static function trimMemory()
+	{
+		static $on = null;
+		if ($on === null) {
+			$on = (bool) Q_Config::get('Q', 'webserver', 'trimMemory', false) && function_exists('gc_mem_caches');
+		}
+		return $on ? gc_mem_caches() : 0;
+	}
+
+	/**
+	 * Release what a request left behind (see the worker loop).
 	 */
 	static function collectCycles()
 	{

@@ -470,6 +470,7 @@ Every setting, with its default. All are under `Q.webserver`.
 | `maxStreams` | `0` | Workers event streams may hold at once, instead of `streamShare`. `0` uses the share. |
 | `retryWithin` | `10` | Seconds after a request reached its worker within which a `GET`, `HEAD` or `OPTIONS` whose worker died without answering is run again once. |
 | `workerMemoryCeiling` | `256`, or ¾ of `memory_limit` if lower | Heap size in MB past which a worker is replaced. `0` turns it off. |
+| `trimMemory` | `false` | Hand the memory manager's cached chunks back to the system after each request (see [configuration.md](configuration.md)). |
 | `forkPerRequest` | `false` | One request per worker, then a fresh fork. |
 | `zygote` | `true` | Fork workers started after the pool from a zygote, so they inherit no visitor's connection. `false` forks them from the server as before. See [Forking from a zygote](#forking-from-a-zygote). |
 | `warmup` | — | A script run once in the parent before the workers are forked. See [reset.md](reset.md#warming-the-pool-in-the-parent-and-the-one-trap-in-it). |

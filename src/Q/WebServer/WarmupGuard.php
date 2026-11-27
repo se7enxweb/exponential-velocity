@@ -159,6 +159,11 @@ class Q_WebServer_WarmupGuard
 		// connection among them -- is released now, in the parent, instead of
 		// being inherited by every worker.
 		gc_collect_cycles();
+		// ... and the chunks the warm-up needed only while it ran go back to the system before the workers fork,
+		// so no worker starts with a copy of them.
+		if (function_exists('gc_mem_caches')) {
+			gc_mem_caches();
+		}
 
 		self::$superglobals = self::$globals = self::$classes = array();
 		return $done;
