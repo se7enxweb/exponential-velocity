@@ -67,6 +67,10 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.73 — --project-root: an application inside another one keeps the outer one's autoloader out
+
+2026-11-27
+
 ### Added
 
 - **`--project-root=DIR|none`**: the application's root, whose `vendor/autoload.php` and `.env` the server loads, instead of the directory above `--root`; `none` loads no project at all, for an application whose entry scripts load their own (as under Apache). An application served from its own root that sits inside another one (an Exponential installation in a subfolder of an older installation) got the outer one's Composer autoloader, and through it the outer kernel: its warm-up found no class of its own and every uncached page failed. Test: `tests/project-root.sh`.
