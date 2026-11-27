@@ -140,6 +140,7 @@ define('QBIX_SERVER_DIR', dirname(__DIR__));
 
 $opts = array(
 	'root'    => null,
+	'project-root' => null, // --project-root=DIR|none : the application's root (default: the directory above --root)
 	'app'     => null,
 	'host'    => '0.0.0.0',
 	'port'    => null,  // null = read from config, then default 80
@@ -206,7 +207,7 @@ if (!function_exists('qbix_normalize_argv')) {
 	}
 }
 $argv = qbix_normalize_argv($argv,
-	array('root', 'app', 'host', 'port', 'https-port', 'socket', 'socket-mode', 'workers', 'config',
+	array('root', 'project-root', 'app', 'host', 'port', 'https-port', 'socket', 'socket-mode', 'workers', 'config',
 		'preset', 'sign', 'verify', 'key', 'key-id', 'generate-key', 'policy', 'pid', 'pack', 'output',
 		'keep-globals', 'conf-dir', 'distribution', 'deploy', 'signer', 'm', 'user', 'group', 'pool-mode'),
 	array('help', 'version', 'stop', 'reload', 'debug', 'quiet', 'verbose', 'hotreload', 'layout', 'gui', 'open', 'watchdog',
@@ -220,6 +221,10 @@ foreach ($argv as $i => $arg) {
 		echo "Usage: $me [options]\n\n";
 		echo "Options:\n";
 		echo "  --root=DIR       Document root (default: ./web)\n";
+		echo "  --project-root=DIR  The application's root, whose vendor/autoload.php and .env\n";
+		echo "                   are loaded (default: the directory above --root, as for a\n";
+		echo "                   public/ or web/ folder); none: no project is loaded, for an\n";
+		echo "                   application whose entry scripts load their own\n";
 		echo "  --app=DIR        Qbix app directory (uses full Q framework)\n";
 		echo "  --host=IP        Bind address (default: 0.0.0.0)\n";
 		echo "  --port=PORT      HTTP port (default: 80)\n";
@@ -644,11 +649,25 @@ if ($servingFromPhar) {
 // Initialize project root
 // In standalone mode: Q::init() sets up autoloading from classes/ and handlers/
 // In --app mode: Platform already initialized, but we still register the path
+// The directory above the document root, as for an application whose public/ or web/ folder is served; or the
+// one given (--project-root=DIR). --project-root=none loads no project at all, neither a Composer autoloader nor
+// a .env: for an application served from its own root whose entry scripts load their own (as under Apache), and
+// which may sit inside another application whose autoloader (and the classes it loads) must not reach its workers.
 $projectRoot = dirname($webDir);
+$loadProject = true;
+if ($opts['project-root'] === 'none') {
+	$loadProject = false;
+} elseif (is_string($opts['project-root']) && $opts['project-root'] !== '') {
+	$projectRoot = realpath($opts['project-root']);
+	if ($projectRoot === false || !is_dir($projectRoot)) {
+		fwrite(STDERR, "Error: --project-root is not a directory: {$opts['project-root']}\n");
+		exit(1);
+	}
+}
 if (!defined('APP_DIR')) {
 	define('APP_DIR', $projectRoot);
 }
-if (method_exists('Q', 'init')) {
+if ($loadProject && method_exists('Q', 'init')) {
 	Q::init($projectRoot);
 } else if (property_exists('Q', 'paths')) {
 	// Standalone shim (src/Q.php) exposes Q::$paths — register the path
@@ -661,7 +680,7 @@ if (method_exists('Q', 'init')) {
 
 // Load .env file if present (sets $_ENV and getenv())
 $envFile = $projectRoot . DIRECTORY_SEPARATOR . '.env';
-if (file_exists($envFile)) {
+if ($loadProject && file_exists($envFile)) {
 	$lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 	foreach ($lines as $line) {
 		$line = trim($line);
@@ -1124,7 +1143,7 @@ if (!Q_Config::get('Q', 'compat', 'skipSourceCodeTransform', false)) {
 	// Prewarm from the project root (parent of web root) so vendor/, app/,
 	// src/ etc. are all cached. The web root is typically public/ or web/.
 	$prewarmDir = Q_Config::get('Q', 'compat', 'prewarmDir', null)
-		?: dirname($webDir);  // one level above --root
+		?: $projectRoot;  // one level above --root, or --project-root
 	// A document root directly under / -- a container's /app -- has no
 	// project above it: one level up is the whole filesystem, which the walk
 	// tried to prewarm (and, trimmed to '', crashed on before it could).

@@ -31,6 +31,7 @@ php sbin/qbixserver.php --help
 | Option | Meaning |
 |---|---|
 | `--root=DIR` | Document root (default `./web`). |
+| `--project-root=DIR` | The application's root, whose `vendor/autoload.php` and `.env` are loaded (default: the directory above `--root`, as for a `public/` or `web/` folder). `none`: no project is loaded at all (no Composer autoloader, no `.env`), for an application served from its own root whose entry scripts load their own, as under Apache, and which may sit inside another application. |
 | `--app=DIR` | A Qbix app directory, served with the full Q framework. |
 | `--host=IP`, `--port=PORT` | Bind address (default `0.0.0.0`) and HTTP port (default `80`). |
 | `--https-port=PORT` | HTTPS port. See [https.md](https.md). |
