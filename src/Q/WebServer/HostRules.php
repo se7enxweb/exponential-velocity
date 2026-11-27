@@ -265,6 +265,7 @@ class Q_WebServer_HostRules
 			if ($neg) $m = array($local);
 			$cm = array();
 			if (!self::conds((array) ($rule['conds'] ?? array()), $root, $rel, $parsed, $m, $cm)) continue;
+			self::setEnv($flags, $m, $cm, $parsed, $root, $rel);
 			$target = (string) ($rule['target'] ?? '-');
 			if (!empty($flags['F'])) return self::answer(403, 'Forbidden');
 			if (!empty($flags['G'])) return self::answer(410, 'Gone');
@@ -339,7 +340,42 @@ class Q_WebServer_HostRules
 		return $result;
 	}
 
-	/** $n, %n and the %{VAR} this engine knows. */
+	/**
+	 * [E=NAME:value] of a matching rule (Apache's mod_rewrite environment variables): kept with the request for
+	 * the conditions and substitutions of the rules after it (%{ENV:NAME}).
+	 */
+	static function setEnv(array $flags, array $m, array $cm, array &$parsed, $root, $rel)
+	{
+		if (empty($flags['E']) or !is_array($flags['E'])) return;
+		foreach ($flags['E'] as $name => $value) {
+			$parsed['_env'][(string) $name] = self::expand((string) $value, $m, $cm, $parsed, $root, $rel);
+		}
+	}
+
+	/**
+	 * A RewriteMap lookup ${map:key|default} of the request's host (Q.webserver.hosts.<host>.maps):
+	 * {"type": "txt", "map": {"key": "value"}} (a txt: map, read by the configuration's writer) or
+	 * {"type": "int", "fn": "unescape|escape|tolower|toupper"}. An unknown map answers the default, as Apache's
+	 * lookup that finds nothing.
+	 */
+	static function mapLookup($name, $key, $default)
+	{
+		$map = self::$current['maps'][$name] ?? null;
+		if (!is_array($map)) return $default;
+		if (($map['type'] ?? '') === 'int') {
+			switch ($map['fn'] ?? '') {
+				case 'unescape': return rawurldecode($key);
+				case 'escape': return rawurlencode($key);
+				case 'tolower': return strtolower($key);
+				case 'toupper': return strtoupper($key);
+			}
+			return $default;
+		}
+		$v = $map['map'][$key] ?? null;
+		return $v === null ? $default : (string) $v;
+	}
+
+	/** $n, %n, %{ENV:NAME}, ${map:key|default} and the %{VAR} this engine knows. */
 	static function expand($s, array $m, array $cm, array $parsed, $root, $rel)
 	{
 		$h = (array) ($parsed['headers'] ?? array());
@@ -355,16 +391,28 @@ class Q_WebServer_HostRules
 			'REQUEST_METHOD' => (string) ($parsed['method'] ?? 'GET'),
 			'HTTPS' => $https ? 'on' : 'off',
 			'DOCUMENT_ROOT' => $root,
+			// The request line as the client sent it (the raw path, before any decoding or rewrite).
+			'THE_REQUEST' => (string) ($parsed['method'] ?? 'GET') . ' ' . (string) ($parsed['uri'] ?? ($parsed['path'] ?? '/'))
+				. ' HTTP/' . (string) ($parsed['httpVersion'] ?? '1.1'),
 		);
-		$s = str_replace('%{ENV:REDIRECT_STATUS}', empty($parsed['_rewriteRound']) ? '' : '200', $s);
-		$s = preg_replace_callback('/%\{HTTP:([A-Za-z0-9-]+)\}/', function ($x) use ($h) {
-			return (string) ($h[strtolower($x[1])] ?? '');
-		}, $s);
-		$s = preg_replace_callback('/%\{([A-Z_]+)\}/', function ($x) use ($vars) {
-			return $vars[$x[1]] ?? '';
-		}, $s);
-		$s = preg_replace_callback('/\$(\d)/', function ($x) use ($m) { return (string) ($m[(int) $x[1]] ?? ''); }, $s);
-		$s = preg_replace_callback('/%(\d)/', function ($x) use ($cm) { return (string) ($cm[(int) $x[1]] ?? ''); }, $s);
+		$env = (array) ($parsed['_env'] ?? array());
+		$env['REDIRECT_STATUS'] = empty($parsed['_rewriteRound']) ? '' : '200';
+		// One pass, as Apache expands a substitution: what a variable brings in (a query string with %3D ...) is
+		// never read again as a back-reference.
+		$s = preg_replace_callback('/%\{ENV:([A-Za-z0-9_]+)\}|%\{HTTP:([A-Za-z0-9-]+)\}|%\{([A-Z_]+)\}|\$(\d)|%(\d)/',
+			function ($x) use ($env, $h, $vars, $m, $cm) {
+				if (isset($x[1]) and $x[1] !== '') return (string) ($env[$x[1]] ?? '');
+				if (isset($x[2]) and $x[2] !== '') return (string) ($h[strtolower($x[2])] ?? '');
+				if (isset($x[3]) and $x[3] !== '') return (string) ($vars[$x[3]] ?? '');
+				if (isset($x[4]) and $x[4] !== '') return (string) ($m[(int) $x[4]] ?? '');
+				return (string) ($cm[(int) $x[5]] ?? '');
+			}, $s);
+		// RewriteMap lookups last, with their keys already expanded (Apache: ${map:%{QUERY_STRING}}, ${map:kb-$1|-}).
+		if (strpos($s, '${') !== false) {
+			$s = preg_replace_callback('/\$\{([A-Za-z0-9_-]+):([^|}]*)(?:\|([^}]*))?\}/', function ($x) {
+				return self::mapLookup($x[1], $x[2], isset($x[3]) ? $x[3] : '');
+			}, $s);
+		}
 		return $s;
 	}
 
@@ -422,6 +470,7 @@ class Q_WebServer_HostRules
 			if ($neg) $m = array($path);
 			$cm = array();
 			if (!self::conds((array) ($rule['conds'] ?? array()), $root, $rel, $parsed, $m, $cm)) continue;
+			self::setEnv($flags, $m, $cm, $parsed, $root, $rel);
 			$target = (string) ($rule['target'] ?? '-');
 			if (!empty($flags['F'])) return self::answer(403, 'Forbidden');
 			if (!empty($flags['G'])) return self::answer(410, 'Gone');

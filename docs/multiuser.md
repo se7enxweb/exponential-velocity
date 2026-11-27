@@ -142,8 +142,15 @@ for every request of that host, before the cache, a file or a script
   or a regex on `%{HTTP_HOST}`, `%{HTTP_USER_AGENT}`, `%{REQUEST_URI}`, `%{QUERY_STRING}`,
   `%{HTTPS}`, `%{REQUEST_METHOD}`, `%{HTTP_REFERER}`, `%{HTTP_COOKIE}`, `%{HTTP:Name}`, with
   `nocase` and `or`), `target` (`-`, a path, or a URL; `$n` and `%n`), `flags` `F`, `G`,
-  `R` (code), `L`/`END`, `NC`, `QSA`. An internal rewrite goes through access and the
-  rules again, at most ten times.
+  `R` (code), `L`/`END`, `NC`, `QSA`, `E` (`{"NAME": "value"}`: kept for the rules after it,
+  read as `%{ENV:NAME}`). `%{THE_REQUEST}` is the request line as the client sent it. A
+  substitution is expanded in one pass, as Apache does: a query string brought in by a
+  variable is never read again as a back-reference. An internal rewrite goes through access
+  and the rules again, at most ten times.
+- `maps`: Apache's `RewriteMap`, looked up as `${name:key|default}` in a condition or a
+  substitution: `{"name": {"type": "txt", "map": {"key": "value"}}}` (a `txt:` file, read by
+  the tool that writes the host) or `{"type": "int", "fn": "unescape"}` (`escape`, `tolower`,
+  `toupper`). A key that is not in the map, or a map the host does not have, gives the default.
 - `index`: the directory index names, first existing wins.
 - `serverRewrite`: the virtual host's own mod_rewrite rules (Apache's server context, as in
   a Plesk `vhost.conf`): the same rule form as a `rewrite` set, but each `pattern` is

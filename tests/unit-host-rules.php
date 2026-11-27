@@ -157,6 +157,28 @@ check('rewritten to the front controller', array($pa['path'], $pb['path']), arra
 check('the path asked for is kept', array($pa['_askedPath'], $pb['_askedPath']), array('/clean/url', '/other/page'));
 check('two pages, two cache keys', Q_WebServer_Cache::cacheKey($pa) !== Q_WebServer_Cache::cacheKey($pb), true);
 
+// [E=NAME:value] and %{ENV:NAME}; RewriteMap lookups (txt and int:unescape), as exponential.earth and se7enx.com use them
+Q_Config::set('Q', 'webserver', 'hosts', 'h.test', array('root' => $root,
+	'maps' => array('twin' => array('type' => 'txt', 'map' => array('pid-1' => 'https://s.test/one')),
+		'unescape' => array('type' => 'int', 'fn' => 'unescape')),
+	'serverRewrite' => array(
+		array('pattern' => '^', 'target' => '-', 'flags' => array('E' => array('TWIN' => 'p.test')),
+			'conds' => array(array('test' => '%{HTTP_HOST}', 'pattern' => '^h\.test$', 'nocase' => true, 'or' => false))),
+		array('pattern' => '^/twin(/.*)$', 'target' => 'https://%{ENV:TWIN}$1', 'flags' => array('R' => 301, 'L' => true),
+			'conds' => array(array('test' => '%{ENV:TWIN}', 'pattern' => '.', 'nocase' => false, 'or' => false))),
+		array('pattern' => '^/cart\.php$', 'target' => '${twin:%1|https://s.test/}?', 'flags' => array('R' => 301, 'L' => true),
+			'conds' => array(array('test' => '%{QUERY_STRING}', 'pattern' => '(?:^|&)a=(pid-\d+)', 'nocase' => false, 'or' => false))),
+		array('pattern' => '^/u$', 'target' => '/v?${unescape:%{QUERY_STRING}}', 'flags' => array('R' => 302, 'L' => true)),
+	)));
+check('[E=] then %{ENV:} in a later rule', req('/twin/x/y'), '301 https://p.test/x/y');
+check('RewriteMap txt: found', req('/cart.php?a=pid-1'), '301 https://s.test/one');
+check('RewriteMap txt: the default', req('/cart.php?a=pid-9'), '301 https://s.test/');
+check('RewriteMap int:unescape', req('/u?q%3D1%26b%3D2'), '302 /v?q=1&b=2');
+Q_Config::set('Q', 'webserver', 'hosts', 'h.test', array('root' => $root, 'serverRewrite' => array(
+	array('pattern' => '^', 'target' => 'https://e.test%1', 'flags' => array('R' => 301, 'L' => true, 'NE' => true),
+		'conds' => array(array('test' => '%{THE_REQUEST}', 'pattern' => '^[A-Z]+\\s+(/[^\\s?]*)', 'nocase' => false, 'or' => false))))));
+check('%{THE_REQUEST}: the raw path of the request line', req('/a%20b/c?x=1'), '301 https://e.test/a%20b/c?x=1');
+
 array_map('unlink', array_filter((array) glob("$root/*/*/*") + (array) glob("$root/*/*"), 'is_file'));
 @unlink($users);
 echo ($fail ? 'FAIL' : 'PASS') . ": unit-host-rules, $pass passed, $fail failed\n";

@@ -35,6 +35,8 @@ Apache sites writes from the sites' `.htaccess` files and virtual hosts
 | `DirectoryIndex` | `index` |
 | `ErrorDocument` | `errorDocuments` |
 | `RewriteRule` in the virtual host | `serverRewrite` |
+| `RewriteMap` (`txt:`, `int:`) | `maps`, looked up as `${name:key\|default}` |
+| `RewriteRule ... [E=NAME:value]`, `%{ENV:NAME}` | `flags.E`, for the rules after it (not handed to PHP) |
 | `Options FollowSymLinks` / `SymLinksIfOwnerMatch` | `followSymlinks` |
 | `Options -Indexes` | the default for a host listed there: a root without an index answers 403 |
 
