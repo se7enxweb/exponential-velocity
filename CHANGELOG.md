@@ -67,6 +67,18 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+## v0.0.4.72 — trimMemory: a persistent worker hands its cached memory back after each request
+
+2026-11-27
+
+### Added
+
+- **`Q.webserver.trimMemory`**: a persistent worker hands the memory manager's cached chunks back to the system after each request, so a quiet worker holds what its warm state needs and not what its largest request needed (a worker after a request that built 40 MB of data: 55.9 MB resident without, 18.5 MB with). Off by default. Test: `unit-trim-memory.php`.
+
+### Updated
+
+- **The warm-up hands its memory back before the workers fork**: the chunks it needed only while it ran are returned to the system (`gc_mem_caches()` after the warm-up's own collection), so no worker starts with a copy of them.
+
 ## v0.0.4.71 — RewriteMap lookups, [E=] variables and %{THE_REQUEST} in a host's URL rules; Docker images as www-data
 
 2026-11-26
