@@ -67,6 +67,10 @@ edited down to what a reader actually needs.
 
 ## Unreleased
 
+### Updated
+
+- **`main` image tag**: a push to main also tags the newest PHP's standard image `main`, the same image as `edge`, as the Exponential images do ([docs/docker.md](docs/docker.md#tags)).
+
 ## v0.0.4.73 — --project-root: an application inside another one keeps the outer one's autoloader out
 
 2026-11-27

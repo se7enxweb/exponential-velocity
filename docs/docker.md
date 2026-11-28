@@ -27,6 +27,7 @@ ghcr.io/se7enxweb/exponential-velocity:<release>                          newest
 ghcr.io/se7enxweb/exponential-velocity:latest                             newest PHP, standard variant
 ghcr.io/se7enxweb/exponential-velocity:edge-php<version>-<variant>        the main branch, moves with each push
 ghcr.io/se7enxweb/exponential-velocity:edge                               the main branch, newest PHP, standard variant
+ghcr.io/se7enxweb/exponential-velocity:main                               the same image as edge
 ```
 
 `<release>` is the version without its `v` (`0.0.4.69`). A fixed tag is never

@@ -7,7 +7,7 @@ name: Docker images
 # Every run builds and tests (the server answers /Q/health, and the engine's
 # own `ext:check` finds the variant complete). A tag publishes the release's
 # fixed tags (never moved: a run stops before it would overwrite one); a push
-# to main publishes the moving edge tags (edge, edge-php<ver>-<variant>); a
+# to main publishes the moving edge tags (edge, main, edge-php<ver>-<variant>); a
 # manual run publishes only when asked to.
 
 on:
@@ -157,7 +157,7 @@ jobs:
 
   # One multi-architecture tag per image from the per-architecture pushes:
   # <version>-php<ver>-<variant>, php<ver>-<variant>, and latest for the
-  # newest PHP's standard image; from main, edge-php<ver>-<variant> and edge.
+  # newest PHP's standard image; from main, edge-php<ver>-<variant>, edge and main.
   publish:
     needs: [plan, build]
     if: needs.plan.outputs.push == 'true'
@@ -181,7 +181,7 @@ jobs:
           if [ '${{ matrix.php }}' = '${{ needs.plan.outputs.newest }}' ] && [ '${{ matrix.variant }}' = standard ]; then newest=true; fi
           if [ "$v" = edge ]; then
             tags="-t $IMAGE:edge-$t"
-            [ "$newest" = true ] && tags="$tags -t $IMAGE:edge"
+            [ "$newest" = true ] && tags="$tags -t $IMAGE:edge -t $IMAGE:main"
           else
             if docker buildx imagetools inspect "$IMAGE:$v-$t" >/dev/null 2>&1; then
               echo "::error::$IMAGE:$v-$t exists already; a published version tag is never moved"; exit 1
